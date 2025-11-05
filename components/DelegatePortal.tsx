@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo, useCallback } from 'react';
+import React, { useState, useEffect, useMemo, useCallback, useRef } from 'react';
 import { type RegistrationData, type EventConfig, type Transaction, type Invitation } from '../types';
 import { getDelegateProfile, getTransactionsForUser, getOtherDelegates, sendEventCoin, createInvitation, getSentInvitations } from '../server/api';
 import { ContentLoader } from './ContentLoader';
@@ -13,6 +13,148 @@ interface DelegatePortalProps {
 type DelegateView = 'dashboard' | 'send' | 'invite';
 
 // --- Sub-Views (Extracted for better organization) ---
+
+const Loader: React.FC = () => (
+    <div className="flex justify-center items-center">
+        <svg className="animate-spin h-8 w-8 text-white" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+            <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+            <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+        </svg>
+    </div>
+);
+
+interface QRCodeScannerModalProps {
+    isOpen: boolean;
+    onClose: () => void;
+    onScan: (data: string) => void;
+}
+
+const QRCodeScannerModal: React.FC<QRCodeScannerModalProps> = ({ isOpen, onClose, onScan }) => {
+    const videoRef = useRef<HTMLVideoElement>(null);
+    const streamRef = useRef<MediaStream | null>(null);
+    const animationFrameRef = useRef<number | null>(null);
+    const [error, setError] = useState<string | null>(null);
+    const [isLoading, setIsLoading] = useState(true);
+
+    const cleanup = useCallback(() => {
+        if (animationFrameRef.current) {
+            cancelAnimationFrame(animationFrameRef.current);
+            animationFrameRef.current = null;
+        }
+        if (streamRef.current) {
+            streamRef.current.getTracks().forEach(track => track.stop());
+            streamRef.current = null;
+        }
+        if (videoRef.current) {
+            videoRef.current.srcObject = null;
+        }
+    }, []);
+
+    useEffect(() => {
+        if (!isOpen) {
+            cleanup();
+            return;
+        }
+        
+        const startScan = async () => {
+            setError(null);
+            setIsLoading(true);
+
+            if (!('BarcodeDetector' in window)) {
+                setError('QR code scanning is not supported by your browser.');
+                setIsLoading(false);
+                return;
+            }
+
+            try {
+                streamRef.current = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'environment' } });
+                if (videoRef.current) {
+                    videoRef.current.srcObject = streamRef.current;
+                    await videoRef.current.play();
+                    setIsLoading(false);
+                    
+                    const barcodeDetector = new (window as any).BarcodeDetector({ formats: ['qr_code'] });
+                    
+                    const detect = () => {
+                        if (!videoRef.current || videoRef.current.paused || videoRef.current.ended) {
+                           return;
+                        }
+                        if (videoRef.current.readyState === videoRef.current.HAVE_ENOUGH_DATA) {
+                             barcodeDetector.detect(videoRef.current)
+                                .then((barcodes: any[]) => {
+                                    if (barcodes.length > 0) {
+                                        onScan(barcodes[0].rawValue);
+                                    } else {
+                                        animationFrameRef.current = requestAnimationFrame(detect);
+                                    }
+                                })
+                                .catch((err: Error) => {
+                                    console.error("Barcode detection failed:", err);
+                                });
+                        } else {
+                            animationFrameRef.current = requestAnimationFrame(detect);
+                        }
+                    };
+                    detect();
+                }
+            } catch (err) {
+                 if (err instanceof Error) {
+                    if (err.name === 'NotAllowedError') {
+                        setError('Camera permission denied. Please enable camera access in your browser settings.');
+                    } else if (err.name === 'NotFoundError') {
+                         setError('No camera found. Please connect a camera to use this feature.');
+                    } else {
+                        setError(`Could not start camera: ${err.message}`);
+                    }
+                } else {
+                    setError('An unknown error occurred while accessing the camera.');
+                }
+                setIsLoading(false);
+            }
+        };
+
+        startScan();
+
+        return () => {
+            cleanup();
+        };
+
+    }, [isOpen, onScan, cleanup]);
+
+
+    if (!isOpen) return null;
+
+    return (
+        <div 
+            className="fixed inset-0 bg-black bg-opacity-80 z-50 flex items-center justify-center p-4"
+            onClick={onClose}
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="qr-scanner-title"
+        >
+            <div 
+                className="bg-gray-900 rounded-lg shadow-xl w-full max-w-lg h-full max-h-[80vh] flex flex-col relative overflow-hidden"
+                onClick={(e) => e.stopPropagation()}
+            >
+                <div className="p-4 border-b border-gray-700 flex justify-between items-center flex-shrink-0">
+                    <h2 id="qr-scanner-title" className="text-lg font-bold text-white">Scan Recipient's QR Code</h2>
+                    <button onClick={onClose} className="text-gray-400 hover:text-white text-3xl leading-none">&times;</button>
+                </div>
+                <div className="flex-1 relative bg-black flex items-center justify-center">
+                    <video ref={videoRef} className="w-full h-full object-cover" playsInline />
+                    <div className="absolute inset-0 flex items-center justify-center">
+                        {isLoading && <Loader />}
+                        {error && <div className="p-4 max-w-sm mx-auto"><Alert type="error" message={error} /></div>}
+                        {!isLoading && !error && <div className="absolute w-2/3 aspect-square border-4 border-dashed border-white/50 rounded-lg"></div>}
+                    </div>
+                </div>
+                 <div className="p-4 text-center text-sm text-gray-400 bg-gray-800 flex-shrink-0">
+                    Position the delegate's QR code inside the frame.
+                </div>
+            </div>
+        </div>
+    );
+};
 
 const DashboardView: React.FC<{
     user: RegistrationData;
@@ -64,8 +206,21 @@ const SendCoinView: React.FC<{
     const [error, setError] = useState('');
     const [success, setSuccess] = useState('');
     const [isSending, setIsSending] = useState(false);
+    const [isScannerOpen, setIsScannerOpen] = useState(false);
 
     const otherDelegates = useMemo(() => delegates.filter(d => d.email !== userEmail), [delegates, userEmail]);
+
+    const handleScan = (data: string) => {
+        setIsScannerOpen(false);
+        const recipientExists = otherDelegates.some(d => d.email === data);
+        if (recipientExists) {
+            setToEmail(data);
+            setSuccess(`Recipient ${data} selected successfully.`);
+            setTimeout(() => setSuccess(''), 3000);
+        } else {
+            setError(`The scanned user (${data}) is not a valid recipient.`);
+        }
+    };
 
     const handleSubmit = async (e: React.FormEvent) => {
         e.preventDefault();
@@ -92,31 +247,48 @@ const SendCoinView: React.FC<{
     };
     
     return (
-        <form onSubmit={handleSubmit} className="space-y-6 max-w-lg">
-            {error && <Alert type="error" message={error} />}
-            {success && <Alert type="success" message={success} />}
-            <p className="text-sm text-gray-500 dark:text-gray-400">Your current balance: <span className="font-bold text-primary">{balance.toLocaleString()} {currencyName}</span></p>
-            <div>
-                <label htmlFor="recipient" className="block text-sm font-medium">Recipient</label>
-                <select id="recipient" value={toEmail} onChange={e => setToEmail(e.target.value)} className="mt-1 block w-full rounded-md border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 shadow-sm" required>
-                    <option value="">Select a delegate...</option>
-                    {otherDelegates.map(d => <option key={d.email} value={d.email}>{d.name} ({d.email})</option>)}
-                </select>
-            </div>
-            <div>
-                 <label htmlFor="amount" className="block text-sm font-medium">Amount ({currencyName})</label>
-                 <input type="number" id="amount" value={amount} onChange={e => setAmount(e.target.value)} step="0.01" min="0.01" max={balance} className="mt-1 block w-full rounded-md border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 shadow-sm" required />
-            </div>
-             <div>
-                 <label htmlFor="message" className="block text-sm font-medium">Message (Optional)</label>
-                 <textarea id="message" value={message} onChange={e => setMessage(e.target.value)} rows={3} className="mt-1 block w-full rounded-md border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 shadow-sm" placeholder="For coffee, lunch, etc."></textarea>
-            </div>
-            <div className="flex justify-end gap-4">
-                <button type="submit" disabled={isSending} className="py-2 px-6 border border-transparent rounded-md shadow-sm text-sm font-medium text-white bg-primary hover:bg-primary/90 flex items-center disabled:opacity-50">
-                   {isSending && <Spinner />} {isSending ? 'Sending...' : `Send ${currencyName}`}
-                </button>
-            </div>
-        </form>
+        <>
+            <form onSubmit={handleSubmit} className="space-y-6 max-w-lg">
+                {error && <Alert type="error" message={error} />}
+                {success && <Alert type="success" message={success} />}
+                <p className="text-sm text-gray-500 dark:text-gray-400">Your current balance: <span className="font-bold text-primary">{balance.toLocaleString()} {currencyName}</span></p>
+                <div>
+                    <label htmlFor="recipient" className="block text-sm font-medium">Recipient</label>
+                    <div className="flex items-center gap-2 mt-1">
+                        <select id="recipient" value={toEmail} onChange={e => setToEmail(e.target.value)} className="block w-full rounded-md border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 shadow-sm" required>
+                            <option value="">Select a delegate...</option>
+                            {otherDelegates.map(d => <option key={d.email} value={d.email}>{d.name} ({d.email})</option>)}
+                        </select>
+                         <button
+                            type="button"
+                            onClick={() => setIsScannerOpen(true)}
+                            className="p-2 border border-gray-300 dark:border-gray-600 rounded-md shadow-sm bg-white dark:bg-gray-700 hover:bg-gray-50 dark:hover:bg-gray-600 flex-shrink-0"
+                            aria-label="Scan QR code to add recipient"
+                        >
+                            <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v1m6 11h2m-6.5 6.5l-1.5-1.5M4 12H2m13.5-6.5l-1.5 1.5M4 20h16a2 2 0 002-2V6a2 2 0 00-2-2H4a2 2 0 00-2 2v12a2 2 0 002 2z" /></svg>
+                        </button>
+                    </div>
+                </div>
+                <div>
+                     <label htmlFor="amount" className="block text-sm font-medium">Amount ({currencyName})</label>
+                     <input type="number" id="amount" value={amount} onChange={e => setAmount(e.target.value)} step="0.01" min="0.01" max={balance} className="mt-1 block w-full rounded-md border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 shadow-sm" required />
+                </div>
+                 <div>
+                     <label htmlFor="message" className="block text-sm font-medium">Message (Optional)</label>
+                     <textarea id="message" value={message} onChange={e => setMessage(e.target.value)} rows={3} className="mt-1 block w-full rounded-md border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 shadow-sm" placeholder="For coffee, lunch, etc."></textarea>
+                </div>
+                <div className="flex justify-end gap-4">
+                    <button type="submit" disabled={isSending} className="py-2 px-6 border border-transparent rounded-md shadow-sm text-sm font-medium text-white bg-primary hover:bg-primary/90 flex items-center disabled:opacity-50">
+                       {isSending && <Spinner />} {isSending ? 'Sending...' : `Send ${currencyName}`}
+                    </button>
+                </div>
+            </form>
+            <QRCodeScannerModal
+                isOpen={isScannerOpen}
+                onClose={() => setIsScannerOpen(false)}
+                onScan={handleScan}
+            />
+        </>
     );
 };
 
