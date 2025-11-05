@@ -1,5 +1,3 @@
-
-
 import React from 'react';
 import { type FormField } from '../types';
 import { TextInput } from './TextInput';
@@ -7,7 +5,7 @@ import { TextInput } from './TextInput';
 interface DynamicFormFieldProps {
   field: FormField;
   value: string;
-  onChange: (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) => void;
+  onChange: (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement>) => void;
   error?: string;
 }
 
@@ -33,6 +31,36 @@ export const DynamicFormField: React.FC<DynamicFormFieldProps> = ({ field, value
             aria-invalid={!!error}
             aria-describedby={error ? `${field.id}-error` : undefined}
           />
+          {error && (
+            <p id={`${field.id}-error`} className="mt-2 text-sm text-red-600 dark:text-red-400">
+              {error}
+            </p>
+          )}
+        </div>
+      );
+    case 'dropdown':
+      return (
+        <div>
+          <label htmlFor={field.id} className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
+            {field.label}
+            {field.required && <span aria-hidden="true" className="text-red-500 ml-1">*</span>}
+          </label>
+          <select
+            id={field.id}
+            name={field.id}
+            value={value || ''}
+            onChange={onChange}
+            required={field.required}
+            aria-required={field.required}
+            className={`appearance-none block w-full px-3 py-2 border rounded-md shadow-sm focus:outline-none focus:ring-2 sm:text-sm bg-white dark:bg-gray-700 text-gray-900 dark:text-white transition ${error ? 'border-red-500 dark:border-red-500 focus:ring-red-500 focus:border-red-500' : 'border-gray-300 dark:border-gray-600 focus:ring-primary focus:border-primary'}`}
+            aria-invalid={!!error}
+            aria-describedby={error ? `${field.id}-error` : undefined}
+          >
+            <option value="">{field.placeholder || 'Select an option...'}</option>
+            {field.options?.map(option => (
+              <option key={option} value={option}>{option}</option>
+            ))}
+          </select>
           {error && (
             <p id={`${field.id}-error`} className="mt-2 text-sm text-red-600 dark:text-red-400">
               {error}

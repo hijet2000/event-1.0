@@ -1,4 +1,3 @@
-
 // types.ts
 
 export type Permission = 
@@ -35,10 +34,11 @@ export interface AdminUser {
 export interface FormField {
   id: string;
   label: string;
-  type: 'text' | 'textarea';
+  type: 'text' | 'textarea' | 'dropdown';
   placeholder: string;
   required: boolean;
   enabled: boolean;
+  options?: string[];
 }
 
 export interface BadgeConfig {

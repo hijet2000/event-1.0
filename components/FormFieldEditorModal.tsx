@@ -1,4 +1,3 @@
-
 import React, { useState, useEffect } from 'react';
 import { type FormField } from '../types';
 import { Spinner } from './Spinner';
@@ -22,6 +21,7 @@ const InputField: React.FC<React.InputHTMLAttributes<HTMLInputElement> & { label
 
 export const FormFieldEditorModal: React.FC<FormFieldEditorModalProps> = ({ isOpen, onClose, onSave, field }) => {
   const [formData, setFormData] = useState<Partial<FormField>>({});
+  const [optionsString, setOptionsString] = useState('');
   const [error, setError] = useState('');
   const [isSaving, setIsSaving] = useState(false);
 
@@ -37,6 +37,7 @@ export const FormFieldEditorModal: React.FC<FormFieldEditorModalProps> = ({ isOp
         required: false,
         enabled: true,
       });
+      setOptionsString(field?.options?.join('\n') || '');
       setError('');
       setIsSaving(false);
     }
@@ -59,11 +60,24 @@ export const FormFieldEditorModal: React.FC<FormFieldEditorModalProps> = ({ isOp
       setError("Label is required.");
       return;
     }
+
+    const finalData = { ...formData };
+
+    if (finalData.type === 'dropdown') {
+        const options = optionsString.split('\n').map(o => o.trim()).filter(o => o);
+        if (options.length === 0) {
+            setError('Dropdown options are required for the dropdown field type. Please enter at least one option per line.');
+            return;
+        }
+        finalData.options = options;
+    } else {
+        delete finalData.options; // Clean up options if type is not dropdown
+    }
     
     setIsSaving(true);
     setError('');
     
-    await onSave(formData as FormField);
+    await onSave(finalData as FormField);
 
     setIsSaving(false);
     onClose();
@@ -99,10 +113,30 @@ export const FormFieldEditorModal: React.FC<FormFieldEditorModalProps> = ({ isOp
               <select id="type" name="type" value={formData.type} onChange={handleInputChange} className="mt-1 block w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-md shadow-sm focus:outline-none focus:ring-primary focus:border-primary sm:text-sm bg-white dark:bg-gray-700 text-gray-900 dark:text-white">
                 <option value="text">Text (Single Line)</option>
                 <option value="textarea">Text Area (Multi-line)</option>
+                <option value="dropdown">Dropdown</option>
               </select>
             </div>
             
-            <InputField label="Placeholder Text" id="placeholder" type="text" name="placeholder" value={formData.placeholder || ''} onChange={handleInputChange} placeholder="e.g., Vegan, Gluten-Free, etc." />
+            {formData.type === 'dropdown' && (
+                <div>
+                    <label htmlFor="options" className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
+                        Dropdown Options
+                        <span className="text-red-500 ml-1">*</span>
+                    </label>
+                    <textarea
+                        id="options"
+                        name="options"
+                        rows={4}
+                        value={optionsString}
+                        onChange={(e) => setOptionsString(e.target.value)}
+                        className="appearance-none block w-full px-3 py-2 border rounded-md shadow-sm placeholder-gray-400 dark:placeholder-gray-500 focus:outline-none focus:ring-2 sm:text-sm bg-white dark:bg-gray-700 text-gray-900 dark:text-white border-gray-300 dark:border-gray-600 focus:ring-primary focus:border-primary"
+                        placeholder="Enter one option per line"
+                    />
+                     <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">Each line will be a separate option in the dropdown.</p>
+                </div>
+            )}
+            
+            <InputField label="Placeholder Text" id="placeholder" type="text" name="placeholder" value={formData.placeholder || ''} onChange={handleInputChange} placeholder={formData.type === 'dropdown' ? 'e.g., Select your t-shirt size...' : "e.g., Vegan, Gluten-Free, etc."} />
             
             <div className="pt-2 space-y-2">
                 <ToggleSwitch label="Field is enabled (visible on form)" name="enabled" enabled={!!formData.enabled} onChange={(val) => handleToggleChange('enabled', val)} />

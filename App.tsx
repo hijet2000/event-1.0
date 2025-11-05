@@ -1,5 +1,3 @@
-
-
 import React, { useState, useEffect } from 'react';
 import { type RegistrationData, type Permission } from './types';
 // Fix: Changed import for verifyToken to import from auth service directly.
@@ -67,7 +65,7 @@ const AppContent: React.FC<AppContentProps> = ({ onAdminLogin }) => {
     }
   }, []);
 
-  const handleFormChange = (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) => {
+  const handleFormChange = (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement>) => {
     const { name, value } = e.target;
     setFormData(prev => ({ ...prev, [name]: value }));
   };
@@ -175,6 +173,13 @@ const AppContent: React.FC<AppContentProps> = ({ onAdminLogin }) => {
                       <div className="flex items-center space-x-2">
                           <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17.657 16.657L13.414 20.9a1.998 1.998 0 01-2.827 0l-4.244-4.243a8 8 0 1111.314 0z" /><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 11a3 3 0 11-6 0 3 3 0 016 0z" /></svg>
                           <span>{config.event.location}</span>
+                      </div>
+                      <div className="flex items-center space-x-2">
+                          <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.653-.125-1.274-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.653.125-1.274.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0zm6 3a2 2 0 11-4 0 2 2 0 014 0zM7 10a2 2 0 11-4 0 2 2 0 014 0z" /></svg>
+                          <span>
+                            {registrationCount}
+                            {config.event.maxAttendees > 0 && ` / ${config.event.maxAttendees}`} Attendees
+                          </span>
                       </div>
                   </div>
                 </header>

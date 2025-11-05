@@ -1,4 +1,3 @@
-
 import React, { useState, useRef } from 'react';
 import { type RegistrationData, type EventConfig } from '../types';
 import { TextInput } from './TextInput';
@@ -9,7 +8,7 @@ import { PasswordStrengthIndicator } from './PasswordStrengthIndicator';
 
 interface RegistrationFormProps {
   formData: RegistrationData;
-  onFormChange: (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) => void;
+  onFormChange: (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement>) => void;
   onSubmit: () => void;
   onReset: () => void;
   isLoading: boolean;

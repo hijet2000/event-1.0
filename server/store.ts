@@ -1,96 +1,163 @@
+
 import { type EventConfig, type RegistrationData, type AdminUser, type Role, type Transaction, type Invitation } from '../types';
 import { defaultConfig } from './config';
 import { hashPassword } from './auth';
 
-// --- In-memory store that persists across hot-reloads in dev environments ---
+// This file mocks a PostgreSQL database connection and seeding process.
+// In a real application, this would use the 'pg' library to connect to a real database.
 
-interface Database {
-  config: EventConfig;
-  registrations: Map<string, RegistrationData>;
-  transactions: Map<string, Transaction>;
-  invitations: Map<string, Invitation>;
-  adminUsers: Map<string, AdminUser>;
-  roles: Map<string, Role>;
-  passwordResetTokens: Map<string, { email: string; expires: number; type: 'admin' | 'delegate' }>;
+class MockPool {
+  _data: { [key: string]: any[] } = {
+    event_configs: [],
+    registrations: [],
+    transactions: [],
+    invitations: [],
+    admin_users: [],
+    roles: [],
+    password_reset_tokens: [],
+  };
+  _seeded = false;
+
+  async query(sql: string, params: any[] = []) {
+    const ucSql = sql.toUpperCase();
+    
+    // Simple SELECT with one WHERE clause
+    if (ucSql.startsWith('SELECT')) {
+      const fromMatch = ucSql.match(/FROM\s+(\w+)/);
+      const table = fromMatch ? fromMatch[1].toLowerCase() : null;
+      if (!table || this._data[table] === undefined) return { rows: [], rowCount: 0 };
+
+      let results = [...this._data[table]];
+      const whereMatch = sql.match(/WHERE\s+([\w."]+)\s*=\s*\$(\d+)/i);
+      if (whereMatch) {
+        const field = whereMatch[1].replace(/"/g, '');
+        const paramIndex = parseInt(whereMatch[2], 10) - 1;
+        if (params[paramIndex] !== undefined) {
+          results = results.filter(row => row[field] === params[paramIndex]);
+        }
+      }
+
+      if (ucSql.includes('COUNT(*)')) {
+        return { rows: [{ count: String(results.length) }], rowCount: 1 };
+      }
+      
+      const orderMatch = sql.match(/ORDER BY\s+([\w."]+)\s+(ASC|DESC)/i);
+      if(orderMatch) {
+          const [_, field, direction] = orderMatch;
+          results.sort((a,b) => {
+              if (a[field] < b[field]) return direction.toUpperCase() === 'ASC' ? -1 : 1;
+              if (a[field] > b[field]) return direction.toUpperCase() === 'ASC' ? 1 : -1;
+              return 0;
+          });
+      }
+      
+      const limitMatch = sql.match(/LIMIT\s+(\d+)/i);
+      if(limitMatch) {
+          results = results.slice(0, parseInt(limitMatch[1], 10));
+      }
+
+      return { rows: results, rowCount: results.length };
+    }
+
+    if (ucSql.startsWith('INSERT INTO')) {
+      const tableMatch = ucSql.match(/INTO\s+(\w+)/);
+      const table = tableMatch ? tableMatch[1].toLowerCase() : null;
+      if (!table || this._data[table] === undefined) throw new Error(`Table ${table} not found`);
+      
+      const colsMatch = sql.match(/\(([^)]+)\)/);
+      const columns = colsMatch ? colsMatch[1].split(',').map(s => s.trim().replace(/"/g, '')) : [];
+
+      const newRow: { [key: string]: any } = {};
+      columns.forEach((col, i) => {
+        newRow[col] = params[i];
+      });
+      this._data[table].push(newRow);
+      return { rows: [newRow], rowCount: 1 };
+    }
+
+    if (ucSql.startsWith('UPDATE')) {
+      const tableMatch = ucSql.match(/UPDATE\s+(\w+)/);
+      const table = tableMatch ? tableMatch[1].toLowerCase() : null;
+      if (!table || this._data[table] === undefined) throw new Error(`Table ${table} not found`);
+
+      const whereMatch = sql.match(/WHERE\s+([\w."]+)\s*=\s*\$(\d+)/i);
+      if (!whereMatch) throw new Error("UPDATE without WHERE is not supported in this mock");
+
+      const field = whereMatch[1].replace(/"/g, '');
+      const paramIndex = parseInt(whereMatch[2], 10) - 1;
+      const value = params[paramIndex];
+      
+      const setMatch = sql.match(/SET\s+(.*?)\s+WHERE/i);
+      if (setMatch) {
+        const setClauses = setMatch[1].split(',').map(s => s.trim());
+        const updates: { [key: string]: any } = {};
+        setClauses.forEach(clause => {
+          const [col, paramPlaceholder] = clause.split('=').map(s => s.trim());
+          const pIndex = parseInt(paramPlaceholder.replace('$', ''), 10) - 1;
+          updates[col.replace(/"/g, '')] = params[pIndex];
+        });
+
+        this._data[table].forEach(row => {
+          if (row[field] === value) {
+            Object.assign(row, updates);
+          }
+        });
+      }
+      return { rowCount: 1 };
+    }
+    
+    if (ucSql.startsWith('DELETE FROM')) {
+      const tableMatch = ucSql.match(/FROM\s+(\w+)/);
+      const table = tableMatch ? tableMatch[1].toLowerCase() : null;
+      if (!table || this._data[table] === undefined) throw new Error(`Table ${table} not found`);
+      
+      const whereMatch = sql.match(/WHERE\s+([\w."]+)\s*=\s*\$(\d+)/i);
+       if (whereMatch) {
+        const field = whereMatch[1].replace(/"/g, '');
+        const paramIndex = parseInt(whereMatch[2], 10) - 1;
+        const value = params[paramIndex];
+        const originalLength = this._data[table].length;
+        this._data[table] = this._data[table].filter(row => row[field] !== value);
+        return { rowCount: originalLength - this._data[table].length };
+      }
+    }
+
+    return { rows: [], rowCount: 0 };
+  }
 }
 
-const globalWithDb = globalThis as typeof globalThis & { __event_platform_db?: Database };
-
-if (!globalWithDb.__event_platform_db) {
-    globalWithDb.__event_platform_db = {
-        config: defaultConfig,
-        registrations: new Map(),
-        transactions: new Map(),
-        invitations: new Map(),
-        adminUsers: new Map(),
-        roles: new Map(),
-        passwordResetTokens: new Map(),
-    };
-}
-
-export const db: Database = globalWithDb.__event_platform_db;
+const pool = new MockPool();
+export const query = pool.query.bind(pool);
 
 const seedData = async () => {
-  if (db.adminUsers.size > 0) {
-    return;
-  }
-  
-  console.log("Seeding initial database...");
+    if (pool._seeded) return;
+    pool._seeded = true;
+    
+    console.log("Seeding PostgreSQL mock database...");
 
-  // Roles
-  const superAdminRole: Role = {
-    id: 'role_super_admin',
-    name: 'Super Admin',
-    description: 'Has all permissions.',
-    permissions: [
-      'view_dashboard', 'manage_settings', 'manage_registrations', 
-      'manage_users_roles', 'view_eventcoin_dashboard', 'manage_event_id_design'
-    ]
-  };
-  db.roles.set(superAdminRole.id, superAdminRole);
+    await query('INSERT INTO event_configs (id, config_data) VALUES ($1, $2)', ['main-event', defaultConfig]);
+    
+    const superAdminRole: Role = { id: 'role_super_admin', name: 'Super Admin', description: 'Has all permissions.', permissions: ['view_dashboard', 'manage_settings', 'manage_registrations', 'manage_users_roles', 'view_eventcoin_dashboard', 'manage_event_id_design'] };
+    await query('INSERT INTO roles (id, name, description, permissions) VALUES ($1, $2, $3, $4)', [superAdminRole.id, superAdminRole.name, superAdminRole.description, superAdminRole.permissions]);
 
-  // Admin User
-  const adminPasswordHash = await hashPassword('password123');
-  const adminUser: AdminUser = {
-    id: 'user_admin',
-    email: 'admin@example.com',
-    password_hash: adminPasswordHash,
-    roleId: superAdminRole.id,
-  };
-  db.adminUsers.set(adminUser.email, adminUser);
+    const adminPasswordHash = await hashPassword('password123');
+    await query('INSERT INTO admin_users (id, email, password_hash, role_id) VALUES ($1, $2, $3, $4)', ['user_admin', 'admin@example.com', adminPasswordHash, superAdminRole.id]);
 
-  // Sample Delegate
-  const delegatePasswordHash = await hashPassword('password123');
-  const sampleRegistration: RegistrationData = {
-      id: 'reg_12345',
-      name: 'John Delegate',
-      email: 'delegate@example.com',
-      password_hash: delegatePasswordHash,
-      createdAt: Date.now(),
-      updatedAt: Date.now(),
-      emailVerified: true,
-      company: 'Delegate Corp',
-      role: 'Test User'
-  };
-  db.registrations.set(sampleRegistration.email, sampleRegistration);
+    const delegatePasswordHash = await hashPassword('password123');
+    const customFields = { company: 'Delegate Corp', role: 'Test User' };
+    await query(
+        'INSERT INTO registrations (id, name, email, password_hash, created_at, updated_at, email_verified, custom_fields) VALUES ($1, $2, $3, $4, $5, $6, $7, $8)',
+        ['reg_12345', 'John Delegate', 'delegate@example.com', delegatePasswordHash, new Date(), new Date(), true, customFields]
+    );
 
-  // Initial Transaction
-  if (db.config.eventCoin.enabled) {
-    const initialTransaction: Transaction = {
-      id: `tx_${Date.now()}`,
-      fromEmail: 'system',
-      fromName: 'EventCoin Treasury',
-      toEmail: sampleRegistration.email,
-      toName: sampleRegistration.name,
-      amount: db.config.eventCoin.startingBalance,
-      message: `Initial balance deposit.`,
-      type: 'initial',
-      timestamp: Date.now(),
-    };
-    db.transactions.set(initialTransaction.id, initialTransaction);
-  }
-  
-  console.log("Database seeded successfully.");
+    if (defaultConfig.eventCoin.enabled) {
+        await query(
+            'INSERT INTO transactions (id, from_email, from_name, to_email, to_name, amount, message, type, timestamp) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)',
+            [`tx_${Date.now()}`, 'system', `${defaultConfig.eventCoin.name} Treasury`, 'delegate@example.com', 'John Delegate', defaultConfig.eventCoin.startingBalance, 'Initial balance deposit.', 'initial', new Date()]
+        );
+    }
+    
+    console.log("Database seeded successfully.");
 };
 
 export const dbReady = seedData();
