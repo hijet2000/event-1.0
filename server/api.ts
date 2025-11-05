@@ -283,6 +283,28 @@ export const getTransactionsForUserByAdmin = async (adminToken: string, delegate
         .sort((a, b) => b.timestamp - a.timestamp);
 };
 
+export const addFundsToDelegateByAdmin = async (adminToken: string, delegateEmail: string, amount: number, message: string): Promise<Transaction> => {
+    await dbReady;
+    verifyAdminAccess(adminToken, 'manage_registrations');
+    const delegate = db.registrations.get(delegateEmail);
+    if (!delegate) throw new Error("Delegate not found.");
+    if (amount <= 0) throw new Error("Amount must be a positive number.");
+
+    const newTx: Transaction = {
+        id: `tx_${uuidv4()}`,
+        fromEmail: 'system_admin',
+        fromName: 'Admin Credit',
+        toEmail: delegate.email,
+        toName: delegate.name,
+        amount,
+        message: message || 'Administrative credit.',
+        type: 'purchase', // Using 'purchase' to represent funds entering the system
+        timestamp: Date.now(),
+    };
+    db.transactions.set(newTx.id, newTx);
+    return newTx;
+};
+
 export const bulkImportRegistrations = async (adminToken: string, csvData: string): Promise<{ successCount: number; errorCount: number; errors: string[] }> => {
     await dbReady;
     verifyAdminAccess(adminToken, 'manage_registrations');
@@ -421,6 +443,29 @@ export const getDelegateProfile = async (delegateToken: string): Promise<{ user:
     const { user } = verifyDelegateAccess(delegateToken);
     return { user, config: db.config };
 };
+
+export const updateDelegateProfile = async (delegateToken: string, profileData: { name: string, [key: string]: any }): Promise<RegistrationData> => {
+    await dbReady;
+    const { user } = verifyDelegateAccess(delegateToken);
+
+    // Update allowed fields
+    user.name = profileData.name || user.name;
+    
+    // Also update dynamic fields that might be on the form
+    const allowedToUpdate = ['company', 'role'];
+    for (const key of allowedToUpdate) {
+        if (profileData[key] !== undefined) {
+            user[key] = profileData[key];
+        }
+    }
+
+    user.updatedAt = Date.now();
+
+    db.registrations.set(user.email, user);
+    
+    return user;
+};
+
 
 export const getTransactionsForUser = async (delegateToken: string): Promise<Transaction[]> => {
     await dbReady;

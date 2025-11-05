@@ -1,43 +1,130 @@
-import React, { useState, useEffect } from 'react';
-import { type RegistrationData, type FormField, type Transaction } from '../types';
-import { getTransactionsForUserByAdmin } from '../server/api';
+
+import React, { useState, useEffect, useCallback } from 'react';
+import { type RegistrationData, type EventConfig, type Transaction } from '../types';
+import { getTransactionsForUserByAdmin, addFundsToDelegateByAdmin } from '../server/api';
 import { ContentLoader } from './ContentLoader';
+import { Alert } from './Alert';
+import { Spinner } from './Spinner';
 
 interface DelegateDetailViewProps {
   delegate: RegistrationData;
-  formFields: FormField[];
+  config: EventConfig;
   onBack: () => void;
   adminToken: string;
 }
 
-export const DelegateDetailView: React.FC<DelegateDetailViewProps> = ({ delegate, formFields, onBack, adminToken }) => {
+const AddFundsForm: React.FC<{ delegate: RegistrationData; adminToken: string; onFundsAdded: () => void }> = ({ delegate, adminToken, onFundsAdded }) => {
+    const [amount, setAmount] = useState('');
+    const [message, setMessage] = useState('');
+    const [isSubmitting, setIsSubmitting] = useState(false);
+    const [error, setError] = useState<string | null>(null);
+    const [success, setSuccess] = useState<string | null>(null);
+
+    const handleSubmit = async (e: React.FormEvent) => {
+        e.preventDefault();
+        setError(null);
+        setSuccess(null);
+        
+        const numericAmount = parseFloat(amount);
+        if (isNaN(numericAmount) || numericAmount <= 0) {
+            setError('Please enter a valid positive amount.');
+            return;
+        }
+
+        setIsSubmitting(true);
+        try {
+            await addFundsToDelegateByAdmin(adminToken, delegate.email, numericAmount, message);
+            setSuccess(`Successfully added ${numericAmount} to ${delegate.name}'s wallet.`);
+            setAmount('');
+            setMessage('');
+            onFundsAdded(); // Callback to refresh transaction list
+        } catch (err) {
+            setError(err instanceof Error ? err.message : 'An unexpected error occurred.');
+        } finally {
+            setIsSubmitting(false);
+            setTimeout(() => setSuccess(null), 4000);
+        }
+    };
+
+    return (
+        <div className="mt-8">
+            <h4 className="text-lg font-semibold text-gray-900 dark:text-white px-6">Add Funds</h4>
+            <div className="mt-4 border-t border-gray-200 dark:border-gray-700 p-6">
+                <form onSubmit={handleSubmit} className="space-y-4 max-w-lg">
+                    {error && <Alert type="error" message={error} />}
+                    {success && <Alert type="success" message={success} />}
+                    <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+                        <div className="sm:col-span-1">
+                            <label htmlFor="amount" className="block text-sm font-medium">Amount</label>
+                            <input
+                                type="number"
+                                id="amount"
+                                value={amount}
+                                onChange={(e) => setAmount(e.target.value)}
+                                className="mt-1 block w-full rounded-md border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 shadow-sm"
+                                placeholder="e.g., 50"
+                                required
+                                step="0.01"
+                                min="0.01"
+                            />
+                        </div>
+                        <div className="sm:col-span-2">
+                             <label htmlFor="message" className="block text-sm font-medium">Message (Optional)</label>
+                             <input
+                                type="text"
+                                id="message"
+                                value={message}
+                                onChange={(e) => setMessage(e.target.value)}
+                                className="mt-1 block w-full rounded-md border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 shadow-sm"
+                                placeholder="e.g., Prize for winning hackathon"
+                            />
+                        </div>
+                    </div>
+                    <div className="flex justify-end">
+                        <button
+                            type="submit"
+                            disabled={isSubmitting}
+                            className="py-2 px-4 border border-transparent rounded-md shadow-sm text-sm font-medium text-white bg-primary hover:bg-primary/90 flex items-center justify-center disabled:opacity-50"
+                        >
+                            {isSubmitting ? <><Spinner /> Processing...</> : 'Add Funds'}
+                        </button>
+                    </div>
+                </form>
+            </div>
+        </div>
+    );
+};
+
+export const DelegateDetailView: React.FC<DelegateDetailViewProps> = ({ delegate, config, onBack, adminToken }) => {
   const [transactions, setTransactions] = useState<Transaction[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
-  useEffect(() => {
-    const fetchTransactions = async () => {
-      if (!adminToken) {
-          setError("Admin token is missing.");
-          setIsLoading(false);
-          return;
-      }
-      try {
-        setIsLoading(true);
-        setError(null);
-        const userTransactions = await getTransactionsForUserByAdmin(adminToken, delegate.email);
-        setTransactions(userTransactions);
-      } catch (err) {
-        setError("Could not load transaction history.");
-        console.error(err);
-      } finally {
+  const fetchTransactions = useCallback(async () => {
+    if (!adminToken) {
+        setError("Admin token is missing.");
         setIsLoading(false);
-      }
-    };
-    fetchTransactions();
-  }, [delegate.email, adminToken]);
+        return;
+    }
+    try {
+      setIsLoading(true);
+      setError(null);
+      const userTransactions = await getTransactionsForUserByAdmin(adminToken, delegate.email);
+      setTransactions(userTransactions);
+    } catch (err) {
+      setError("Could not load transaction history.");
+      console.error(err);
+    } finally {
+      setIsLoading(false);
+    }
+  }, [adminToken, delegate.email]);
 
-  const customFields = formFields.filter(field => field.enabled && delegate[field.id]);
+
+  useEffect(() => {
+    fetchTransactions();
+  }, [fetchTransactions]);
+
+  const customFields = config.formFields.filter(field => field.enabled && delegate[field.id]);
 
   return (
     <div className="p-6 md:p-8 animate-fade-in">
@@ -95,6 +182,10 @@ export const DelegateDetailView: React.FC<DelegateDetailViewProps> = ({ delegate
         </dl>
       </div>
 
+      {config.eventCoin.enabled && (
+        <AddFundsForm delegate={delegate} adminToken={adminToken} onFundsAdded={fetchTransactions} />
+      )}
+
       {/* Transaction History */}
       <div className="mt-8">
         <h4 className="text-lg font-semibold text-gray-900 dark:text-white px-6">Transaction History</h4>
@@ -111,7 +202,7 @@ export const DelegateDetailView: React.FC<DelegateDetailViewProps> = ({ delegate
                   <div className="flex items-center justify-between">
                     <div>
                       <p className="text-sm font-medium text-gray-900 dark:text-white">
-                        {tx.type === 'p2p' ? `Transfer to ${tx.toName}` : tx.message}
+                        {tx.type === 'p2p' && tx.fromEmail === delegate.email ? `Transfer to ${tx.toName}` : tx.message}
                       </p>
                       <p className="text-xs text-gray-500 dark:text-gray-400">
                         {new Date(tx.timestamp).toLocaleString()} &bull; From: {tx.fromName}

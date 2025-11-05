@@ -1,16 +1,18 @@
+
 import React, { useState, useEffect, useMemo, useCallback, useRef } from 'react';
 import { type RegistrationData, type EventConfig, type Transaction, type Invitation } from '../types';
 import { getDelegateProfile, getTransactionsForUser, getOtherDelegates, sendEventCoin, createInvitation, getSentInvitations } from '../server/api';
 import { ContentLoader } from './ContentLoader';
 import { Alert } from './Alert';
 import { Spinner } from './Spinner';
+import { ProfileView } from './ProfileView';
 
 interface DelegatePortalProps {
   onLogout: () => void;
   delegateToken: string;
 }
 
-type DelegateView = 'dashboard' | 'send' | 'invite';
+type DelegateView = 'dashboard' | 'send' | 'invite' | 'profile';
 
 // --- Sub-Views (Extracted for better organization) ---
 
@@ -160,13 +162,44 @@ const DashboardView: React.FC<{
     user: RegistrationData;
     config: EventConfig;
     balance: number;
-}> = ({ user, config, balance }) => (
+    transactions: Transaction[];
+}> = ({ user, config, balance, transactions }) => (
     <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
         <div className="lg:col-span-1 space-y-8">
-            <div className="bg-white dark:bg-gray-800 shadow-lg rounded-2xl p-6 text-center">
-                <h2 className="text-xl font-bold text-gray-900 dark:text-white mb-2">{config.eventCoin.name} Wallet</h2>
-                <p className="text-5xl font-bold text-primary my-2">{balance.toLocaleString()}</p>
-                <p className="text-sm text-gray-500 dark:text-gray-400">{config.eventCoin.name}</p>
+            <div className="bg-gradient-to-br from-primary/80 to-primary dark:from-primary/70 dark:to-primary/90 text-white shadow-lg rounded-2xl p-6 flex flex-col justify-between h-full">
+                <div>
+                    <div className="flex justify-between items-center">
+                        <h2 className="text-xl font-bold opacity-90">Your Wallet</h2>
+                        <svg xmlns="http://www.w3.org/2000/svg" className="h-8 w-8 opacity-50" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 10h18M7 15h1m4 0h1m-7 4h12a3 3 0 003-3V8a3 3 0 00-3-3H6a3 3 0 00-3 3v8a3 3 0 003 3z" /></svg>
+                    </div>
+                    <p className="text-sm opacity-70">{config.eventCoin.name}</p>
+                </div>
+                <div className="text-right mt-8">
+                    <p className="text-5xl font-bold tracking-tight">{balance.toLocaleString()}</p>
+                     {config.eventCoin.peggedCurrency && <p className="text-sm opacity-80 mt-1">~${(balance * config.eventCoin.exchangeRate).toFixed(2)} {config.eventCoin.peggedCurrency}</p>}
+                </div>
+            </div>
+             <div>
+                <h3 className="text-lg font-semibold text-gray-800 dark:text-gray-200 mb-3">Recent Activity</h3>
+                <div className="bg-white dark:bg-gray-800 shadow-lg rounded-2xl p-4 space-y-3">
+                    {transactions.length > 0 ? (
+                        transactions.slice(0, 3).map(tx => (
+                            <div key={tx.id} className="flex items-center justify-between">
+                                <div>
+                                    <p className="text-sm font-medium text-gray-900 dark:text-white">
+                                        {tx.fromEmail === user.email ? `To: ${tx.toName}` : `From: ${tx.fromName}`}
+                                    </p>
+                                    <p className="text-xs text-gray-500 dark:text-gray-400">{tx.message || 'Peer Transfer'}</p>
+                                </div>
+                                <p className={`text-lg font-mono font-semibold ${tx.toEmail === user.email ? 'text-green-600 dark:text-green-400' : 'text-red-600 dark:text-red-400'}`}>
+                                    {tx.toEmail === user.email ? '+' : '-'}{tx.amount.toLocaleString()}
+                                </p>
+                            </div>
+                        ))
+                    ) : (
+                        <p className="text-sm text-gray-500 dark:text-gray-400 italic text-center py-4">No transactions yet.</p>
+                    )}
+                </div>
             </div>
         </div>
         <div className="lg:col-span-2">
@@ -457,6 +490,10 @@ export const DelegatePortal: React.FC<DelegatePortalProps> = ({ onLogout, delega
         return inviteLink;
     };
 
+    const handleProfileUpdate = (updatedUser: RegistrationData) => {
+        setProfile(prev => prev ? { ...prev, user: updatedUser } : null);
+    };
+
     if (isLoading) {
         return <div className="min-h-screen flex items-center justify-center"><ContentLoader text="Loading your portal..." /></div>;
     }
@@ -475,7 +512,7 @@ export const DelegatePortal: React.FC<DelegatePortalProps> = ({ onLogout, delega
     const views: Record<DelegateView, { title: string; component: React.ReactNode }> = {
         dashboard: {
             title: 'Dashboard',
-            component: <DashboardView user={user} config={config} balance={balance} />
+            component: <DashboardView user={user} config={config} balance={balance} transactions={transactions} />
         },
         send: {
             title: `Send ${config.eventCoin.name}`,
@@ -484,6 +521,10 @@ export const DelegatePortal: React.FC<DelegatePortalProps> = ({ onLogout, delega
         invite: {
             title: 'Invite Delegate',
             component: <InviteView onInvite={handleInvite} sentInvitations={invitations} isLoading={isLoading} />
+        },
+        profile: {
+            title: 'Your Profile',
+            component: <ProfileView user={user} delegateToken={delegateToken} onProfileUpdate={handleProfileUpdate} />
         }
     };
 
@@ -509,6 +550,7 @@ export const DelegatePortal: React.FC<DelegatePortalProps> = ({ onLogout, delega
                     <NavItem active={activeView === 'dashboard'} onClick={() => changeView('dashboard')} label="Dashboard" icon={<svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 6a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2H6a2 2 0 01-2-2V6zM14 6a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2h-2a2 2 0 01-2-2V6zM4 16a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2H6a2 2 0 01-2-2v-2zM14 16a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2h-2a2 2 0 01-2-2v-2z" /></svg>} />
                     <NavItem active={activeView === 'send'} onClick={() => changeView('send')} label={`Send ${config.eventCoin.name}`} icon={<svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 19l9 2-9-18-9 18 9-2zm0 0v-8" /></svg>} />
                     <NavItem active={activeView === 'invite'} onClick={() => changeView('invite')} label="Invite Delegate" icon={<svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M18 9v3m0 0v3m0-3h3m-3 0h-3m-2-5a4 4 0 11-8 0 4 4 0 018 0zM3 20a6 6 0 0112 0v1H3v-1z" /></svg>} />
+                    <NavItem active={activeView === 'profile'} onClick={() => changeView('profile')} label="Profile" icon={<svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z" /></svg>} />
                 </nav>
                 <div className="p-4 border-t dark:border-gray-700">
                     <button onClick={onLogout} className="w-full text-left flex items-center space-x-3 px-4 py-3 hover:bg-red-100 dark:hover:bg-red-900/50 text-red-600 dark:text-red-400 rounded-lg transition-colors">

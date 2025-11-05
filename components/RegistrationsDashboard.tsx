@@ -206,7 +206,7 @@ export const RegistrationsDashboard: React.FC<RegistrationsDashboardProps> = ({ 
   };
 
   if (selectedDelegate && config) {
-    return <DelegateDetailView delegate={selectedDelegate} formFields={config.formFields} onBack={() => setSelectedDelegate(null)} adminToken={adminToken} />;
+    return <DelegateDetailView delegate={selectedDelegate} config={config} onBack={() => setSelectedDelegate(null)} adminToken={adminToken} />;
   }
   
   return (
