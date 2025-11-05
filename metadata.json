@@ -1,0 +1,5 @@
+{
+  "name": "Event Registration Form",
+  "description": "A modern, custom registration form that uses the Gemini API to generate and send confirmation emails to attendees and notifications to the event host.",
+  "requestFramePermissions": []
+}

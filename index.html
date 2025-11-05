@@ -1,0 +1,79 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Event Registration Platform</title>
+    
+    <!-- Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    
+    <!-- Google Fonts -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Lato:wght@400;700&family=Montserrat:wght@400;500;600;700&family=Roboto:wght@400;500;700&display=swap" rel="stylesheet">
+    
+    <!-- Import Map for JS Modules -->
+    <script type="importmap">
+    {
+      "imports": {
+        "react": "https://aistudiocdn.com/react@^19.2.0",
+        "react-dom/": "https://aistudiocdn.com/react-dom@^19.2.0/",
+        "react/": "https://aistudiocdn.com/react@^19.2.0/",
+        "@google/genai": "https://aistudiocdn.com/@google/genai@^1.27.0"
+      }
+    }
+    </script>
+    
+    <style>
+      :root {
+        /* These CSS variables will be updated by the ThemeContext */
+        --color-primary: #4f46e5;
+        --color-secondary: #ec4899;
+        --color-background-color: #f9fafb;
+        --font-family: 'Inter', sans-serif;
+      }
+      html.dark {
+        --color-background-color: #111827;
+      }
+      body {
+        font-family: var(--font-family);
+        background-color: var(--color-background-color);
+      }
+    </style>
+</head>
+<body class="antialiased">
+    <noscript>You need to enable JavaScript to run this app.</noscript>
+    <div id="root"></div>
+    
+    <!-- Main Application Script -->
+    <script type="module" src="/index.tsx"></script>
+    
+    <!-- Helper Scripts -->
+    <script>
+      // Handle dark mode persistence to avoid a "flash of incorrect theme"
+      if (localStorage.getItem('adminDarkMode') === 'true' || (!('adminDarkMode' in localStorage) && window.matchMedia('(prefers-color-scheme: dark)').matches)) {
+        document.documentElement.classList.add('dark');
+      } else {
+        document.documentElement.classList.remove('dark');
+      }
+
+      // Configure Tailwind to use our CSS variables for the primary color
+      tailwind.config = {
+        darkMode: 'class',
+        theme: {
+          extend: {
+            colors: {
+              primary: 'var(--color-primary)',
+              secondary: 'var(--color-secondary)',
+              'background-color': 'var(--color-background-color)'
+            },
+            fontFamily: {
+                sans: ['var(--font-family)', 'sans-serif'],
+            }
+          }
+        }
+      }
+    </script>
+</body>
+</html>
