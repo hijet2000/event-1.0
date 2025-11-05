@@ -1,4 +1,3 @@
-
 import React, { useState, useEffect } from 'react';
 import { listPublicEvents } from '../server/api';
 import { type PublicEvent } from '../types';
@@ -6,52 +5,39 @@ import { ContentLoader } from './ContentLoader';
 import { Alert } from './Alert';
 import { AdminLoginModal } from './AdminLoginModal';
 
-const EventCard: React.FC<{ event: PublicEvent }> = ({ event }) => {
-    const handleNavigate = (e: React.MouseEvent<HTMLAnchorElement>) => {
-        // Prevent the browser from doing a full page reload
-        e.preventDefault();
-        // Update the URL in the address bar without reloading the page
-        window.history.pushState({}, '', `/${event.id}`);
-        // Dispatch a custom 'popstate' event to let the App router know the URL has changed
-        const navEvent = new PopStateEvent('popstate');
-        window.dispatchEvent(navEvent);
-    };
-
-    return (
-        <a 
-            href={`/${event.id}`}
-            onClick={handleNavigate}
-            className="block group bg-white dark:bg-gray-800 rounded-lg shadow-lg hover:shadow-2xl transform hover:-translate-y-1 transition-all duration-300 overflow-hidden border-b-4 border-transparent group-hover:border-[var(--event-color)]"
-            style={{ '--event-color': event.colorPrimary } as React.CSSProperties}
-        >
-            <div className="h-40 bg-gray-200 dark:bg-gray-700 flex items-center justify-center">
-                {event.logoUrl ? (
-                    <img src={event.logoUrl} alt={`${event.name} Logo`} className="h-24 w-auto object-contain" />
-                ) : (
-                    <div 
-                        className="h-24 w-24 rounded-full flex items-center justify-center"
-                        style={{ backgroundColor: `${event.colorPrimary}20` }} // Primary color with 20% opacity
+const EventCard: React.FC<{ event: PublicEvent }> = ({ event }) => (
+    <a 
+        href={`/${event.id}`} 
+        className="block group bg-white dark:bg-gray-800 rounded-lg shadow-lg hover:shadow-2xl transform hover:-translate-y-1 transition-all duration-300 overflow-hidden border-b-4 border-transparent group-hover:border-[var(--event-color)]"
+        style={{ '--event-color': event.colorPrimary } as React.CSSProperties}
+    >
+        <div className="h-40 bg-gray-200 dark:bg-gray-700 flex items-center justify-center">
+            {event.logoUrl ? (
+                <img src={event.logoUrl} alt={`${event.name} Logo`} className="h-24 w-auto object-contain" />
+            ) : (
+                <div 
+                    className="h-24 w-24 rounded-full flex items-center justify-center"
+                    style={{ backgroundColor: `${event.colorPrimary}20` }} // Primary color with 20% opacity
+                >
+                     <svg 
+                        className="h-12 w-12" 
+                        style={{ color: event.colorPrimary }}
+                        viewBox="0 0 100 100" 
+                        fill="none" 
+                        xmlns="http://www.w3.org/2000/svg"
                     >
-                         <svg 
-                            className="h-12 w-12" 
-                            style={{ color: event.colorPrimary }}
-                            viewBox="0 0 100 100" 
-                            fill="none" 
-                            xmlns="http://www.w3.org/2000/svg"
-                        >
-                            <path d="M50 0L93.3 25V75L50 100L6.7 75V25L50 0Z" stroke="currentColor" strokeWidth="8"/>
-                            <path d="M50 22L76.5 37V63L50 78L23.5 63V37L50 22Z" fill="currentColor" />
-                        </svg>
-                    </div>
-                )}
-            </div>
-            <div className="p-6">
-                <h3 className="text-xl font-bold text-gray-900 dark:text-white">{event.name}</h3>
-                <p className="mt-2 text-sm text-gray-500 dark:text-gray-400">{event.date} &bull; {event.location}</p>
-            </div>
-        </a>
-    );
-};
+                        <path d="M50 0L93.3 25V75L50 100L6.7 75V25L50 0Z" stroke="currentColor" strokeWidth="8"/>
+                        <path d="M50 22L76.5 37V63L50 78L23.5 63V37L50 22Z" fill="currentColor" />
+                    </svg>
+                </div>
+            )}
+        </div>
+        <div className="p-6">
+            <h3 className="text-xl font-bold text-gray-900 dark:text-white">{event.name}</h3>
+            <p className="mt-2 text-sm text-gray-500 dark:text-gray-400">{event.date} &bull; {event.location}</p>
+        </div>
+    </a>
+);
 
 export const EventSelectionPage: React.FC = () => {
     const [events, setEvents] = useState<PublicEvent[]>([]);

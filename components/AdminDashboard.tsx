@@ -1,3 +1,4 @@
+
 import React, { useState, useEffect } from 'react';
 import { type Permission, type DashboardStats } from '../types';
 import { getDashboardStats } from '../server/api';
@@ -68,20 +69,6 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ user, adminToken
     fetchData();
   }, [adminToken]);
 
-  if (isLoading) {
-    return <ContentLoader text="Loading dashboard..." />;
-  }
-
-  if (error) {
-    return <Alert type="error" message={error} />;
-  }
-
-  // Fix: Add a guard to ensure stats is loaded before attempting to render.
-  // This prevents crashes if the API call finishes but stats is still null for any reason.
-  if (!stats) {
-    return <Alert type="info" message="No dashboard data available to display." />;
-  }
-  
   const calculateDaysLeft = (dateString: string) => {
     try {
         const cleanDateString = dateString.split(/[-–,]/)[0].trim() + ", " + dateString.match(/\d{4}/)?.[0];
@@ -103,13 +90,19 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ user, adminToken
     }
   };
   
-  // With the guard above, we can now safely access stats properties.
-  const countdown = calculateDaysLeft(stats.eventDate);
-  const capacityPercent = stats.maxAttendees > 0 ? (stats.totalRegistrations / stats.maxAttendees) * 100 : 0;
-  const registrationsValue = stats.maxAttendees > 0
-    ? `${stats.totalRegistrations.toLocaleString()} / ${stats.maxAttendees.toLocaleString()}`
-    : stats.totalRegistrations.toLocaleString();
+  const countdown = stats ? calculateDaysLeft(stats.eventDate) : null;
+  const capacityPercent = stats && stats.maxAttendees > 0 ? (stats.totalRegistrations / stats.maxAttendees) * 100 : 0;
+  const registrationsValue = stats?.maxAttendees > 0 
+      ? `${stats.totalRegistrations.toLocaleString()} / ${stats.maxAttendees.toLocaleString()}` 
+      : stats?.totalRegistrations.toLocaleString();
 
+  if (isLoading) {
+    return <ContentLoader text="Loading dashboard..." />;
+  }
+
+  if (error) {
+    return <Alert type="error" message={error} />;
+  }
 
   return (
     <div>
@@ -128,12 +121,12 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ user, adminToken
         />
         <StatCard 
             title="Event Countdown"
-            value={countdown.text}
+            value={countdown?.text || '...'}
             icon={<svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z" /></svg>}
         />
         <StatCard 
-            title={`${stats.eventCoinName} Circulating`}
-            value={stats.eventCoinCirculation.toLocaleString()}
+            title={`${stats?.eventCoinName || 'EventCoin'} Circulating`}
+            value={stats?.eventCoinCirculation.toLocaleString() || 0}
             icon={<svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8c-1.657 0-3 .895-3 2s1.343 2 3 2 3 .895 3 2-1.343 2-3 2m0-8c1.11 0 2.08.402 2.599 1M12 8V7m0 1v.01M12 12v-1m0 1v.01M12 12c-1.11 0-2.08-.402-2.599-1M12 12V7m0 5v4m0 0v-4m0 4H9m3 0h3m-3 0a2.5 2.5 0 00-2.5-2.5V7.5A2.5 2.5 0 0112 5v1.5a2.5 2.5 0 00-2.5 2.5m5 0A2.5 2.5 0 0112 14.5V16a2.5 2.5 0 002.5-2.5m-5 0V9a2.5 2.5 0 012.5-2.5M12 5v1.5a2.5 2.5 0 002.5 2.5" /></svg>}
         />
       </div>
@@ -141,7 +134,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ user, adminToken
       {/* Recent Activity */}
       <div className="mt-8 bg-white dark:bg-gray-800 shadow-md rounded-lg">
         <h3 className="text-lg font-semibold p-5 border-b border-gray-200 dark:border-gray-700">Recent Activity</h3>
-        {stats.recentRegistrations && stats.recentRegistrations.length > 0 ? (
+        {stats && stats.recentRegistrations.length > 0 ? (
           <ul className="divide-y divide-gray-200 dark:divide-gray-700">
             {stats.recentRegistrations.map(reg => (
               <li key={reg.id} className="p-4 flex items-center justify-between hover:bg-gray-50 dark:hover:bg-gray-700/50">

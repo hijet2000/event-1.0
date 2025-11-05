@@ -1,3 +1,4 @@
+
 import React, { useState, useEffect, useContext, createContext, useCallback } from 'react';
 import { type EventConfig } from '../types';
 import { getPublicEventData } from '../server/api';
@@ -18,11 +19,7 @@ const ThemeContext = createContext<ThemeContextType>({
   updateConfig: () => {},
 });
 
-const applyTheme = (cfg: EventConfig | null) => {
-    // Add a guard to prevent crash if config is null or theme is missing
-    if (!cfg?.theme) {
-        return;
-    }
+const applyTheme = (cfg: EventConfig) => {
     const root = document.documentElement;
     root.style.setProperty('--color-primary', cfg.theme.colorPrimary);
     root.style.setProperty('--color-secondary', cfg.theme.colorSecondary);
@@ -63,7 +60,6 @@ export const ThemeProvider: React.FC<{ children: React.ReactNode }> = ({ childre
 
   const value = { config, registrationCount, isLoading, error, updateConfig };
 
-  // Fix: Corrected typo from `Theme.Provider` to `ThemeContext.Provider` to resolve "Cannot find name 'Theme'" error.
   return (
     <ThemeContext.Provider value={value}>
       {children}

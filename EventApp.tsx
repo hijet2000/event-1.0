@@ -122,6 +122,8 @@ const EventAppContent: React.FC<{ eventId: string }> = ({ eventId }) => {
     setDelegateToken(null);
   };
   
+  const isSoldOut = config && config.event.maxAttendees > 0 && registrationCount >= config.event.maxAttendees;
+
   if (delegateToken) {
     return <DelegatePortal onLogout={handleDelegateLogout} delegateToken={delegateToken} />;
   }
@@ -134,32 +136,29 @@ const EventAppContent: React.FC<{ eventId: string }> = ({ eventId }) => {
     );
   }
 
-  // This check is more robust. It handles network errors or cases where config is simply not found.
-  if (!config) {
+  if (themeError && !config) {
     return (
       <div className="bg-background-color min-h-screen flex items-center justify-center p-4">
         <div className="max-w-md mx-auto">
-          <Alert type="error" message={themeError || "The requested event could not be loaded."} />
+          <Alert type="error" message={themeError} />
         </div>
       </div>
     );
   }
 
-  const isSoldOut = config.event.maxAttendees > 0 && registrationCount >= config.event.maxAttendees;
-
   return (
     <div className="bg-background-color min-h-screen font-sans text-gray-800 dark:text-gray-200">
       <div 
         className="absolute inset-0 bg-cover bg-center bg-no-repeat z-0" 
-        style={{ backgroundImage: `url(${config.theme.pageImageUrl})`, opacity: 0.1 }}
+        style={{ backgroundImage: `url(${config?.theme.pageImageUrl})`, opacity: 0.1 }}
       ></div>
       <div className="relative z-10 container mx-auto px-4 sm:px-6 lg:px-8 py-12 sm:py-16 md:py-20">
         <main className="max-w-3xl mx-auto">
-          {view === 'passwordReset' && resetToken && (
+          {view === 'passwordReset' && config && resetToken && (
              <PasswordResetForm token={resetToken} />
           )}
           
-          {(view === 'registration' || view === 'success') && (
+          {(view === 'registration' || view === 'success') && config && (
             <div className="bg-white dark:bg-gray-800 shadow-2xl rounded-2xl overflow-hidden animate-fade-in">
               <div className="p-8 sm:p-12">
                 <header className="text-center">
@@ -219,7 +218,7 @@ const EventAppContent: React.FC<{ eventId: string }> = ({ eventId }) => {
               <button onClick={() => setDelegateModalOpen(true)} className="hover:text-primary transition">Delegate Portal</button>
               <span>&bull;</span>
               <button onClick={() => setAdminModalOpen(true)} className="hover:text-primary transition">Admin Login</button>
-              {config.theme.websiteUrl && (
+              {config?.theme.websiteUrl && (
                   <>
                     <span>&bull;</span>
                     <a href={config.theme.websiteUrl} target="_blank" rel="noopener noreferrer" className="hover:text-primary transition">Event Website</a>
