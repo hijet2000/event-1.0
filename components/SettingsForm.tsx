@@ -17,6 +17,40 @@ interface SettingsFormProps {
 const FONT_OPTIONS = ['Inter', 'Roboto', 'Lato', 'Montserrat'];
 const EVENT_TYPES = ['Conference', 'Workshop', 'Webinar', 'Meetup', 'Other'];
 
+const TemplateEditor: React.FC<{
+    templateKey: keyof EventConfig['emailTemplates'],
+    label: string;
+    config: EventConfig;
+    onChange: (templateKey: keyof EventConfig['emailTemplates'], field: 'subject' | 'body', value: string) => void;
+    placeholders: string[];
+}> = ({ templateKey, label, config, onChange, placeholders }) => (
+    <div className="p-4 rounded-md bg-gray-50 dark:bg-gray-700/50 border border-gray-200 dark:border-gray-600">
+        <h4 className="text-md font-medium text-gray-800 dark:text-gray-200">{label}</h4>
+        <div className="mt-3 space-y-2">
+            <input 
+                type="text" 
+                name="subject" 
+                value={config.emailTemplates[templateKey].subject}
+                onChange={(e) => onChange(templateKey, 'subject', e.target.value)}
+                placeholder="Email Subject"
+                className="block w-full rounded-md border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 shadow-sm sm:text-sm" 
+            />
+            <textarea 
+                name="body" 
+                rows={6}
+                value={config.emailTemplates[templateKey].body}
+                onChange={(e) => onChange(templateKey, 'body', e.target.value)}
+                placeholder="Email Body..."
+                className="block w-full rounded-md border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 shadow-sm sm:text-sm font-mono text-sm"
+            />
+            <p className="text-xs text-gray-500 dark:text-gray-400">
+                <span className="font-semibold">Placeholders:</span> {placeholders.join(', ')}
+            </p>
+        </div>
+    </div>
+);
+
+
 export const SettingsForm: React.FC<SettingsFormProps> = ({ adminToken }) => {
   const { updateConfig } = useTheme();
   const [config, setConfig] = useState<EventConfig | null>(null);
@@ -59,6 +93,16 @@ export const SettingsForm: React.FC<SettingsFormProps> = ({ adminToken }) => {
       const finalValue = type === 'number' ? parseInt(value, 10) || 0 : value;
       newConfig[section][name] = finalValue;
       return newConfig;
+    });
+  };
+  
+  const handleTemplateChange = (templateKey: keyof EventConfig['emailTemplates'], field: 'subject' | 'body', value: string) => {
+    if (!config) return;
+    setConfig(prevConfig => {
+        if (!prevConfig) return null;
+        const newConfig = JSON.parse(JSON.stringify(prevConfig));
+        newConfig.emailTemplates[templateKey][field] = value;
+        return newConfig;
     });
   };
 
@@ -332,6 +376,41 @@ export const SettingsForm: React.FC<SettingsFormProps> = ({ adminToken }) => {
                 <button type="button" onClick={() => openFieldModal(null, null)} className="py-2 px-4 border border-dashed border-gray-300 dark:border-gray-600 rounded-md text-sm font-medium text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-700/50 w-full">
                     + Add New Field
                 </button>
+            </div>
+        </div>
+
+        {/* Email Templates */}
+        <div className="border-t border-gray-200 dark:border-gray-700 p-6 space-y-4">
+            <h3 className="text-lg font-medium">Email Templates</h3>
+            <div className="space-y-4">
+                <TemplateEditor
+                    templateKey="userConfirmation"
+                    label="User Confirmation Email"
+                    config={config}
+                    onChange={handleTemplateChange}
+                    placeholders={['{{name}}', '{{eventName}}', '{{eventDate}}', '{{eventLocation}}', '{{customFields}}', '{{verificationLink}}', '{{hostName}}']}
+                />
+                 <TemplateEditor
+                    templateKey="hostNotification"
+                    label="Host Notification Email"
+                    config={config}
+                    onChange={handleTemplateChange}
+                    placeholders={['{{name}}', '{{email}}', '{{eventName}}', '{{customFields}}']}
+                />
+                 <TemplateEditor
+                    templateKey="passwordReset"
+                    label="Password Reset Email"
+                    config={config}
+                    onChange={handleTemplateChange}
+                    placeholders={['{{eventName}}', '{{resetLink}}', '{{hostName}}']}
+                />
+                 <TemplateEditor
+                    templateKey="delegateInvitation"
+                    label="Delegate Invitation Email"
+                    config={config}
+                    onChange={handleTemplateChange}
+                    placeholders={['{{eventName}}', '{{inviterName}}', '{{inviteLink}}', '{{hostName}}']}
+                />
             </div>
         </div>
         

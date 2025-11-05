@@ -1,162 +1,20 @@
-
 import React, { useState, useEffect, useMemo, useCallback, useRef } from 'react';
 import { type RegistrationData, type EventConfig, type Transaction, type Invitation } from '../types';
-import { getDelegateProfile, getTransactionsForUser, getOtherDelegates, sendEventCoin, createInvitation, getSentInvitations } from '../server/api';
+import { getDelegateProfile, getTransactionsForUser, getOtherDelegates, sendEventCoin, createInvitation, getSentInvitations, resendInvitation, purchaseEventCoin } from '../server/api';
 import { ContentLoader } from './ContentLoader';
 import { Alert } from './Alert';
 import { Spinner } from './Spinner';
 import { ProfileView } from './ProfileView';
+import { QRCodeScannerModal } from './QRCodeScannerModal';
 
 interface DelegatePortalProps {
   onLogout: () => void;
   delegateToken: string;
 }
 
-type DelegateView = 'dashboard' | 'send' | 'invite' | 'profile';
+type DelegateView = 'dashboard' | 'send' | 'purchase' | 'invite' | 'profile';
 
 // --- Sub-Views (Extracted for better organization) ---
-
-const Loader: React.FC = () => (
-    <div className="flex justify-center items-center">
-        <svg className="animate-spin h-8 w-8 text-white" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
-            <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
-            <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
-        </svg>
-    </div>
-);
-
-interface QRCodeScannerModalProps {
-    isOpen: boolean;
-    onClose: () => void;
-    onScan: (data: string) => void;
-}
-
-const QRCodeScannerModal: React.FC<QRCodeScannerModalProps> = ({ isOpen, onClose, onScan }) => {
-    const videoRef = useRef<HTMLVideoElement>(null);
-    const streamRef = useRef<MediaStream | null>(null);
-    const animationFrameRef = useRef<number | null>(null);
-    const [error, setError] = useState<string | null>(null);
-    const [isLoading, setIsLoading] = useState(true);
-
-    const cleanup = useCallback(() => {
-        if (animationFrameRef.current) {
-            cancelAnimationFrame(animationFrameRef.current);
-            animationFrameRef.current = null;
-        }
-        if (streamRef.current) {
-            streamRef.current.getTracks().forEach(track => track.stop());
-            streamRef.current = null;
-        }
-        if (videoRef.current) {
-            videoRef.current.srcObject = null;
-        }
-    }, []);
-
-    useEffect(() => {
-        if (!isOpen) {
-            cleanup();
-            return;
-        }
-        
-        const startScan = async () => {
-            setError(null);
-            setIsLoading(true);
-
-            if (!('BarcodeDetector' in window)) {
-                setError('QR code scanning is not supported by your browser.');
-                setIsLoading(false);
-                return;
-            }
-
-            try {
-                streamRef.current = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'environment' } });
-                if (videoRef.current) {
-                    videoRef.current.srcObject = streamRef.current;
-                    await videoRef.current.play();
-                    setIsLoading(false);
-                    
-                    const barcodeDetector = new (window as any).BarcodeDetector({ formats: ['qr_code'] });
-                    
-                    const detect = () => {
-                        if (!videoRef.current || videoRef.current.paused || videoRef.current.ended) {
-                           return;
-                        }
-                        if (videoRef.current.readyState === videoRef.current.HAVE_ENOUGH_DATA) {
-                             barcodeDetector.detect(videoRef.current)
-                                .then((barcodes: any[]) => {
-                                    if (barcodes.length > 0) {
-                                        onScan(barcodes[0].rawValue);
-                                    } else {
-                                        animationFrameRef.current = requestAnimationFrame(detect);
-                                    }
-                                })
-                                .catch((err: Error) => {
-                                    console.error("Barcode detection failed:", err);
-                                });
-                        } else {
-                            animationFrameRef.current = requestAnimationFrame(detect);
-                        }
-                    };
-                    detect();
-                }
-            } catch (err) {
-                 if (err instanceof Error) {
-                    if (err.name === 'NotAllowedError') {
-                        setError('Camera permission denied. Please enable camera access in your browser settings.');
-                    } else if (err.name === 'NotFoundError') {
-                         setError('No camera found. Please connect a camera to use this feature.');
-                    } else {
-                        setError(`Could not start camera: ${err.message}`);
-                    }
-                } else {
-                    setError('An unknown error occurred while accessing the camera.');
-                }
-                setIsLoading(false);
-            }
-        };
-
-        startScan();
-
-        return () => {
-            cleanup();
-        };
-
-    }, [isOpen, onScan, cleanup]);
-
-
-    if (!isOpen) return null;
-
-    return (
-        <div 
-            className="fixed inset-0 bg-black bg-opacity-80 z-50 flex items-center justify-center p-4"
-            onClick={onClose}
-            role="dialog"
-            aria-modal="true"
-            aria-labelledby="qr-scanner-title"
-        >
-            <div 
-                className="bg-gray-900 rounded-lg shadow-xl w-full max-w-lg h-full max-h-[80vh] flex flex-col relative overflow-hidden"
-                onClick={(e) => e.stopPropagation()}
-            >
-                <div className="p-4 border-b border-gray-700 flex justify-between items-center flex-shrink-0">
-                    <h2 id="qr-scanner-title" className="text-lg font-bold text-white">Scan Recipient's QR Code</h2>
-                    <button onClick={onClose} className="text-gray-400 hover:text-white text-3xl leading-none">&times;</button>
-                </div>
-                <div className="flex-1 relative bg-black flex items-center justify-center">
-                    <video ref={videoRef} className="w-full h-full object-cover" playsInline />
-                    <div className="absolute inset-0 flex items-center justify-center">
-                        {isLoading && <Loader />}
-                        {error && <div className="p-4 max-w-sm mx-auto"><Alert type="error" message={error} /></div>}
-                        {!isLoading && !error && <div className="absolute w-2/3 aspect-square border-4 border-dashed border-white/50 rounded-lg"></div>}
-                    </div>
-                </div>
-                 <div className="p-4 text-center text-sm text-gray-400 bg-gray-800 flex-shrink-0">
-                    Position the delegate's QR code inside the frame.
-                </div>
-            </div>
-        </div>
-    );
-};
 
 const DashboardView: React.FC<{
     user: RegistrationData;
@@ -245,13 +103,23 @@ const SendCoinView: React.FC<{
 
     const handleScan = (data: string) => {
         setIsScannerOpen(false);
+        setError('');
+        setSuccess('');
+
+        if (!/\S+@\S+\.\S+/.test(data)) {
+            setError(`Invalid QR code. Expected an email, but got: "${data}"`);
+            return;
+        }
+        
         const recipientExists = otherDelegates.some(d => d.email === data);
         if (recipientExists) {
             setToEmail(data);
             setSuccess(`Recipient ${data} selected successfully.`);
             setTimeout(() => setSuccess(''), 3000);
+        } else if (data === userEmail) {
+            setError('You cannot send EventCoin to yourself.');
         } else {
-            setError(`The scanned user (${data}) is not a valid recipient.`);
+            setError(`The scanned user (${data}) is not a registered delegate for this event.`);
         }
     };
 
@@ -325,16 +193,119 @@ const SendCoinView: React.FC<{
     );
 };
 
+const PurchaseCoinView: React.FC<{
+    config: EventConfig['eventCoin'];
+    onPurchase: (amountUSD: number) => Promise<boolean>;
+}> = ({ config, onPurchase }) => {
+    const [amountUSD, setAmountUSD] = useState('');
+    const [error, setError] = useState('');
+    const [success, setSuccess] = useState('');
+    const [isPurchasing, setIsPurchasing] = useState(false);
+
+    const eventCoinToReceive = useMemo(() => {
+        const usd = parseFloat(amountUSD);
+        if (isNaN(usd) || usd <= 0 || !config.exchangeRate || config.exchangeRate <= 0) {
+            return 0;
+        }
+        return usd / config.exchangeRate;
+    }, [amountUSD, config.exchangeRate]);
+    
+    const handleSubmit = async (e: React.FormEvent) => {
+        e.preventDefault();
+        setError('');
+        setSuccess('');
+        const usd = parseFloat(amountUSD);
+        if (isNaN(usd) || usd <= 0) {
+            setError('Please enter a valid positive purchase amount.');
+            return;
+        }
+
+        setIsPurchasing(true);
+        try {
+            const purchased = await onPurchase(usd);
+            if (purchased) {
+                setSuccess(`Successfully purchased ${eventCoinToReceive.toLocaleString()} ${config.name}. Your balance has been updated.`);
+                setAmountUSD('');
+            }
+        } catch (err) {
+            setError(err instanceof Error ? err.message : 'Purchase failed.');
+        } finally {
+            setIsPurchasing(false);
+        }
+    };
+
+    return (
+         <form onSubmit={handleSubmit} className="space-y-6 max-w-lg">
+            {error && <Alert type="error" message={error} />}
+            {success && <Alert type="success" message={success} />}
+
+            <div className="p-4 rounded-lg bg-gray-50 dark:bg-gray-700/50 border border-gray-200 dark:border-gray-700">
+                <p className="text-sm text-gray-600 dark:text-gray-300">
+                    Current Exchange Rate: <strong>1 {config.peggedCurrency} = {(1 / config.exchangeRate).toLocaleString()} {config.name}</strong>
+                </p>
+            </div>
+            
+            <div>
+                <label htmlFor="amountUSD" className="block text-sm font-medium">Amount to Spend ({config.peggedCurrency})</label>
+                <input
+                    type="number"
+                    id="amountUSD"
+                    value={amountUSD}
+                    onChange={e => setAmountUSD(e.target.value)}
+                    step="0.01"
+                    min="0.01"
+                    className="mt-1 block w-full rounded-md border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 shadow-sm"
+                    placeholder="e.g., 20.00"
+                    required
+                />
+                {eventCoinToReceive > 0 && (
+                     <p className="mt-2 text-sm text-gray-500 dark:text-gray-400">
+                        You will receive: <strong className="text-primary">{eventCoinToReceive.toLocaleString()} {config.name}</strong>
+                    </p>
+                )}
+            </div>
+
+            <fieldset className="space-y-4 pt-4 border-t border-gray-200 dark:border-gray-700">
+                <legend className="text-base font-medium text-gray-900 dark:text-white">Payment Details (Mock)</legend>
+                 <div>
+                    <label htmlFor="cardNumber" className="block text-sm font-medium">Card Number</label>
+                    <input type="text" id="cardNumber" className="mt-1 block w-full rounded-md border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 shadow-sm" placeholder="•••• •••• •••• 4242" />
+                </div>
+                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                    <div>
+                        <label htmlFor="expiryDate" className="block text-sm font-medium">Expiry Date</label>
+                        <input type="text" id="expiryDate" className="mt-1 block w-full rounded-md border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 shadow-sm" placeholder="MM / YY" />
+                    </div>
+                    <div>
+                        <label htmlFor="cvc" className="block text-sm font-medium">CVC</label>
+                        <input type="text" id="cvc" className="mt-1 block w-full rounded-md border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 shadow-sm" placeholder="123" />
+                    </div>
+                </div>
+            </fieldset>
+
+            <div className="flex justify-end gap-4">
+                <button type="submit" disabled={isPurchasing} className="py-2 px-6 border border-transparent rounded-md shadow-sm text-sm font-medium text-white bg-primary hover:bg-primary/90 flex items-center disabled:opacity-50">
+                   {isPurchasing && <Spinner />} {isPurchasing ? 'Processing...' : `Purchase`}
+                </button>
+            </div>
+        </form>
+    );
+};
+
 const InviteView: React.FC<{
     onInvite: (email: string) => Promise<string | null>;
     sentInvitations: Invitation[];
-    isLoading: boolean;
-}> = ({ onInvite, sentInvitations, isLoading }) => {
+    onResend: (invitationId: string) => Promise<void>;
+}> = ({ onInvite, sentInvitations, onResend }) => {
     const [inviteeEmail, setInviteeEmail] = useState('');
     const [error, setError] = useState('');
     const [isSending, setIsSending] = useState(false);
     const [lastInviteLink, setLastInviteLink] = useState('');
     const [copyButtonText, setCopyButtonText] = useState('Copy');
+
+    // State for resending logic
+    const [resendingId, setResendingId] = useState<string | null>(null);
+    const [resendSuccessId, setResendSuccessId] = useState<string | null>(null);
 
     const handleCopyLink = () => {
         navigator.clipboard.writeText(lastInviteLink).then(() => {
@@ -343,7 +314,7 @@ const InviteView: React.FC<{
         });
     };
 
-    const handleSubmit = async (e: React.FormEvent) => {
+    const handleNewInviteSubmit = async (e: React.FormEvent) => {
         e.preventDefault();
         setError('');
         setLastInviteLink('');
@@ -365,10 +336,26 @@ const InviteView: React.FC<{
         }
     };
     
+    const handleResendClick = async (invitationId: string) => {
+        setResendingId(invitationId);
+        setResendSuccessId(null);
+        try {
+            await onResend(invitationId);
+            setResendSuccessId(invitationId);
+            setTimeout(() => setResendSuccessId(null), 3000);
+        } catch (err) {
+            alert(`Resend failed: ${err instanceof Error ? err.message : 'Unknown error'}`);
+        } finally {
+            setResendingId(null);
+        }
+    };
+
     return (
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
+        <div className="space-y-10">
+            {/* New Invitation Form */}
             <div>
-                 <form onSubmit={handleSubmit} className="space-y-6">
+                <h3 className="text-lg font-semibold text-gray-800 dark:text-gray-200">Send a New Invitation</h3>
+                 <form onSubmit={handleNewInviteSubmit} className="mt-4 space-y-6 max-w-lg">
                     {error && <Alert type="error" message={error} />}
                     <p className="text-sm text-gray-500 dark:text-gray-400">
                         Know someone who should be at this event? Send them an invitation. An email will be sent and you can also copy the direct link below.
@@ -393,24 +380,39 @@ const InviteView: React.FC<{
                     </div>
                 )}
             </div>
+            
+            {/* Sent Invitations List */}
             <div>
                 <h3 className="text-lg font-semibold text-gray-800 dark:text-gray-200">Your Sent Invitations</h3>
-                {isLoading ? <ContentLoader /> : sentInvitations.length > 0 ? (
-                    <ul className="mt-4 space-y-3 max-h-80 overflow-y-auto pr-2">
-                        {sentInvitations.map(inv => (
-                            <li key={inv.id} className="p-3 bg-gray-50 dark:bg-gray-700/50 rounded-md flex justify-between items-center">
-                                <div>
-                                    <p className="font-medium text-gray-900 dark:text-gray-100">{inv.inviteeEmail}</p>
-                                    <p className="text-xs text-gray-500 dark:text-gray-400">Sent: {new Date(inv.createdAt).toLocaleString()}</p>
-                                </div>
-                                <span className={`px-2 inline-flex text-xs leading-5 font-semibold rounded-full ${
-                                    inv.status === 'accepted' ? 'bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-200' : 'bg-yellow-100 text-yellow-800 dark:bg-yellow-900 dark:text-yellow-200'
-                                }`}>
-                                    {inv.status}
-                                </span>
-                            </li>
-                        ))}
-                    </ul>
+                {sentInvitations.length > 0 ? (
+                     <div className="mt-4 border rounded-lg overflow-hidden border-gray-200 dark:border-gray-700">
+                        <ul className="divide-y divide-gray-200 dark:divide-gray-700">
+                            {sentInvitations.map(inv => (
+                                <li key={inv.id} className="p-4 flex flex-col sm:flex-row justify-between items-start sm:items-center bg-white dark:bg-gray-800 hover:bg-gray-50 dark:hover:bg-gray-700/50">
+                                    <div className="mb-2 sm:mb-0">
+                                        <p className="font-medium text-gray-900 dark:text-gray-100">{inv.inviteeEmail}</p>
+                                        <p className="text-xs text-gray-500 dark:text-gray-400">Sent: {new Date(inv.createdAt).toLocaleString()}</p>
+                                    </div>
+                                    <div className="flex items-center gap-4 w-full sm:w-auto justify-end">
+                                        <span className={`px-2 inline-flex text-xs leading-5 font-semibold rounded-full ${
+                                            inv.status === 'accepted' ? 'bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-200' : 'bg-yellow-100 text-yellow-800 dark:bg-yellow-900 dark:text-yellow-200'
+                                        }`}>
+                                            {inv.status}
+                                        </span>
+                                        {inv.status === 'pending' && (
+                                            <button 
+                                                onClick={() => handleResendClick(inv.id)}
+                                                disabled={resendingId === inv.id}
+                                                className="py-1 px-3 border border-gray-300 dark:border-gray-600 rounded-md shadow-sm text-xs font-medium text-gray-700 dark:text-gray-200 bg-white dark:bg-gray-700 hover:bg-gray-50 dark:hover:bg-gray-600 disabled:opacity-50 disabled:cursor-wait w-20 text-center"
+                                            >
+                                               {resendingId === inv.id ? <Spinner /> : resendSuccessId === inv.id ? 'Sent!' : 'Resend'}
+                                            </button>
+                                        )}
+                                    </div>
+                                </li>
+                            ))}
+                        </ul>
+                    </div>
                 ) : (
                     <p className="mt-4 text-sm text-gray-500 dark:text-gray-400 italic">You haven't sent any invitations yet.</p>
                 )}
@@ -443,6 +445,7 @@ export const DelegatePortal: React.FC<DelegatePortalProps> = ({ onLogout, delega
 
     const loadData = useCallback(async (showLoading = true) => {
         if(showLoading) setIsLoading(true);
+        setError(null);
         try {
             const [profileData, transactionsData, delegatesData, invitationsData] = await Promise.all([
                 getDelegateProfile(delegateToken),
@@ -483,11 +486,21 @@ export const DelegatePortal: React.FC<DelegatePortalProps> = ({ onLogout, delega
         return true;
     };
     
+    const handlePurchaseCoin = async (amountUSD: number): Promise<boolean> => {
+        await purchaseEventCoin(delegateToken, amountUSD);
+        await loadData(false);
+        return true;
+    };
+    
     const handleInvite = async (email: string): Promise<string | null> => {
         const { inviteLink } = await createInvitation(delegateToken, email);
-        const invitationsData = await getSentInvitations(delegateToken);
+        const invitationsData = await getSentInvitations(delegateToken); // Refresh list
         setInvitations(invitationsData);
         return inviteLink;
+    };
+    
+    const handleResend = async (invitationId: string): Promise<void> => {
+        await resendInvitation(delegateToken, invitationId);
     };
 
     const handleProfileUpdate = (updatedUser: RegistrationData) => {
@@ -518,9 +531,13 @@ export const DelegatePortal: React.FC<DelegatePortalProps> = ({ onLogout, delega
             title: `Send ${config.eventCoin.name}`,
             component: <SendCoinView delegates={delegates} onSend={handleSendCoin} currencyName={config.eventCoin.name} balance={balance} userEmail={user.email} />
         },
+        purchase: {
+            title: `Purchase ${config.eventCoin.name}`,
+            component: <PurchaseCoinView config={config.eventCoin} onPurchase={handlePurchaseCoin} />
+        },
         invite: {
-            title: 'Invite Delegate',
-            component: <InviteView onInvite={handleInvite} sentInvitations={invitations} isLoading={isLoading} />
+            title: 'Invite & Manage',
+            component: <InviteView onInvite={handleInvite} sentInvitations={invitations} onResend={handleResend} />
         },
         profile: {
             title: 'Your Profile',
@@ -549,7 +566,8 @@ export const DelegatePortal: React.FC<DelegatePortalProps> = ({ onLogout, delega
                 <nav className="flex-1 p-4 space-y-2">
                     <NavItem active={activeView === 'dashboard'} onClick={() => changeView('dashboard')} label="Dashboard" icon={<svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 6a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2H6a2 2 0 01-2-2V6zM14 6a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2h-2a2 2 0 01-2-2V6zM4 16a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2H6a2 2 0 01-2-2v-2zM14 16a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2h-2a2 2 0 01-2-2v-2z" /></svg>} />
                     <NavItem active={activeView === 'send'} onClick={() => changeView('send')} label={`Send ${config.eventCoin.name}`} icon={<svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 19l9 2-9-18-9 18 9-2zm0 0v-8" /></svg>} />
-                    <NavItem active={activeView === 'invite'} onClick={() => changeView('invite')} label="Invite Delegate" icon={<svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M18 9v3m0 0v3m0-3h3m-3 0h-3m-2-5a4 4 0 11-8 0 4 4 0 018 0zM3 20a6 6 0 0112 0v1H3v-1z" /></svg>} />
+                    <NavItem active={activeView === 'purchase'} onClick={() => changeView('purchase')} label="Purchase" icon={<svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 10h18M7 15h1m4 0h1m-7 4h12a3 3 0 003-3V8a3 3 0 00-3-3H6a3 3 0 00-3 3v8a3 3 0 003 3z" /></svg>} />
+                    <NavItem active={activeView === 'invite'} onClick={() => changeView('invite')} label="Invite & Manage" icon={<svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M18 9v3m0 0v3m0-3h3m-3 0h-3m-2-5a4 4 0 11-8 0 4 4 0 018 0zM3 20a6 6 0 0112 0v1H3v-1z" /></svg>} />
                     <NavItem active={activeView === 'profile'} onClick={() => changeView('profile')} label="Profile" icon={<svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z" /></svg>} />
                 </nav>
                 <div className="p-4 border-t dark:border-gray-700">

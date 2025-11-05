@@ -213,7 +213,7 @@ export const RegistrationsDashboard: React.FC<RegistrationsDashboardProps> = ({ 
     <div>
       <div className="flex justify-between items-center mb-4">
         <h2 className="text-2xl font-bold text-gray-900 dark:text-white">Registrations</h2>
-        {canManage && registrations.length > 0 && (
+        {canManage && (
             <button onClick={() => setIsImportModalOpen(true)} className="py-2 px-4 border border-transparent rounded-md shadow-sm text-sm font-medium text-white bg-primary hover:bg-primary/90">
                 Bulk Import
             </button>

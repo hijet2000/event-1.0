@@ -1,6 +1,5 @@
-
 import { query, dbReady } from './store';
-import { type AdminUser, type EventConfig, type DashboardStats, type EventCoinStats, type Invitation, type Permission, type RegistrationData, type Role, type Transaction, type PublicEvent, type EventData } from '../types';
+import { type AdminUser, type EventConfig, type DashboardStats, type EventCoinStats, type Invitation, type Permission, type RegistrationData, type Role, type Transaction, type PublicEvent, type EventData, type Task } from '../types';
 import { comparePassword, generateToken, hashPassword, verifyToken } from './auth';
 import { v4 as uuidv4 } from 'https://jspm.dev/uuid';
 import { sendEmail } from './email';
@@ -337,30 +336,51 @@ export const addFundsToDelegateByAdmin = async (adminToken: string, delegateEmai
 
 export const bulkImportRegistrations = async (adminToken: string, csvData: string): Promise<{ successCount: number; errorCount: number; errors: string[] }> => {
     await dbReady;
-    verifyAdminAccess(adminToken, 'manage_registrations');
+    await verifyAdminAccess(adminToken, 'manage_registrations');
+    
     const result = { successCount: 0, errorCount: 0, errors: [] as string[] };
     const lines = csvData.trim().split('\n');
-    lines.shift(); // Skip header
+    
+    // Skip header if it exists
+    const header = lines[0].toLowerCase();
+    if (header.includes('name') && header.includes('email')) {
+        lines.shift();
+    }
+
+    // Use Promise.all to check for existing users more efficiently
+    const emails = lines.map(line => line.split(',')[1]?.trim()).filter(Boolean);
+    const { rows: existingRows } = await query(`SELECT email FROM registrations WHERE email = ANY($1::text[])`, [emails]);
+    const existingEmails = new Set(existingRows.map(r => r.email));
 
     for (const [i, line] of lines.entries()) {
-        const [name, email] = line.split(',').map(s => s.trim());
+        const [name, email] = line.split(',').map(s => s ? s.trim() : '');
+        
         if (!name || !email || !/\S+@\S+\.\S+/.test(email)) {
             result.errorCount++;
-            result.errors.push(`Line ${i + 2}: Invalid data.`);
+            result.errors.push(`Line ${i + 2}: Invalid data format. Each line must contain a name and a valid email.`);
             continue;
         }
-        const { rows } = await query('SELECT id FROM registrations WHERE email = $1', [email]);
-        if (rows.length > 0) {
+
+        if (existingEmails.has(email)) {
             result.errorCount++;
-            result.errors.push(`Line ${i + 2}: Email '${email}' already exists.`);
+            result.errors.push(`Line ${i + 2}: Email '${email}' is already registered.`);
             continue;
         }
         
-        await query(
-            'INSERT INTO registrations (id, name, email, password_hash, created_at, updated_at, email_verified) VALUES ($1, $2, $3, $4, $5, $6, $7)',
-            [`reg_${uuidv4()}`, name, email, await hashPassword(uuidv4()), new Date(), new Date(), true]
-        );
-        result.successCount++;
+        try {
+            // Because we're looping, add the newly processed email to the set
+            // to catch duplicates within the same import file.
+            existingEmails.add(email);
+
+            await query(
+                'INSERT INTO registrations (id, name, email, password_hash, created_at, updated_at, email_verified) VALUES ($1, $2, $3, $4, $5, $6, $7)',
+                [`reg_${uuidv4()}`, name, email, await hashPassword(uuidv4()), new Date(), new Date(), true]
+            );
+            result.successCount++;
+        } catch (e) {
+            result.errorCount++;
+            result.errors.push(`Line ${i + 2}: Database error for email '${email}'.`);
+        }
     }
     return result;
 };
@@ -533,6 +553,42 @@ export const sendEventCoin = async (delegateToken: string, toEmail: string, amou
     return newTx;
 };
 
+export const purchaseEventCoin = async (delegateToken: string, purchaseAmountUSD: number): Promise<Transaction> => {
+    await dbReady;
+    const { user } = await verifyDelegateAccess(delegateToken);
+    const config = await getEventConfig();
+    const { exchangeRate, name: currencyName } = config.eventCoin;
+
+    if (!config.eventCoin.enabled) throw new Error("EventCoin is not enabled for this event.");
+    if (purchaseAmountUSD <= 0) throw new Error("Purchase amount must be positive.");
+    if (exchangeRate <= 0) throw new Error("Invalid exchange rate configured for the event.");
+
+    // This is where a real payment gateway integration would happen.
+    // For this mock, we assume payment is always successful.
+    
+    const eventCoinAmount = purchaseAmountUSD / exchangeRate;
+
+    const newTx: Transaction = {
+        id: `tx_${uuidv4()}`,
+        fromEmail: 'system_purchase',
+        fromName: 'Credit Card Purchase',
+        toEmail: user.email,
+        toName: user.name,
+        amount: eventCoinAmount,
+        message: `Purchased ${eventCoinAmount.toFixed(2)} ${currencyName} for $${purchaseAmountUSD.toFixed(2)}`,
+        type: 'purchase',
+        timestamp: Date.now(),
+    };
+
+    await query(
+        `INSERT INTO transactions (id, from_email, from_name, to_email, to_name, amount, message, type, timestamp) 
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)`,
+        [newTx.id, newTx.fromEmail, newTx.fromName, newTx.toEmail, newTx.toName, newTx.amount, newTx.message, newTx.type, new Date(newTx.timestamp)]
+    );
+
+    return newTx;
+};
+
 export const createInvitation = async (delegateToken: string, inviteeEmail: string): Promise<{ invitation: Invitation, inviteLink: string }> => {
     await dbReady;
     const { user: inviter } = await verifyDelegateAccess(delegateToken);
@@ -554,6 +610,29 @@ export const createInvitation = async (delegateToken: string, inviteeEmail: stri
     } catch (e) { console.error("Failed to send invitation email:", e); }
     
     return { invitation: newInvite, inviteLink };
+};
+
+export const resendInvitation = async (delegateToken: string, invitationId: string): Promise<void> => {
+    await dbReady;
+    const { user: inviter } = await verifyDelegateAccess(delegateToken);
+    
+    const { rows } = await query('SELECT * FROM invitations WHERE id = $1', [invitationId]);
+    const invitation = rowToObj<Invitation>(rows[0]);
+
+    if (!invitation) throw new Error("Invitation not found.");
+    if (invitation.inviterEmail !== inviter.email) throw new Error("You are not authorized to resend this invitation.");
+    if (invitation.status === 'accepted') throw new Error("This invitation has already been accepted.");
+
+    const config = await getEventConfig();
+    const inviteLink = `https://example.com/?inviteToken=${invitation.id}`;
+    
+    try {
+        const emailContent = await generateDelegateInvitationEmail(config, inviter.name, inviteLink);
+        await sendEmail({ to: invitation.inviteeEmail, ...emailContent }, config);
+    } catch (e) {
+        console.error("Failed to resend invitation email:", e);
+        throw new Error("Failed to resend email.");
+    }
 };
 
 export const getSentInvitations = async (delegateToken: string): Promise<Invitation[]> => {
@@ -587,4 +666,51 @@ export const createEvent = async (adminToken: string, eventName: string, eventTy
         name: eventName,
         eventType: eventType,
     };
+};
+
+// --- TASK MANAGEMENT APIS ---
+export const getTasks = async (adminToken: string, eventId: string): Promise<Task[]> => {
+    await dbReady;
+    await verifyAdminAccess(adminToken, 'manage_tasks');
+    const { rows } = await query('SELECT * FROM tasks WHERE event_id = $1 ORDER BY created_at DESC', [eventId]);
+    return rows.map(r => rowToObj<Task>(r));
+};
+
+export const saveTask = async (adminToken: string, data: Partial<Task>): Promise<Task> => {
+    await dbReady;
+    await verifyAdminAccess(adminToken, 'manage_tasks');
+    const { id, title, description, status, assigneeEmail, dueDate, eventId } = data;
+
+    if (id) { // Update
+        await query(
+            'UPDATE tasks SET title = $1, description = $2, status = $3, assignee_email = $4, due_date = $5, updated_at = $6 WHERE id = $7',
+            [title, description, status, assigneeEmail, dueDate, new Date(), id]
+        );
+        const { rows } = await query('SELECT * FROM tasks WHERE id = $1', [id]);
+        return rowToObj<Task>(rows[0]);
+    } else { // Create
+        if (!title || !status) throw new Error("Title and status are required for new tasks.");
+        const newTask: Task = {
+            id: `task_${uuidv4()}`,
+            eventId: eventId || 'main-event',
+            title,
+            description: description || '',
+            status,
+            assigneeEmail: assigneeEmail || undefined,
+            dueDate: dueDate || undefined,
+            createdAt: Date.now(),
+            updatedAt: Date.now(),
+        };
+        await query(
+            'INSERT INTO tasks (id, event_id, title, description, status, assignee_email, due_date, created_at, updated_at) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)',
+            [newTask.id, newTask.eventId, newTask.title, newTask.description, newTask.status, newTask.assigneeEmail, newTask.dueDate, new Date(newTask.createdAt), new Date(newTask.updatedAt)]
+        );
+        return newTask;
+    }
+};
+
+export const deleteTask = async (adminToken: string, taskId: string): Promise<void> => {
+    await dbReady;
+    await verifyAdminAccess(adminToken, 'manage_tasks');
+    await query('DELETE FROM tasks WHERE id = $1', [taskId]);
 };

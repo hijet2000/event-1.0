@@ -42,8 +42,12 @@ export const BulkImportModal: React.FC<BulkImportModalProps> = ({ isOpen, onClos
     try {
       const importResult = await bulkImportRegistrations(adminToken, csvData);
       setResult(importResult);
-      if (importResult.successCount > 0) {
-          onImportSuccess();
+      if (importResult.successCount > 0 && importResult.errorCount === 0) {
+        // Only call full success if there are no errors, otherwise user might want to see errors
+        setTimeout(() => {
+            onImportSuccess();
+            handleClose();
+        }, 1500)
       }
     } catch (e) {
       setError(e instanceof Error ? e.message : 'An unknown error occurred during import.');
@@ -55,6 +59,16 @@ export const BulkImportModal: React.FC<BulkImportModalProps> = ({ isOpen, onClos
   if (!isOpen) return null;
   
   const renderContent = () => {
+      if (isImporting) {
+        return (
+            <div className="text-center py-10">
+                <Spinner />
+                <p className="mt-4 text-lg font-medium">Importing, please wait...</p>
+                <p className="text-sm text-gray-500">This may take a moment for large lists.</p>
+            </div>
+        );
+      }
+
       if (result) {
           return (
               <div>
@@ -75,7 +89,7 @@ export const BulkImportModal: React.FC<BulkImportModalProps> = ({ isOpen, onClos
       }
 
       if (showConfirm) {
-        const lineCount = Math.max(0, csvData.trim().split('\n').length - 1);
+        const lineCount = Math.max(0, csvData.trim().split('\n').filter(line => line.trim()).length - 1);
         return (
             <div>
                 <h2 id="import-title" className="text-xl font-bold text-gray-900 dark:text-white">Confirm Bulk Import</h2>
@@ -98,9 +112,9 @@ export const BulkImportModal: React.FC<BulkImportModalProps> = ({ isOpen, onClos
               <p className="text-sm text-gray-600 dark:text-gray-400">
                 Paste your CSV data below. The format should be two columns: `name,email`. The first row will be treated as a header and skipped.
               </p>
-              <div className="mt-2 p-2 rounded-md bg-yellow-100 dark:bg-yellow-900/50 text-yellow-800 dark:text-yellow-200 text-sm">
+              <div className="mt-2 p-2 rounded-md bg-gray-100 dark:bg-gray-700/50 text-gray-600 dark:text-gray-300 text-sm">
                   <strong>Example:</strong><br />
-                  <pre className="mt-1"><code>
+                  <pre className="mt-1 font-mono"><code>
                       name,email<br/>
                       John Doe,john.doe@example.com<br/>
                       Jane Smith,jane.smith@example.com
@@ -113,8 +127,7 @@ export const BulkImportModal: React.FC<BulkImportModalProps> = ({ isOpen, onClos
                 value={csvData}
                 onChange={(e) => setCsvData(e.target.value)}
                 placeholder="name,email..."
-                className="w-full rounded-md border-gray-300 dark:border-gray-600 shadow-sm sm:text-sm bg-white dark:bg-gray-700 text-gray-900 dark:text-white"
-                disabled={isImporting}
+                className="w-full rounded-md border-gray-300 dark:border-gray-600 shadow-sm sm:text-sm bg-white dark:bg-gray-700 text-gray-900 dark:text-white font-mono text-sm"
               />
             </div>
             {error && <div className="mt-2"><Alert type="error" message={error} /></div>}
@@ -141,10 +154,9 @@ export const BulkImportModal: React.FC<BulkImportModalProps> = ({ isOpen, onClos
               <button
                 type="button"
                 onClick={executeImport}
-                disabled={isImporting}
-                className="py-2 px-4 border border-transparent rounded-md shadow-sm text-sm font-medium text-white bg-red-600 hover:bg-red-700 flex items-center justify-center disabled:opacity-50"
+                className="py-2 px-4 border border-transparent rounded-md shadow-sm text-sm font-medium text-white bg-red-600 hover:bg-red-700 flex items-center justify-center"
               >
-                {isImporting ? <><Spinner /> Importing...</> : 'Confirm & Import'}
+                Confirm & Import
               </button>
             </>
           ) : (
@@ -155,8 +167,7 @@ export const BulkImportModal: React.FC<BulkImportModalProps> = ({ isOpen, onClos
               <button
                 type="button"
                 onClick={handleAttemptImport}
-                disabled={isImporting}
-                className="py-2 px-4 border border-transparent rounded-md shadow-sm text-sm font-medium text-white bg-primary hover:bg-primary/90 flex items-center justify-center disabled:opacity-50"
+                className="py-2 px-4 border border-transparent rounded-md shadow-sm text-sm font-medium text-white bg-primary hover:bg-primary/90 flex items-center justify-center"
               >
                 Import Data
               </button>

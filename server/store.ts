@@ -1,4 +1,3 @@
-
 import { type EventConfig, type RegistrationData, type AdminUser, type Role, type Transaction, type Invitation } from '../types';
 import { defaultConfig } from './config';
 import { hashPassword } from './auth';
@@ -15,6 +14,7 @@ class MockPool {
     admin_users: [],
     roles: [],
     password_reset_tokens: [],
+    tasks: [],
   };
   _seeded = false;
 
@@ -137,7 +137,7 @@ const seedData = async () => {
 
     await query('INSERT INTO event_configs (id, config_data) VALUES ($1, $2)', ['main-event', defaultConfig]);
     
-    const superAdminRole: Role = { id: 'role_super_admin', name: 'Super Admin', description: 'Has all permissions.', permissions: ['view_dashboard', 'manage_settings', 'manage_registrations', 'manage_users_roles', 'view_eventcoin_dashboard', 'manage_event_id_design'] };
+    const superAdminRole: Role = { id: 'role_super_admin', name: 'Super Admin', description: 'Has all permissions.', permissions: ['view_dashboard', 'manage_settings', 'manage_registrations', 'manage_users_roles', 'view_eventcoin_dashboard', 'manage_event_id_design', 'manage_tasks'] };
     await query('INSERT INTO roles (id, name, description, permissions) VALUES ($1, $2, $3, $4)', [superAdminRole.id, superAdminRole.name, superAdminRole.description, superAdminRole.permissions]);
 
     const adminPasswordHash = await hashPassword('password123');
@@ -157,6 +157,24 @@ const seedData = async () => {
         );
     }
     
+    // Seed tasks
+    await query(
+        'INSERT INTO tasks (id, event_id, title, description, status, due_date, created_at, updated_at, assignee_email) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)',
+        ['task_1', 'main-event', 'Prepare keynote slides', 'Finalize the presentation for the opening keynote.', 'in_progress', new Date(Date.now() + 3 * 24 * 60 * 60 * 1000).toISOString().split('T')[0], new Date(), new Date(), 'admin@example.com']
+    );
+    await query(
+        'INSERT INTO tasks (id, event_id, title, description, status, due_date, created_at, updated_at) VALUES ($1, $2, $3, $4, $5, $6, $7, $8)',
+        ['task_2', 'main-event', 'Confirm catering menu', 'Call the caterer to confirm the final menu and headcount.', 'todo', new Date(Date.now() - 2 * 24 * 60 * 60 * 1000).toISOString().split('T')[0], new Date(), new Date()]
+    );
+     await query(
+        'INSERT INTO tasks (id, event_id, title, description, status, due_date, created_at, updated_at) VALUES ($1, $2, $3, $4, $5, $6, $7, $8)',
+        ['task_4', 'main-event', 'Book guest speaker flights', 'Book round-trip flights for our main guest speaker.', 'todo', new Date().toISOString().split('T')[0], new Date(), new Date()]
+    );
+    await query(
+        'INSERT INTO tasks (id, event_id, title, description, status, created_at, updated_at) VALUES ($1, $2, $3, $4, $5, $6, $7)',
+        ['task_3', 'main-event', 'Send final attendee list to printer', 'The list for the badges needs to be sent out.', 'completed', new Date(), new Date()]
+    );
+
     console.log("Database seeded successfully.");
 };
 

@@ -1,4 +1,5 @@
 
+
 import { type EventConfig } from '../types';
 
 export const defaultConfig: EventConfig = {
@@ -33,6 +34,23 @@ export const defaultConfig: EventConfig = {
       enabled: true,
     },
     {
+      id: "tshirt_size",
+      label: "T-Shirt Size",
+      type: "dropdown",
+      placeholder: "Select your size",
+      required: false,
+      enabled: true,
+      options: ["Small", "Medium", "Large", "X-Large", "XX-Large"],
+    },
+    {
+      id: "linkedin_url",
+      label: "LinkedIn Profile URL",
+      type: "text",
+      placeholder: "https://linkedin.com/in/your-profile",
+      required: false,
+      enabled: true,
+    },
+    {
       id: "role",
       label: "Your Role",
       type: "text",
@@ -44,7 +62,7 @@ export const defaultConfig: EventConfig = {
   emailTemplates: {
     userConfirmation: {
       subject: "Registration Confirmed for {{eventName}}!",
-      body: "Hi {{name}},\n\nThank you for registering for {{eventName}}! We're thrilled to have you join us on {{eventDate}} at {{eventLocation}}.\n\nPlease verify your email address by clicking the link below:\n{{verificationLink}}\n\nSee you there!\n- The {{hostName}} Team",
+      body: "Hi {{name}},\n\nThank you for registering for {{eventName}}! We're thrilled to have you join us on {{eventDate}} at {{eventLocation}}.\n\nHere are the details from your registration:\n{{customFields}}\n\nPlease verify your email address by clicking the link below:\n{{verificationLink}}\n\nSee you there!\n- The {{hostName}} Team",
     },
     hostNotification: {
       subject: "New Registration for {{eventName}}: {{name}}",

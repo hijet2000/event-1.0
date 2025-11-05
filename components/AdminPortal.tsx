@@ -6,6 +6,7 @@ import { SettingsForm } from './SettingsForm';
 import { UsersAndRolesDashboard } from './UsersAndRolesDashboard';
 import { EventCoinDashboard } from './EventCoinDashboard';
 import { EventIdDesign } from './EventIdDesign';
+import { TasksDashboard } from './TasksDashboard';
 
 interface AdminPortalProps {
   onLogout: () => void;
@@ -13,11 +14,12 @@ interface AdminPortalProps {
   user: { email: string; permissions: Permission[] };
 }
 
-type AdminView = 'dashboard' | 'registrations' | 'settings' | 'users_roles' | 'eventcoin' | 'event_id';
+type AdminView = 'dashboard' | 'registrations' | 'settings' | 'users_roles' | 'eventcoin' | 'event_id' | 'tasks';
 
 const navItems: { id: AdminView, label: string, requiredPermission: Permission }[] = [
     { id: 'dashboard', label: 'Dashboard', requiredPermission: 'view_dashboard' },
     { id: 'registrations', label: 'Registrations', requiredPermission: 'manage_registrations' },
+    { id: 'tasks', label: 'Tasks', requiredPermission: 'manage_tasks' },
     { id: 'settings', label: 'Event Settings', requiredPermission: 'manage_settings' },
     { id: 'eventcoin', label: 'EventCoin', requiredPermission: 'view_eventcoin_dashboard' },
     { id: 'event_id', label: 'ID Design', requiredPermission: 'manage_event_id_design' },
@@ -37,6 +39,8 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({ onLogout, adminToken, 
                 return <AdminDashboard user={user} adminToken={adminToken} />;
             case 'registrations':
                 return <RegistrationsDashboard adminToken={adminToken} permissions={user.permissions} />;
+            case 'tasks':
+                return <TasksDashboard adminToken={adminToken} />;
             case 'settings':
                 return <SettingsForm adminToken={adminToken} />;
             case 'users_roles':

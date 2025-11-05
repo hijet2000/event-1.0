@@ -6,7 +6,8 @@ export type Permission =
   | 'manage_registrations'
   | 'manage_users_roles'
   | 'view_eventcoin_dashboard'
-  | 'manage_event_id_design';
+  | 'manage_event_id_design'
+  | 'manage_tasks';
 
 export const ALL_PERMISSIONS: Record<Permission, string> = {
   view_dashboard: 'Can view the main admin dashboard.',
@@ -15,6 +16,7 @@ export const ALL_PERMISSIONS: Record<Permission, string> = {
   manage_users_roles: 'Can create, edit, and delete admin users and roles.',
   view_eventcoin_dashboard: 'Can view the EventCoin dashboard.',
   manage_event_id_design: 'Can customize the event ID badge.',
+  manage_tasks: 'Can create, update, and manage event tasks.',
 };
 
 export interface Role {
@@ -162,6 +164,21 @@ export interface DashboardStats {
   eventCoinCirculation: number;
   eventCoinName: string;
 }
+
+export type TaskStatus = 'todo' | 'in_progress' | 'completed';
+
+export interface Task {
+  id: string;
+  title: string;
+  description: string;
+  status: TaskStatus;
+  assigneeEmail?: string;
+  dueDate?: string; // YYYY-MM-DD
+  createdAt: number;
+  updatedAt: number;
+  eventId: string;
+}
+
 
 // Fix: Added missing PublicEvent and EventData types for multi-event functionality.
 export interface PublicEvent {
