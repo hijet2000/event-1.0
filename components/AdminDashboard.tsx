@@ -1,4 +1,5 @@
 
+
 import React, { useState, useEffect } from 'react';
 import { type Permission, type DashboardStats } from '../types';
 import { getDashboardStats } from '../server/api';
@@ -137,12 +138,12 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ user, adminToken
         {stats && stats.recentRegistrations.length > 0 ? (
           <ul className="divide-y divide-gray-200 dark:divide-gray-700">
             {stats.recentRegistrations.map(reg => (
-              <li key={reg.id} className="p-4 flex items-center justify-between hover:bg-gray-50 dark:hover:bg-gray-700/50">
-                <div>
+              <li key={reg.id} className="p-4 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-2 hover:bg-gray-50 dark:hover:bg-gray-700/50">
+                <div className="flex-grow">
                   <p className="font-medium text-gray-900 dark:text-white">{reg.name}</p>
                   <p className="text-sm text-gray-500 dark:text-gray-400">{reg.email}</p>
                 </div>
-                <p className="text-sm text-gray-500 dark:text-gray-400">{timeAgo(reg.createdAt)}</p>
+                <p className="text-sm text-gray-500 dark:text-gray-400 flex-shrink-0 w-full sm:w-auto text-left sm:text-right">{timeAgo(reg.createdAt)}</p>
               </li>
             ))}
           </ul>

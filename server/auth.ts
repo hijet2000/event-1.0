@@ -14,6 +14,8 @@ interface TokenPayload {
   email: string;
   permissions?: any[];
   type: 'admin' | 'delegate';
+  // FIX: Added optional eventId to support multi-event contexts.
+  eventId?: string;
   iat: number;
   exp: number;
 }

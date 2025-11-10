@@ -1,12 +1,18 @@
-import React, { useState } from 'react';
-import { type Permission } from '../types';
+import React, { useState, useEffect } from 'react';
+import { type Permission, type PublicEvent, type EventData } from '../types';
 import { AdminDashboard } from './AdminDashboard';
 import { RegistrationsDashboard } from './RegistrationsDashboard';
 import { SettingsForm } from './SettingsForm';
 import { UsersAndRolesDashboard } from './UsersAndRolesDashboard';
-import { EventCoinDashboard } from './EventCoinDashboard';
-import { EventIdDesign } from './EventIdDesign';
+import { EventSelector } from './EventSelector';
+import { CreateEventModal } from './CreateEventModal';
+import { listPublicEvents, createEvent as apiCreateEvent } from '../server/api';
 import { TasksDashboard } from './TasksDashboard';
+import { DiningDashboard } from './DiningDashboard';
+import { HotelsDashboard } from './HotelsDashboard';
+import { EventIdDesign } from './EventIdDesign';
+
+type AdminView = 'dashboard' | 'registrations' | 'settings' | 'users' | 'tasks' | 'dining' | 'hotels' | 'id_design';
 
 interface AdminPortalProps {
   onLogout: () => void;
@@ -14,93 +20,126 @@ interface AdminPortalProps {
   user: { email: string; permissions: Permission[] };
 }
 
-type AdminView = 'dashboard' | 'registrations' | 'settings' | 'users_roles' | 'eventcoin' | 'event_id' | 'tasks';
-
-const navItems: { id: AdminView, label: string, requiredPermission: Permission }[] = [
-    { id: 'dashboard', label: 'Dashboard', requiredPermission: 'view_dashboard' },
-    { id: 'registrations', label: 'Registrations', requiredPermission: 'manage_registrations' },
-    { id: 'tasks', label: 'Tasks', requiredPermission: 'manage_tasks' },
-    { id: 'settings', label: 'Event Settings', requiredPermission: 'manage_settings' },
-    { id: 'eventcoin', label: 'EventCoin', requiredPermission: 'view_eventcoin_dashboard' },
-    { id: 'event_id', label: 'ID Design', requiredPermission: 'manage_event_id_design' },
-    { id: 'users_roles', label: 'Users & Roles', requiredPermission: 'manage_users_roles' },
-];
+const NavLink: React.FC<{
+    label: string;
+    isActive: boolean;
+    onClick: () => void;
+    permission?: Permission;
+    userPermissions: Permission[];
+}> = ({ label, isActive, onClick, permission, userPermissions }) => {
+    if (permission && !userPermissions.includes(permission)) {
+        return null;
+    }
+    return (
+        <button
+            onClick={onClick}
+            className={`w-full text-left px-3 py-2 rounded-md text-sm font-medium transition-colors ${isActive ? 'bg-primary/10 text-primary' : 'hover:bg-gray-200 dark:hover:bg-gray-700'}`}
+        >
+            {label}
+        </button>
+    );
+};
 
 export const AdminPortal: React.FC<AdminPortalProps> = ({ onLogout, adminToken, user }) => {
-    const [currentView, setCurrentView] = useState<AdminView>('dashboard');
-    const [isSidebarOpen, setIsSidebarOpen] = useState(false);
-
-    const hasPermission = (permission: Permission) => user.permissions.includes(permission);
-    const filteredNavItems = navItems.filter(item => hasPermission(item.requiredPermission));
-
-    const renderView = () => {
-        switch (currentView) {
-            case 'dashboard':
-                return <AdminDashboard user={user} adminToken={adminToken} />;
-            case 'registrations':
-                return <RegistrationsDashboard adminToken={adminToken} permissions={user.permissions} />;
-            case 'tasks':
-                return <TasksDashboard adminToken={adminToken} />;
-            case 'settings':
-                return <SettingsForm adminToken={adminToken} />;
-            case 'users_roles':
-                return <UsersAndRolesDashboard adminToken={adminToken} />;
-            case 'eventcoin':
-                return <EventCoinDashboard adminToken={adminToken} />;
-            case 'event_id':
-                return <EventIdDesign adminToken={adminToken} />;
-            default:
-                return <AdminDashboard user={user} adminToken={adminToken} />;
+  const [view, setView] = useState<AdminView>('dashboard');
+  const [events, setEvents] = useState<PublicEvent[]>([]);
+  const [selectedEventId, setSelectedEventId] = useState<string | null>(null);
+  const [isCreateModalOpen, setCreateModalOpen] = useState(false);
+  
+  useEffect(() => {
+    listPublicEvents().then(events => {
+        setEvents(events);
+        if (events.length > 0) {
+            setSelectedEventId(events[0].id);
         }
-    };
+    });
+  }, []);
+  
+  const handleCreateEvent = async (name: string, type: string) => {
+    try {
+        const newEvent = await apiCreateEvent(adminToken, name, type);
+        setEvents(prev => [...prev, { id: newEvent.id, name: newEvent.name, date: newEvent.config.event.date, location: newEvent.config.event.location, logoUrl: '', colorPrimary: '' }]);
+        setSelectedEventId(newEvent.id);
+        setCreateModalOpen(false);
+        return true;
+    } catch(e) {
+        return false;
+    }
+  };
 
-    return (
-        <div className="flex h-screen bg-gray-100 dark:bg-gray-900 text-gray-800 dark:text-gray-200">
-            {isSidebarOpen && <div className="fixed inset-0 bg-black bg-opacity-50 z-20 md:hidden" onClick={() => setIsSidebarOpen(false)}></div>}
-            
-            <aside className={`fixed inset-y-0 left-0 transform ${isSidebarOpen ? 'translate-x-0' : '-translate-x-full'} md:relative md:translate-x-0 z-30 w-64 bg-white dark:bg-gray-800 shadow-lg flex flex-col transition-transform duration-200 ease-in-out`}>
-                <div className="flex items-center justify-center p-4 border-b dark:border-gray-700">
-                    <h1 className="text-xl font-bold text-primary">Admin Portal</h1>
-                </div>
-                <nav className="flex-1 p-4 space-y-2">
-                    {filteredNavItems.map(item => (
-                        <button 
-                            key={item.id}
-                            onClick={() => {
-                                setCurrentView(item.id);
-                                setIsSidebarOpen(false);
-                            }}
-                            className={`w-full text-left flex items-center px-4 py-3 rounded-lg transition-colors duration-200 ${currentView === item.id ? 'bg-primary/10 text-primary font-semibold' : 'hover:bg-gray-100 dark:hover:bg-gray-700'}`}
-                        >
-                            {item.label}
-                        </button>
-                    ))}
-                </nav>
-                <div className="p-4 border-t dark:border-gray-700">
-                    <button onClick={onLogout} className="w-full text-left flex items-center space-x-3 px-4 py-3 hover:bg-red-100 dark:hover:bg-red-900/50 text-red-600 dark:text-red-400 rounded-lg transition-colors">
-                       <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1" /></svg>
-                        <span>Logout</span>
-                    </button>
-                </div>
-            </aside>
-            
-            <div className="flex-1 flex flex-col overflow-hidden">
-                <header className="flex items-center justify-between p-4 bg-white dark:bg-gray-800 border-b dark:border-gray-700">
-                     <button onClick={() => setIsSidebarOpen(!isSidebarOpen)} className="md:hidden text-gray-500 focus:outline-none">
-                        <svg className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 6h16M4 12h16M4 18h16" />
-                        </svg>
-                    </button>
-                    <div className="flex-1"></div> {/* Spacer */}
-                    <div className="text-sm text-right">
-                      <p className="font-semibold">{user.email}</p>
-                      <p className="text-xs text-gray-500">Administrator</p>
-                    </div>
-                </header>
-                <main className="flex-1 overflow-x-hidden overflow-y-auto bg-gray-100 dark:bg-gray-900 p-4 sm:p-6 md:p-8">
-                    {renderView()}
-                </main>
+  const renderView = () => {
+    switch (view) {
+      case 'dashboard':
+        return <AdminDashboard user={user} adminToken={adminToken} />;
+      case 'registrations':
+        return <RegistrationsDashboard adminToken={adminToken} permissions={user.permissions} />;
+      case 'settings':
+        return <SettingsForm adminToken={adminToken} />;
+      case 'users':
+          return <UsersAndRolesDashboard adminToken={adminToken} />;
+      case 'tasks':
+        return <TasksDashboard adminToken={adminToken} />;
+      case 'dining':
+        return <DiningDashboard adminToken={adminToken} />;
+      case 'hotels':
+        return <HotelsDashboard adminToken={adminToken} />;
+      case 'id_design':
+        return <EventIdDesign adminToken={adminToken} />;
+      default:
+        return <div>Select a view</div>;
+    }
+  };
+
+  return (
+    <div className="min-h-screen bg-gray-100 dark:bg-gray-900 text-gray-800 dark:text-gray-200">
+      <header className="bg-white dark:bg-gray-800 shadow-md">
+        <div className="container mx-auto px-4 sm:px-6 lg:px-8 py-4 flex justify-between items-center">
+            <div className="flex items-center gap-4">
+                 <EventSelector 
+                    events={events}
+                    selectedEventId={selectedEventId}
+                    onSelectEvent={setSelectedEventId}
+                    onCreateEvent={() => setCreateModalOpen(true)}
+                    canCreate={true} // Assuming super admin can always create
+                 />
+            </div>
+            <div className="flex items-center space-x-4">
+                <span className="text-sm hidden sm:block">Welcome, {user.email}</span>
+                <button onClick={onLogout} className="text-sm font-medium text-gray-600 dark:text-gray-300 hover:text-primary">
+                    Logout
+                </button>
             </div>
         </div>
-    );
+      </header>
+      <main className="container mx-auto p-4 sm:p-6 lg:p-8">
+        <div className="md:flex md:space-x-8">
+            <aside className="md:w-1/4 lg:w-1/5">
+                <nav className="space-y-1 p-4 bg-white dark:bg-gray-800 rounded-lg shadow-md">
+                    <NavLink label="Dashboard" isActive={view === 'dashboard'} onClick={() => setView('dashboard')} userPermissions={user.permissions} permission="view_dashboard" />
+                    <NavLink label="Registrations" isActive={view === 'registrations'} onClick={() => setView('registrations')} userPermissions={user.permissions} permission="manage_registrations" />
+                    <NavLink label="Task Board" isActive={view === 'tasks'} onClick={() => setView('tasks')} userPermissions={user.permissions} permission="manage_tasks" />
+                    <NavLink label="Dining" isActive={view === 'dining'} onClick={() => setView('dining')} userPermissions={user.permissions} permission="manage_dining" />
+                    <NavLink label="Hotels" isActive={view === 'hotels'} onClick={() => setView('hotels')} userPermissions={user.permissions} permission="manage_accommodation" />
+                    <NavLink label="ID Design" isActive={view === 'id_design'} onClick={() => setView('id_design')} userPermissions={user.permissions} permission="manage_settings" />
+                    <NavLink label="Settings" isActive={view === 'settings'} onClick={() => setView('settings')} userPermissions={user.permissions} permission="manage_settings" />
+                    <NavLink label="Users & Roles" isActive={view === 'users'} onClick={() => setView('users')} userPermissions={user.permissions} permission="manage_users" />
+                </nav>
+            </aside>
+            <div className="md:w-3/4 lg:w-4/5 mt-6 md:mt-0">
+                {renderView()}
+            </div>
+        </div>
+      </main>
+      <CreateEventModal 
+        isOpen={isCreateModalOpen}
+        onClose={() => setCreateModalOpen(false)}
+        onSuccess={(newEvent: EventData) => {
+             setEvents(prev => [...prev, { id: newEvent.id, name: newEvent.name, date: newEvent.config.event.date, location: newEvent.config.event.location, logoUrl: '', colorPrimary: '' }]);
+             setSelectedEventId(newEvent.id);
+             setCreateModalOpen(false);
+        }}
+        adminToken={adminToken}
+      />
+    </div>
+  );
 };

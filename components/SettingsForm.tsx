@@ -1,4 +1,5 @@
 
+
 import React, { useState, useEffect } from 'react';
 import { type EventConfig, type FormField } from '../types';
 import { getEventConfig, saveConfig, syncConfigFromGitHub } from '../server/api';
@@ -347,14 +348,14 @@ export const SettingsForm: React.FC<SettingsFormProps> = ({ adminToken }) => {
             <div className="space-y-3">
                 {config.formFields && config.formFields.length > 0 ? (
                     config.formFields.map((field, index) => (
-                        <div key={field.id} className="flex items-center justify-between p-3 rounded-md bg-gray-50 dark:bg-gray-700/50 border border-gray-200 dark:border-gray-600">
+                        <div key={field.id} className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 p-3 rounded-md bg-gray-50 dark:bg-gray-700/50 border border-gray-200 dark:border-gray-600">
                             <div className="flex-1">
                                 <p className="font-medium text-gray-900 dark:text-white">{field.label}</p>
                                 <p className="text-sm text-gray-500 dark:text-gray-400">
                                     Type: {field.type} &bull; {field.required ? 'Required' : 'Optional'} &bull; {field.enabled ? 'Enabled' : 'Disabled'}
                                 </p>
                             </div>
-                            <div className="flex items-center space-x-2">
+                            <div className="flex items-center space-x-2 self-end sm:self-center">
                                 <div className="flex flex-col">
                                     <button type="button" onClick={() => handleMoveField(index, 'up')} disabled={index === 0} className="p-1 text-gray-400 hover:text-gray-700 dark:hover:text-gray-200 disabled:opacity-30 disabled:cursor-not-allowed">
                                         <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 15l7-7 7 7" /></svg>

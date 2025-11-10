@@ -113,14 +113,14 @@ export const EventCoinDashboard: React.FC<EventCoinDashboardProps> = ({ adminTok
             {/* Transactions Table */}
             <div className="mt-8 bg-white dark:bg-gray-800 shadow-md rounded-lg">
                 <div className="p-4 border-b border-gray-200 dark:border-gray-700">
-                    <div className="flex justify-between items-center">
-                        <h3 className="text-lg font-semibold">All Transactions</h3>
+                    <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
+                        <h3 className="text-lg font-semibold flex-shrink-0">All Transactions</h3>
                         <input 
                             type="text"
                             placeholder="Filter transactions..."
                             value={filter}
                             onChange={(e) => setFilter(e.target.value)}
-                            className="block w-full max-w-xs rounded-md border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 shadow-sm sm:text-sm"
+                            className="block w-full sm:max-w-xs rounded-md border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 shadow-sm sm:text-sm"
                         />
                     </div>
                 </div>

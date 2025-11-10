@@ -1,8 +1,5 @@
-
-import React, { useState, useEffect, useCallback } from 'react';
-import { type RegistrationData, type EventConfig, type Transaction } from '../types';
-import { getTransactionsForUserByAdmin, addFundsToDelegateByAdmin } from '../server/api';
-import { ContentLoader } from './ContentLoader';
+import React, { useState } from 'react';
+import { type RegistrationData, type EventConfig } from '../types';
 import { Alert } from './Alert';
 import { Spinner } from './Spinner';
 
@@ -13,211 +10,44 @@ interface DelegateDetailViewProps {
   adminToken: string;
 }
 
-const AddFundsForm: React.FC<{ delegate: RegistrationData; adminToken: string; onFundsAdded: () => void }> = ({ delegate, adminToken, onFundsAdded }) => {
-    const [amount, setAmount] = useState('');
-    const [message, setMessage] = useState('');
-    const [isSubmitting, setIsSubmitting] = useState(false);
-    const [error, setError] = useState<string | null>(null);
-    const [success, setSuccess] = useState<string | null>(null);
-
-    const handleSubmit = async (e: React.FormEvent) => {
-        e.preventDefault();
-        setError(null);
-        setSuccess(null);
-        
-        const numericAmount = parseFloat(amount);
-        if (isNaN(numericAmount) || numericAmount <= 0) {
-            setError('Please enter a valid positive amount.');
-            return;
-        }
-
-        setIsSubmitting(true);
-        try {
-            await addFundsToDelegateByAdmin(adminToken, delegate.email, numericAmount, message);
-            setSuccess(`Successfully added ${numericAmount} to ${delegate.name}'s wallet.`);
-            setAmount('');
-            setMessage('');
-            onFundsAdded(); // Callback to refresh transaction list
-        } catch (err) {
-            setError(err instanceof Error ? err.message : 'An unexpected error occurred.');
-        } finally {
-            setIsSubmitting(false);
-            setTimeout(() => setSuccess(null), 4000);
-        }
-    };
-
+export const DelegateDetailView: React.FC<DelegateDetailViewProps> = ({ delegate, config, onBack, adminToken }) => {
     return (
-        <div className="mt-8">
-            <h4 className="text-lg font-semibold text-gray-900 dark:text-white px-6">Add Funds</h4>
-            <div className="mt-4 border-t border-gray-200 dark:border-gray-700 p-6">
-                <form onSubmit={handleSubmit} className="space-y-4 max-w-lg">
-                    {error && <Alert type="error" message={error} />}
-                    {success && <Alert type="success" message={success} />}
-                    <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-                        <div className="sm:col-span-1">
-                            <label htmlFor="amount" className="block text-sm font-medium">Amount</label>
-                            <input
-                                type="number"
-                                id="amount"
-                                value={amount}
-                                onChange={(e) => setAmount(e.target.value)}
-                                className="mt-1 block w-full rounded-md border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 shadow-sm"
-                                placeholder="e.g., 50"
-                                required
-                                step="0.01"
-                                min="0.01"
-                            />
-                        </div>
-                        <div className="sm:col-span-2">
-                             <label htmlFor="message" className="block text-sm font-medium">Message (Optional)</label>
-                             <input
-                                type="text"
-                                id="message"
-                                value={message}
-                                onChange={(e) => setMessage(e.target.value)}
-                                className="mt-1 block w-full rounded-md border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 shadow-sm"
-                                placeholder="e.g., Prize for winning hackathon"
-                            />
-                        </div>
-                    </div>
-                    <div className="flex justify-end">
-                        <button
-                            type="submit"
-                            disabled={isSubmitting}
-                            className="py-2 px-4 border border-transparent rounded-md shadow-sm text-sm font-medium text-white bg-primary hover:bg-primary/90 flex items-center justify-center disabled:opacity-50"
-                        >
-                            {isSubmitting ? <><Spinner /> Processing...</> : 'Add Funds'}
-                        </button>
-                    </div>
-                </form>
+        <div className="animate-fade-in">
+            <div className="mb-6">
+                <button
+                    onClick={onBack}
+                    className="flex items-center text-sm font-medium text-gray-600 dark:text-gray-400 hover:text-primary"
+                >
+                    <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5 mr-2" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 19l-7-7m0 0l7-7m-7 7h18" /></svg>
+                    Back to Registrations
+                </button>
+            </div>
+            
+            <div className="bg-white dark:bg-gray-800 shadow-md rounded-lg overflow-hidden">
+                <div className="p-6 border-b border-gray-200 dark:border-gray-700">
+                    <h2 className="text-2xl font-bold text-gray-900 dark:text-white">{delegate.name}</h2>
+                    <p className="text-gray-500 dark:text-gray-400">{delegate.email}</p>
+                    <p className="mt-1 text-sm text-gray-500 dark:text-gray-400">Registered on: {new Date(delegate.createdAt).toLocaleString()}</p>
+                </div>
+                
+                <div className="p-6">
+                    <h3 className="text-lg font-semibold mb-4">Registration Details</h3>
+                    <dl className="grid grid-cols-1 md:grid-cols-2 gap-x-6 gap-y-4">
+                        {config.formFields.filter(f => f.enabled && delegate[f.id]).map(field => (
+                            <div key={field.id}>
+                                <dt className="text-sm font-medium text-gray-500 dark:text-gray-400">{field.label}</dt>
+                                <dd className="mt-1 text-gray-900 dark:text-white">{delegate[field.id]}</dd>
+                            </div>
+                        ))}
+                    </dl>
+                </div>
+
+                <div className="p-4 bg-gray-50 dark:bg-gray-900/50 flex justify-end">
+                    <button className="py-2 px-4 border border-transparent rounded-md shadow-sm text-sm font-medium text-white bg-primary hover:bg-primary/90">
+                        Resend Confirmation
+                    </button>
+                </div>
             </div>
         </div>
     );
-};
-
-export const DelegateDetailView: React.FC<DelegateDetailViewProps> = ({ delegate, config, onBack, adminToken }) => {
-  const [transactions, setTransactions] = useState<Transaction[]>([]);
-  const [isLoading, setIsLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
-
-  const fetchTransactions = useCallback(async () => {
-    if (!adminToken) {
-        setError("Admin token is missing.");
-        setIsLoading(false);
-        return;
-    }
-    try {
-      setIsLoading(true);
-      setError(null);
-      const userTransactions = await getTransactionsForUserByAdmin(adminToken, delegate.email);
-      setTransactions(userTransactions);
-    } catch (err) {
-      setError("Could not load transaction history.");
-      console.error(err);
-    } finally {
-      setIsLoading(false);
-    }
-  }, [adminToken, delegate.email]);
-
-
-  useEffect(() => {
-    fetchTransactions();
-  }, [fetchTransactions]);
-
-  const customFields = config.formFields.filter(field => field.enabled && delegate[field.id]);
-
-  return (
-    <div className="p-6 md:p-8 animate-fade-in">
-      <div className="flex items-center mb-6">
-        <button
-          onClick={onBack}
-          className="mr-4 p-2 rounded-full hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors"
-          aria-label="Back to registrations list"
-        >
-          <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6 text-gray-600 dark:text-gray-300" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 19l-7-7m0 0l7-7m-7 7h18" />
-          </svg>
-        </button>
-        <div>
-          <h3 className="text-2xl font-bold leading-6 text-gray-900 dark:text-white">{delegate.name}</h3>
-          <p className="mt-1 text-sm text-primary">{delegate.email}</p>
-        </div>
-      </div>
-
-      <div className="border-t border-gray-200 dark:border-gray-700">
-        <dl className="divide-y divide-gray-200 dark:divide-gray-700">
-          <div className="py-4 sm:py-5 sm:grid sm:grid-cols-3 sm:gap-4 sm:px-6">
-            <dt className="text-sm font-medium text-gray-500 dark:text-gray-400">Full Name</dt>
-            <dd className="mt-1 text-sm text-gray-900 dark:text-white sm:mt-0 sm:col-span-2">{delegate.name}</dd>
-          </div>
-          <div className="py-4 sm:py-5 sm:grid sm:grid-cols-3 sm:gap-4 sm:px-6">
-            <dt className="text-sm font-medium text-gray-500 dark:text-gray-400">Email address</dt>
-            <dd className="mt-1 text-sm text-gray-900 dark:text-white sm:mt-0 sm:col-span-2">{delegate.email}</dd>
-          </div>
-           <div className="py-4 sm:py-5 sm:grid sm:grid-cols-3 sm:gap-4 sm:px-6">
-            <dt className="text-sm font-medium text-gray-500 dark:text-gray-400">Email Verified</dt>
-            <dd className="mt-1 text-sm text-gray-900 dark:text-white sm:mt-0 sm:col-span-2">{delegate.emailVerified ? 'Yes' : 'No'}</dd>
-          </div>
-           <div className="py-4 sm:py-5 sm:grid sm:grid-cols-3 sm:gap-4 sm:px-6">
-            <dt className="text-sm font-medium text-gray-500 dark:text-gray-400">Registered On</dt>
-            <dd className="mt-1 text-sm text-gray-900 dark:text-white sm:mt-0 sm:col-span-2">{new Date(delegate.createdAt).toLocaleString()}</dd>
-          </div>
-           <div className="py-4 sm:py-5 sm:grid sm:grid-cols-3 sm:gap-4 sm:px-6">
-            <dt className="text-sm font-medium text-gray-500 dark:text-gray-400">Last Updated</dt>
-            <dd className="mt-1 text-sm text-gray-900 dark:text-white sm:mt-0 sm:col-span-2">{new Date(delegate.updatedAt).toLocaleString()}</dd>
-          </div>
-          
-          {customFields.map((field) => (
-             <div key={field.id} className="py-4 sm:py-5 sm:grid sm:grid-cols-3 sm:gap-4 sm:px-6">
-                <dt className="text-sm font-medium text-gray-500 dark:text-gray-400">{field.label}</dt>
-                <dd className="mt-1 text-sm text-gray-900 dark:text-white sm:mt-0 sm:col-span-2 whitespace-pre-wrap">{delegate[field.id]}</dd>
-             </div>
-          ))}
-
-          {customFields.length === 0 && (
-             <div className="py-4 sm:py-5 sm:px-6">
-                <p className="text-sm text-gray-500 dark:text-gray-400 italic">No additional information was provided by this delegate.</p>
-             </div>
-          )}
-        </dl>
-      </div>
-
-      {config.eventCoin.enabled && (
-        <AddFundsForm delegate={delegate} adminToken={adminToken} onFundsAdded={fetchTransactions} />
-      )}
-
-      {/* Transaction History */}
-      <div className="mt-8">
-        <h4 className="text-lg font-semibold text-gray-900 dark:text-white px-6">Transaction History</h4>
-        <div className="mt-4 border-t border-gray-200 dark:border-gray-700">
-          {isLoading && <ContentLoader text="Loading history..." />}
-          {error && <p className="p-6 text-red-500">{error}</p>}
-          {!isLoading && !error && transactions.length === 0 && (
-            <p className="p-6 text-sm text-gray-500 dark:text-gray-400 italic">No transactions found for this user.</p>
-          )}
-          {!isLoading && !error && transactions.length > 0 && (
-            <ul className="divide-y divide-gray-200 dark:divide-gray-700">
-              {transactions.map(tx => (
-                <li key={tx.id} className="py-4 sm:py-5 sm:px-6">
-                  <div className="flex items-center justify-between">
-                    <div>
-                      <p className="text-sm font-medium text-gray-900 dark:text-white">
-                        {tx.type === 'p2p' && tx.fromEmail === delegate.email ? `Transfer to ${tx.toName}` : tx.message}
-                      </p>
-                      <p className="text-xs text-gray-500 dark:text-gray-400">
-                        {new Date(tx.timestamp).toLocaleString()} &bull; From: {tx.fromName}
-                      </p>
-                    </div>
-                    <p className={`text-lg font-mono font-semibold ${tx.toEmail === delegate.email ? 'text-green-600 dark:text-green-400' : 'text-red-600 dark:text-red-400'}`}>
-                      {tx.toEmail === delegate.email ? '+' : '-'}{tx.amount.toLocaleString()}
-                    </p>
-                  </div>
-                </li>
-              ))}
-            </ul>
-          )}
-        </div>
-      </div>
-    </div>
-  );
 };

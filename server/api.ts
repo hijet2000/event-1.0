@@ -1,716 +1,438 @@
-import { query, dbReady } from './store';
-import { type AdminUser, type EventConfig, type DashboardStats, type EventCoinStats, type Invitation, type Permission, type RegistrationData, type Role, type Transaction, type PublicEvent, type EventData, type Task } from '../types';
-import { comparePassword, generateToken, hashPassword, verifyToken } from './auth';
-import { v4 as uuidv4 } from 'https://jspm.dev/uuid';
-import { sendEmail } from './email';
-import { generateDelegateInvitationEmail, generatePasswordResetEmail, generateRegistrationEmails } from './geminiService';
+import { store } from './store';
+import { type AdminUser, type EventConfig, type RegistrationData, type Permission, type PublicEvent, type Role, type DashboardStats, type Task, type Hotel, type MealPlan, type Restaurant, type EventCoinStats, type Transaction, EventData, DelegateProfile } from '../types';
+import { generateToken, verifyToken, comparePassword, hashPassword } from './auth';
+import * as geminiService from '../services/geminiService';
+import * as emailService from './email';
+import { defaultConfig } from './config';
 
-// --- HELPERS ---
+const delay = (ms: number) => new Promise(res => setTimeout(res, ms));
 
-const snakeToCamel = (str: string) => str.replace(/([-_][a-z])/g, (group) => group.toUpperCase().replace('-', '').replace('_', ''));
+// --- PUBLIC/DELEGATE APIS ---
 
-const rowToObj = <T>(row: any): T => {
-    if (!row) return null;
-    const obj: any = {};
-    for (const key in row) {
-        obj[snakeToCamel(key)] = row[key];
-    }
-    return obj as T;
-};
-
-const rowToRegistration = (row: any): RegistrationData => {
-  if (!row) return null;
-  const { custom_fields, ...rest } = row;
-  const registration: any = {
-      createdAt: new Date(row.created_at).getTime(),
-      updatedAt: new Date(row.updated_at).getTime(),
+export const getPublicEventData = async (eventId: string = 'main-event'): Promise<{ config: EventConfig; registrationCount: number }> => {
+  await delay(500);
+  const event = store.events[eventId];
+  if (!event) throw new Error('Event not found.');
+  return {
+    config: event.config,
+    registrationCount: event.registrations.length,
   };
-  for (const key in rest) {
-    if (key !== 'created_at' && key !== 'updated_at') {
-        registration[snakeToCamel(key)] = rest[key];
-    }
+};
+
+export const listPublicEvents = async (): Promise<PublicEvent[]> => {
+    await delay(500);
+    return Object.entries(store.events).map(([id, eventData]) => ({
+        id,
+        name: eventData.config.event.name,
+        date: eventData.config.event.date,
+        location: eventData.config.event.location,
+        logoUrl: eventData.config.theme.logoUrl,
+        colorPrimary: eventData.config.theme.colorPrimary,
+    }));
+};
+
+export const registerUser = async (eventId: string, data: RegistrationData, inviteToken?: string): Promise<{ success: boolean; message: string }> => {
+  await delay(1000);
+  const event = store.events[eventId];
+  if (!event) return { success: false, message: 'Event not found.' };
+
+  if (event.registrations.some(r => r.email === data.email)) {
+    return { success: false, message: 'This email address is already registered.' };
   }
-  return { ...registration, ...(custom_fields || {}) };
-};
-
-
-const verifyAdminAccess = async (token: string, requiredPermission?: Permission): Promise<{ user: AdminUser, role: Role }> => {
-  const payload = verifyToken(token);
-  if (!payload || payload.type !== 'admin') throw new Error('Authentication failed: Invalid token.');
-  
-  const { rows: userRows } = await query('SELECT * FROM admin_users WHERE email = $1', [payload.email]);
-  const user = userRows[0];
-  if (!user) throw new Error('Authentication failed: User not found.');
-  
-  const { rows: roleRows } = await query('SELECT * FROM roles WHERE id = $1', [user.role_id]);
-  const role = rowToObj<Role>(roleRows[0]);
-  if (!role) throw new Error('Authentication failed: Role not found.');
-  
-  if (requiredPermission && !role.permissions.includes(requiredPermission)) {
-    throw new Error('Authorization failed: Insufficient permissions.');
+  if (!data.password) {
+    return { success: false, message: 'Password is required.' };
   }
-  return { user: rowToObj<AdminUser>(user), role };
+  const passwordHash = await hashPassword(data.password);
+  const newUser: RegistrationData = {
+    ...data,
+    id: `reg_${Date.now()}`,
+    createdAt: Date.now(),
+    passwordHash,
+  };
+  delete newUser.password;
+  event.registrations.push(newUser);
+
+  if (inviteToken) {
+    store.inviteTokens.delete(inviteToken);
+  }
+
+  return { success: true, message: 'Registration successful.' };
 };
 
-const verifyDelegateAccess = async (token: string): Promise<{ user: RegistrationData }> => {
-    const payload = verifyToken(token);
-    if (!payload || payload.type !== 'delegate') throw new Error('Authentication failed: Invalid delegate token.');
-    
-    const { rows } = await query('SELECT * FROM registrations WHERE email = $1', [payload.email]);
-    if (rows.length === 0) throw new Error('Authentication failed: Delegate not found.');
-    
-    return { user: rowToRegistration(rows[0]) };
+export const triggerRegistrationEmails = async (eventId: string, registrationData: RegistrationData): Promise<void> => {
+    const event = store.events[eventId];
+    if (!event) throw new Error("Event not found");
+
+    const verificationLink = `${window.location.origin}/${eventId}/verify?token=fake-verify-token`;
+    const emails = await geminiService.generateRegistrationEmails(registrationData, event.config, verificationLink);
+
+    await Promise.all([
+        emailService.sendEmail({ to: registrationData.email, ...emails.userEmail }, event.config),
+        emailService.sendEmail({ to: event.config.host.email, ...emails.hostEmail }, event.config),
+    ]);
 };
 
-// --- PUBLIC APIS ---
-
-export const getEventConfig = async (): Promise<EventConfig> => {
-    await dbReady;
-    const { rows } = await query('SELECT config_data FROM event_configs WHERE id = $1', ['main-event']);
-    if (rows.length === 0) throw new Error("Configuration not found.");
-    return rows[0].config_data;
+export const getInvitationDetails = async (inviteToken: string): Promise<{ inviteeEmail: string, eventId: string } | null> => {
+    const invite = store.inviteTokens.get(inviteToken);
+    if (invite && invite.expires > Date.now()) {
+        return { inviteeEmail: invite.inviteeEmail, eventId: invite.eventId };
+    }
+    return null;
 };
 
-export const getPublicEventData = async (): Promise<{ config: EventConfig, registrationCount: number }> => {
-    await dbReady;
-    const config = await getEventConfig();
-    const { rows } = await query('SELECT COUNT(*) FROM registrations');
-    const registrationCount = parseInt(rows[0].count, 10);
-    return { config, registrationCount };
-};
+export const loginDelegate = async (eventId: string, email: string, password_input: string): Promise<{ token: string } | null> => {
+    await delay(500);
+    const event = store.events[eventId];
+    if (!event) return null;
 
-export const registerUser = async (
-    arg1: string | RegistrationData,
-    arg2?: RegistrationData | string,
-    arg3?: string
-): Promise<{ success: boolean; message: string }> => {
-    await dbReady;
-    
-    const config = await getEventConfig();
-    const { rows: countRows } = await query('SELECT COUNT(*) FROM registrations');
-    if (config.event.maxAttendees > 0 && parseInt(countRows[0].count, 10) >= config.event.maxAttendees) {
-        return { success: false, message: 'This event is at full capacity and no longer accepting registrations.' };
-    }
-
-    let formData: RegistrationData;
-    let inviteToken: string | undefined;
-
-    if (typeof arg1 === 'string') {
-        formData = arg2 as RegistrationData;
-        inviteToken = arg3;
-    } else {
-        formData = arg1;
-        inviteToken = arg2 as string | undefined;
-    }
-    
-    const { rows: existingUser } = await query('SELECT id FROM registrations WHERE email = $1', [formData.email]);
-    if (existingUser.length > 0) {
-        return { success: false, message: 'This email address is already registered for the event.' };
-    }
-
-    const { name, email, password, ...customFields } = formData;
-    const password_hash = await hashPassword(password!);
-
-    await query(
-        `INSERT INTO registrations (id, name, email, password_hash, created_at, updated_at, email_verified, custom_fields) 
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
-        [`reg_${uuidv4()}`, name, email, password_hash, new Date(), new Date(), false, customFields]
-    );
-    
-    if (inviteToken) {
-        await query('UPDATE invitations SET status = $1 WHERE id = $2', ['accepted', inviteToken]);
-    }
-
-    if (config.eventCoin.enabled && config.eventCoin.startingBalance > 0) {
-        await query(
-            `INSERT INTO transactions (id, from_email, from_name, to_email, to_name, amount, message, type, timestamp) 
-             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)`,
-            [`tx_${uuidv4()}`, 'system', `${config.eventCoin.name} Treasury`, email, name, config.eventCoin.startingBalance, 'Initial balance deposit.', 'initial', new Date()]
-        );
-    }
-
-    return { success: true, message: 'Registration successful.' };
-};
-
-
-export const triggerRegistrationEmails = async (
-    arg1: string | RegistrationData,
-    arg2?: RegistrationData
-): Promise<void> => {
-    await dbReady;
-    let registrationData: RegistrationData;
-    if (typeof arg1 === 'string') {
-        registrationData = arg2 as RegistrationData;
-    } else {
-        registrationData = arg1;
-    }
-    const config = await getEventConfig();
-    const verificationLink = `https://example.com/?verify=${btoa(registrationData.email)}`;
-    try {
-        const { userEmail, hostEmail } = await generateRegistrationEmails(registrationData, config, verificationLink);
-        await sendEmail({ to: registrationData.email, ...userEmail }, config);
-        await sendEmail({ to: config.host.email, ...hostEmail }, config);
-    } catch (error) {
-        console.error("Failed to generate or send registration emails:", error);
-    }
-};
-
-export const loginDelegate = async (
-    arg1: string,
-    arg2: string,
-    arg3?: string
-): Promise<{ token: string } | null> => {
-    await dbReady;
-    let email: string;
-    let password_input: string;
-
-    if (arg3 !== undefined) {
-        email = arg2;
-        password_input = arg3;
-    } else {
-        email = arg1;
-        password_input = arg2;
-    }
-
-    const { rows } = await query('SELECT * FROM registrations WHERE email = $1', [email]);
-    const user = rows[0];
-    if (!user || !user.password_hash) return null;
-
-    const isMatch = await comparePassword(password_input, user.password_hash);
-    if (isMatch) {
-        const token = generateToken({ id: user.id, email: user.email, type: 'delegate' });
+    const user = event.registrations.find(u => u.email === email);
+    if (user && user.passwordHash && await comparePassword(password_input, user.passwordHash)) {
+        const token = generateToken({ id: user.id!, email: user.email, type: 'delegate', eventId });
         return { token };
     }
     return null;
 };
 
-export const getInvitationDetails = async (inviteToken: string): Promise<{ inviterName: string; inviteeEmail: string; eventId: string; } | null> => {
-    await dbReady;
-    const { rows } = await query('SELECT * FROM invitations WHERE id = $1', [inviteToken]);
-    const invitation = rowToObj<Invitation>(rows[0]);
-    if (invitation && invitation.status === 'pending') {
-        return { inviterName: invitation.inviterName, inviteeEmail: invitation.inviteeEmail, eventId: invitation.eventId || 'main-event' };
+export const getDelegateProfile = async (delegateToken: string): Promise<DelegateProfile> => {
+    await delay(500);
+    const payload = verifyToken(delegateToken);
+    if (!payload || payload.type !== 'delegate' || !payload.eventId) {
+        throw new Error("Invalid or expired token.");
     }
-    return null;
+    const event = store.events[payload.eventId];
+    const user = event.registrations.find(r => r.id === payload.id);
+    if (!user) throw new Error("User not found.");
+
+    return {
+        user,
+        mealPlanAssignment: store.mealPlanAssignments.find(mpa => mpa.delegateId === user.id) || null,
+        restaurants: store.restaurants,
+        accommodationBooking: store.accommodationBookings.find(ab => ab.delegateId === user.id) || null,
+        hotels: store.hotels,
+    };
 };
+
+export const updateDelegateProfile = async (delegateToken: string, data: Partial<RegistrationData>): Promise<RegistrationData> => {
+    await delay(500);
+    const payload = verifyToken(delegateToken);
+    if (!payload || payload.type !== 'delegate' || !payload.eventId) throw new Error("Invalid token.");
+
+    const event = store.events[payload.eventId];
+    const userIndex = event.registrations.findIndex(r => r.id === payload.id);
+    if (userIndex === -1) throw new Error("User not found.");
+
+    const updatedUser = { ...event.registrations[userIndex], ...data };
+    event.registrations[userIndex] = updatedUser;
+    
+    return updatedUser;
+};
+
 
 // --- ADMIN APIS ---
 
-export const loginAdmin = async (email: string, password_input: string): Promise<{ token: string, user: { id: string, email: string, permissions: Permission[] } } | null> => {
-    await dbReady;
-    const { rows: userRows } = await query('SELECT * FROM admin_users WHERE email = $1', [email]);
-    const user = userRows[0];
-    if (!user) return null;
-    
-    const isMatch = await comparePassword(password_input, user.password_hash);
-    if (isMatch) {
-        const { rows: roleRows } = await query('SELECT * FROM roles WHERE id = $1', [user.role_id]);
-        const role = rowToObj<Role>(roleRows[0]);
-        if (!role) return null;
-        
-        const token = generateToken({ id: user.id, email: user.email, permissions: role.permissions, type: 'admin' });
-        return { token, user: { id: user.id, email: user.email, permissions: role.permissions } };
+export const getEventConfig = async (eventId: string = 'main-event'): Promise<EventConfig> => {
+  await delay(500);
+  const event = store.events[eventId];
+  if (!event) throw new Error("Event not found");
+  return event.config;
+};
+
+export const saveConfig = async (adminToken: string, newConfig: EventConfig, eventId: string = 'main-event'): Promise<EventConfig> => {
+    const payload = verifyToken(adminToken);
+    if (!payload || payload.type !== 'admin') throw new Error("Permission denied.");
+    await delay(1000);
+    const event = store.events[eventId];
+    if (!event) throw new Error("Event not found");
+    event.config = newConfig;
+    return event.config;
+};
+
+export const loginAdmin = async (email: string, password_input: string): Promise<{ token: string, user: {id: string; email: string, permissions: Permission[]} } | null> => {
+    await delay(500);
+    const user = store.adminUsers.find(u => u.email === email);
+    if (user && await comparePassword(password_input, user.passwordHash)) {
+        const role = store.roles.find(r => r.id === user.roleId);
+        const permissions = role?.permissions || [];
+        const token = generateToken({ id: user.id, email: user.email, permissions, type: 'admin' });
+        return { token, user: { id: user.id, email: user.email, permissions } };
     }
     return null;
 };
 
-export const getDashboardStats = async (adminToken: string): Promise<DashboardStats> => {
-    await dbReady;
-    await verifyAdminAccess(adminToken, 'view_dashboard');
+export const getDashboardStats = async (adminToken: string, eventId: string = 'main-event'): Promise<DashboardStats> => {
+    await delay(700);
+    const payload = verifyToken(adminToken);
+    if (!payload || payload.type !== 'admin') throw new Error("Permission denied.");
     
-    const config = await getEventConfig();
-    const { rows: regCountRows } = await query('SELECT COUNT(*) FROM registrations');
-    const { rows: circulationRows } = await query("SELECT SUM(amount) as total FROM transactions WHERE type = 'initial'");
-    const { rows: recentRegRows } = await query('SELECT * FROM registrations ORDER BY created_at DESC LIMIT 5');
+    const event = store.events[eventId];
+    if (!event) throw new Error("Event not found");
+
+    const recentRegistrations = [...event.registrations].sort((a, b) => b.createdAt - a.createdAt).slice(0, 5);
 
     return {
-        totalRegistrations: parseInt(regCountRows[0].count, 10),
-        maxAttendees: config.event.maxAttendees,
-        eventDate: config.event.date,
-        recentRegistrations: recentRegRows.map(rowToRegistration),
-        eventCoinCirculation: parseFloat(circulationRows[0]?.total || '0'),
-        eventCoinName: config.eventCoin.name,
+        totalRegistrations: event.registrations.length,
+        maxAttendees: event.config.event.maxAttendees,
+        eventDate: event.config.event.date,
+        eventCoinName: event.config.eventCoin.name,
+        eventCoinCirculation: store.transactions.filter(t => t.type === 'initial').reduce((sum, t) => sum + t.amount, 0),
+        recentRegistrations,
     };
 };
 
-export const getRegistrations = async (adminToken: string): Promise<RegistrationData[]> => {
-    await dbReady;
-    await verifyAdminAccess(adminToken, 'manage_registrations');
-    const { rows } = await query('SELECT * FROM registrations ORDER BY created_at DESC');
-    return rows.map(rowToRegistration);
-};
-
-export const saveConfig = async (adminToken: string, config: EventConfig): Promise<EventConfig> => {
-    await dbReady;
-    await verifyAdminAccess(adminToken, 'manage_settings');
-    await query('UPDATE event_configs SET config_data = $1 WHERE id = $2', [config, 'main-event']);
-    return config;
-};
-
-export const syncConfigFromGitHub = async (adminToken: string): Promise<EventConfig> => {
-    await dbReady;
-    const { user } = await verifyAdminAccess(adminToken, 'manage_settings');
-    const currentConfig = await getEventConfig();
-    const { enabled, configUrl } = currentConfig.githubSync;
-
-    if (!enabled || !configUrl || !configUrl.startsWith('https://')) throw new Error("GitHub sync is not enabled or configured correctly.");
-
-    let newConfig = { ...currentConfig };
-    try {
-        const response = await fetch(configUrl);
-        if (!response.ok) throw new Error(`Failed to fetch from GitHub: ${response.status}`);
-        const remoteConfigData: Partial<EventConfig> = await response.json();
-        
-        const syncableKeys: (keyof EventConfig)[] = ['event', 'theme', 'formFields', 'badgeConfig', 'eventCoin', 'emailTemplates'];
-        syncableKeys.forEach(key => {
-            if (remoteConfigData[key]) (newConfig as any)[key] = (remoteConfigData as any)[key];
-        });
-        
-        newConfig.githubSync = { ...currentConfig.githubSync, lastSyncTimestamp: Date.now(), lastSyncStatus: 'success', lastSyncMessage: `Successfully synced.` };
-        await saveConfig(adminToken, newConfig);
-        return newConfig;
-    } catch (e) {
-        newConfig.githubSync = { ...currentConfig.githubSync, lastSyncTimestamp: Date.now(), lastSyncStatus: 'failure', lastSyncMessage: e instanceof Error ? e.message : 'Unknown error.' };
-        await saveConfig(adminToken, newConfig);
-        throw e;
-    }
-};
-
-export const getEventCoinStats = async (adminToken: string): Promise<EventCoinStats> => {
-    await dbReady;
-    await verifyAdminAccess(adminToken, 'view_eventcoin_dashboard');
-
-    const { rows: circulationRows } = await query("SELECT SUM(amount) as total FROM transactions WHERE type = 'initial'");
-    const { rows: txCountRows } = await query('SELECT COUNT(*) FROM transactions');
-    const { rows: walletRows } = await query("SELECT COUNT(DISTINCT email) FROM (SELECT from_email as email FROM transactions WHERE from_email != 'system' UNION SELECT to_email as email FROM transactions) as wallets");
+export const getRegistrations = async (adminToken: string, eventId: string = 'main-event'): Promise<RegistrationData[]> => {
+    await delay(800);
+    const payload = verifyToken(adminToken);
+    if (!payload || payload.type !== 'admin') throw new Error("Permission denied.");
     
-    return {
-        totalCirculation: parseFloat(circulationRows[0]?.total || '0'),
-        totalTransactions: parseInt(txCountRows[0].count, 10),
-        activeWallets: parseInt(walletRows[0].count, 10),
-    };
+    const event = store.events[eventId];
+    if (!event) throw new Error("Event not found");
+
+    return [...event.registrations].sort((a,b) => b.createdAt - a.createdAt);
 };
 
-export const getAllTransactions = async (adminToken: string): Promise<Transaction[]> => {
-    await dbReady;
-    await verifyAdminAccess(adminToken, 'view_eventcoin_dashboard');
-    const { rows } = await query('SELECT * FROM transactions ORDER BY timestamp DESC');
-    return rows.map(row => rowToObj<Transaction>(row));
+export const getAdminUsers = async (adminToken: string): Promise<AdminUser[]> => {
+    await delay(300);
+    const payload = verifyToken(adminToken);
+    if (!payload || payload.type !== 'admin') throw new Error("Permission denied.");
+    return store.adminUsers;
 };
 
-export const getTransactionsForUserByAdmin = async (adminToken: string, delegateEmail: string): Promise<Transaction[]> => {
-    await dbReady;
-    await verifyAdminAccess(adminToken, 'manage_registrations');
-    const { rows } = await query('SELECT * FROM transactions WHERE from_email = $1 OR to_email = $1 ORDER BY timestamp DESC', [delegateEmail]);
-    return rows.map(row => rowToObj<Transaction>(row));
+export const getRoles = async (adminToken: string): Promise<Role[]> => {
+    await delay(300);
+    const payload = verifyToken(adminToken);
+    if (!payload || payload.type !== 'admin') throw new Error("Permission denied.");
+    return store.roles;
 };
 
-export const addFundsToDelegateByAdmin = async (adminToken: string, delegateEmail: string, amount: number, message: string): Promise<Transaction> => {
-    await dbReady;
-    await verifyAdminAccess(adminToken, 'manage_registrations');
-    
-    const { rows: delegateRows } = await query('SELECT name FROM registrations WHERE email = $1', [delegateEmail]);
-    if (delegateRows.length === 0) throw new Error("Delegate not found.");
-    const delegate = delegateRows[0];
-    if (amount <= 0) throw new Error("Amount must be a positive number.");
-
-    const newTx: Transaction = {
-        id: `tx_${uuidv4()}`,
-        fromEmail: 'system_admin',
-        fromName: 'Admin Credit',
-        toEmail: delegateEmail,
-        toName: delegate.name,
-        amount,
-        message: message || 'Administrative credit.',
-        type: 'purchase',
-        timestamp: Date.now(),
-    };
-    await query(
-        `INSERT INTO transactions (id, from_email, from_name, to_email, to_name, amount, message, type, timestamp) 
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)`,
-        [newTx.id, newTx.fromEmail, newTx.fromName, newTx.toEmail, newTx.toName, newTx.amount, newTx.message, newTx.type, new Date(newTx.timestamp)]
-    );
-    return newTx;
-};
-
-
-export const bulkImportRegistrations = async (adminToken: string, csvData: string): Promise<{ successCount: number; errorCount: number; errors: string[] }> => {
-    await dbReady;
-    await verifyAdminAccess(adminToken, 'manage_registrations');
-    
-    const result = { successCount: 0, errorCount: 0, errors: [] as string[] };
-    const lines = csvData.trim().split('\n');
-    
-    // Skip header if it exists
-    const header = lines[0].toLowerCase();
-    if (header.includes('name') && header.includes('email')) {
-        lines.shift();
-    }
-
-    // Use Promise.all to check for existing users more efficiently
-    const emails = lines.map(line => line.split(',')[1]?.trim()).filter(Boolean);
-    const { rows: existingRows } = await query(`SELECT email FROM registrations WHERE email = ANY($1::text[])`, [emails]);
-    const existingEmails = new Set(existingRows.map(r => r.email));
-
-    for (const [i, line] of lines.entries()) {
-        const [name, email] = line.split(',').map(s => s ? s.trim() : '');
-        
-        if (!name || !email || !/\S+@\S+\.\S+/.test(email)) {
-            result.errorCount++;
-            result.errors.push(`Line ${i + 2}: Invalid data format. Each line must contain a name and a valid email.`);
-            continue;
-        }
-
-        if (existingEmails.has(email)) {
-            result.errorCount++;
-            result.errors.push(`Line ${i + 2}: Email '${email}' is already registered.`);
-            continue;
-        }
-        
-        try {
-            // Because we're looping, add the newly processed email to the set
-            // to catch duplicates within the same import file.
-            existingEmails.add(email);
-
-            await query(
-                'INSERT INTO registrations (id, name, email, password_hash, created_at, updated_at, email_verified) VALUES ($1, $2, $3, $4, $5, $6, $7)',
-                [`reg_${uuidv4()}`, name, email, await hashPassword(uuidv4()), new Date(), new Date(), true]
-            );
-            result.successCount++;
-        } catch (e) {
-            result.errorCount++;
-            result.errors.push(`Line ${i + 2}: Database error for email '${email}'.`);
-        }
-    }
-    return result;
-};
-
-
-export const requestAdminPasswordReset = async (email: string): Promise<void> => {
-    await dbReady;
-    const { rows } = await query('SELECT id FROM admin_users WHERE email = $1', [email]);
-    if (rows.length === 0) return;
-    
-    const token = uuidv4();
-    const expires = new Date(Date.now() + 3600000);
-    await query('INSERT INTO password_reset_tokens (token, email, expires, type) VALUES ($1, $2, $3, $4)', [token, email, expires, 'admin']);
-    
-    const config = await getEventConfig();
-    const resetLink = `https://example.com/?resetToken=${token}`;
-    try {
-        const emailContent = await generatePasswordResetEmail(config, resetLink);
-        await sendEmail({ to: email, ...emailContent }, config);
-    } catch (e) { console.error("Failed to send admin password reset", e); throw e; }
-};
-
-export const requestDelegatePasswordReset = async (email: string): Promise<void> => {
-    await dbReady;
-    const { rows } = await query('SELECT id FROM registrations WHERE email = $1', [email]);
-    if (rows.length === 0) return;
-    
-    const token = uuidv4();
-    const expires = new Date(Date.now() + 3600000);
-    await query('INSERT INTO password_reset_tokens (token, email, expires, type) VALUES ($1, $2, $3, $4)', [token, email, expires, 'delegate']);
-
-    const config = await getEventConfig();
-    const resetLink = `https://example.com/?resetToken=${token}`;
-    try {
-        const emailContent = await generatePasswordResetEmail(config, resetLink);
-        await sendEmail({ to: email, ...emailContent }, config);
-    } catch (e) { console.error("Failed to send delegate password reset", e); throw e; }
-};
-
-export const resetPassword = async (token: string, newPassword_input: string): Promise<void> => {
-    await dbReady;
-    const { rows } = await query('SELECT * FROM password_reset_tokens WHERE token = $1', [token]);
-    const req = rows[0];
-    if (!req || new Date(req.expires) < new Date()) {
-        if (req) await query('DELETE FROM password_reset_tokens WHERE token = $1', [token]);
-        throw new Error("Invalid or expired token.");
-    }
-    
-    const newPasswordHash = await hashPassword(newPassword_input);
-    const table = req.type === 'admin' ? 'admin_users' : 'registrations';
-    await query(`UPDATE ${table} SET password_hash = $1 WHERE email = $2`, [newPasswordHash, req.email]);
-    await query('DELETE FROM password_reset_tokens WHERE token = $1', [token]);
-};
-
-
-export const getAdminUsers = async (adminToken: string): Promise<AdminUser[]> => (await dbReady, await verifyAdminAccess(adminToken, 'manage_users_roles'), (await query('SELECT id, email, role_id FROM admin_users')).rows.map(r => rowToObj<AdminUser>(r)));
-export const getRoles = async (adminToken: string): Promise<Role[]> => (await dbReady, await verifyAdminAccess(adminToken, 'manage_users_roles'), (await query('SELECT * FROM roles')).rows.map(r => rowToObj<Role>(r)));
-
-export const saveAdminUser = async (adminToken: string, data: Partial<AdminUser> & { password?: string }): Promise<AdminUser> => {
-    await dbReady;
-    await verifyAdminAccess(adminToken, 'manage_users_roles');
-    if (data.id) { // Update
-        const password_hash = data.password ? await hashPassword(data.password) : null;
-        if (password_hash) {
-            await query('UPDATE admin_users SET email = $1, role_id = $2, password_hash = $3 WHERE id = $4', [data.email, data.roleId, password_hash, data.id]);
-        } else {
-            await query('UPDATE admin_users SET email = $1, role_id = $2 WHERE id = $3', [data.email, data.roleId, data.id]);
-        }
-        const {rows} = await query('SELECT * FROM admin_users WHERE id = $1', [data.id]);
-        return rowToObj<AdminUser>(rows[0]);
-    } else { // Create
-        if (!data.email || !data.password || !data.roleId) throw new Error("Email, password, role required.");
-        const {rows: existing} = await query('SELECT id FROM admin_users WHERE email = $1', [data.email]);
-        if (existing.length > 0) throw new Error("Email already exists.");
-        
-        const newUser: AdminUser = { id: `user_${uuidv4()}`, email: data.email, roleId: data.roleId, password_hash: await hashPassword(data.password) };
-        await query('INSERT INTO admin_users (id, email, password_hash, role_id) VALUES ($1, $2, $3, $4)', [newUser.id, newUser.email, newUser.password_hash, newUser.roleId]);
-        return newUser;
-    }
-};
-
-export const deleteAdminUser = async (adminToken: string, userId: string): Promise<void> => {
-    await dbReady;
-    await verifyAdminAccess(adminToken, 'manage_users_roles');
-    const { rows } = await query('SELECT COUNT(*) FROM admin_users');
-    if (parseInt(rows[0].count, 10) <= 1) throw new Error("Cannot delete last admin.");
-    await query('DELETE FROM admin_users WHERE id = $1', [userId]);
-};
-
-export const saveRole = async (adminToken: string, data: Partial<Role>): Promise<Role> => {
-    await dbReady;
-    await verifyAdminAccess(adminToken, 'manage_users_roles');
-    if (data.id) { // Update
-        await query('UPDATE roles SET name = $1, description = $2, permissions = $3 WHERE id = $4', [data.name, data.description, data.permissions, data.id]);
-        const { rows } = await query('SELECT * FROM roles WHERE id = $1', [data.id]);
-        return rowToObj<Role>(rows[0]);
-    } else { // Create
-        if (!data.name) throw new Error("Role name required.");
-        const newRole: Role = { id: `role_${uuidv4()}`, name: data.name, description: data.description || '', permissions: data.permissions || [] };
-        await query('INSERT INTO roles (id, name, description, permissions) VALUES ($1, $2, $3, $4)', [newRole.id, newRole.name, newRole.description, newRole.permissions]);
-        return newRole;
-    }
-};
-
-export const deleteRole = async (adminToken: string, roleId: string): Promise<void> => {
-    await dbReady;
-    await verifyAdminAccess(adminToken, 'manage_users_roles');
-    const { rows } = await query('SELECT id FROM admin_users WHERE role_id = $1', [roleId]);
-    if (rows.length > 0) throw new Error("Cannot delete role: in use.");
-    await query('DELETE FROM roles WHERE id = $1', [roleId]);
-};
-
-// --- DELEGATE PORTAL APIS ---
-
-export const getDelegateProfile = async (delegateToken: string): Promise<{ user: RegistrationData, config: EventConfig }> => {
-    await dbReady;
-    const { user } = await verifyDelegateAccess(delegateToken);
-    const config = await getEventConfig();
-    return { user, config };
-};
-
-export const updateDelegateProfile = async (delegateToken: string, profileData: { name: string, [key: string]: any }): Promise<RegistrationData> => {
-    await dbReady;
-    const { user } = await verifyDelegateAccess(delegateToken);
-    const { name, company, role } = profileData;
-
-    const { rows: oldUserRows } = await query('SELECT custom_fields FROM registrations WHERE email = $1', [user.email]);
-    const oldCustomFields = oldUserRows[0].custom_fields || {};
-    const newCustomFields = { ...oldCustomFields, company, role };
-
-    await query('UPDATE registrations SET name = $1, custom_fields = $2, updated_at = $3 WHERE email = $4', [name, newCustomFields, new Date(), user.email]);
-    
-    const { rows } = await query('SELECT * FROM registrations WHERE email = $1', [user.email]);
-    return rowToRegistration(rows[0]);
-};
-
-export const getTransactionsForUser = async (delegateToken: string): Promise<Transaction[]> => {
-    await dbReady;
-    const { user } = await verifyDelegateAccess(delegateToken);
-    const { rows } = await query('SELECT * FROM transactions WHERE from_email = $1 OR to_email = $1 ORDER BY timestamp DESC', [user.email]);
-    return rows.map(r => rowToObj<Transaction>(r));
-};
-
-export const getOtherDelegates = async (delegateToken: string): Promise<{name: string, email: string}[]> => {
-    await dbReady;
-    const { user } = await verifyDelegateAccess(delegateToken);
-    const { rows } = await query('SELECT name, email FROM registrations WHERE email != $1', [user.email]);
-    return rows;
-};
-
-export const sendEventCoin = async (delegateToken: string, toEmail: string, amount: number, message: string): Promise<Transaction> => {
-    await dbReady;
-    const { user: fromUser } = await verifyDelegateAccess(delegateToken);
-    const { rows: toUserRows } = await query('SELECT name FROM registrations WHERE email = $1', [toEmail]);
-    if (toUserRows.length === 0) throw new Error("Recipient not found.");
-    const toUser = toUserRows[0];
-    if (fromUser.email === toEmail) throw new Error("Cannot send to yourself.");
-    if (amount <= 0) throw new Error("Amount must be positive.");
-
-    const { rows } = await query('SELECT * FROM transactions WHERE from_email = $1 OR to_email = $1', [fromUser.email]);
-    const balance = rows.reduce((bal, tx) => bal + (tx.to_email === fromUser.email ? tx.amount : -tx.amount), 0);
-    if (balance < amount) throw new Error("Insufficient funds.");
-
-    const newTx: Transaction = { id: `tx_${uuidv4()}`, fromEmail: fromUser.email, fromName: fromUser.name, toEmail: toEmail, toName: toUser.name, amount, message, type: 'p2p', timestamp: Date.now() };
-    await query(
-        `INSERT INTO transactions (id, from_email, from_name, to_email, to_name, amount, message, type, timestamp) 
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)`,
-        [newTx.id, newTx.fromEmail, newTx.fromName, newTx.toEmail, newTx.toName, newTx.amount, newTx.message, newTx.type, new Date(newTx.timestamp)]
-    );
-    return newTx;
-};
-
-export const purchaseEventCoin = async (delegateToken: string, purchaseAmountUSD: number): Promise<Transaction> => {
-    await dbReady;
-    const { user } = await verifyDelegateAccess(delegateToken);
-    const config = await getEventConfig();
-    const { exchangeRate, name: currencyName } = config.eventCoin;
-
-    if (!config.eventCoin.enabled) throw new Error("EventCoin is not enabled for this event.");
-    if (purchaseAmountUSD <= 0) throw new Error("Purchase amount must be positive.");
-    if (exchangeRate <= 0) throw new Error("Invalid exchange rate configured for the event.");
-
-    // This is where a real payment gateway integration would happen.
-    // For this mock, we assume payment is always successful.
-    
-    const eventCoinAmount = purchaseAmountUSD / exchangeRate;
-
-    const newTx: Transaction = {
-        id: `tx_${uuidv4()}`,
-        fromEmail: 'system_purchase',
-        fromName: 'Credit Card Purchase',
-        toEmail: user.email,
-        toName: user.name,
-        amount: eventCoinAmount,
-        message: `Purchased ${eventCoinAmount.toFixed(2)} ${currencyName} for $${purchaseAmountUSD.toFixed(2)}`,
-        type: 'purchase',
-        timestamp: Date.now(),
-    };
-
-    await query(
-        `INSERT INTO transactions (id, from_email, from_name, to_email, to_name, amount, message, type, timestamp) 
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)`,
-        [newTx.id, newTx.fromEmail, newTx.fromName, newTx.toEmail, newTx.toName, newTx.amount, newTx.message, newTx.type, new Date(newTx.timestamp)]
-    );
-
-    return newTx;
-};
-
-export const createInvitation = async (delegateToken: string, inviteeEmail: string): Promise<{ invitation: Invitation, inviteLink: string }> => {
-    await dbReady;
-    const { user: inviter } = await verifyDelegateAccess(delegateToken);
-    if (!inviteeEmail || !/\S+@\S+\.\S+/.test(inviteeEmail)) throw new Error("Invalid email.");
-    
-    const { rows } = await query('SELECT id FROM registrations WHERE email = $1', [inviteeEmail]);
-    if (rows.length > 0) throw new Error("Person already registered.");
-
-    const newInvite: Invitation = { id: uuidv4(), inviterEmail: inviter.email, inviterName: inviter.name, inviteeEmail, status: 'pending', createdAt: Date.now(), eventId: 'main-event' };
-    await query('INSERT INTO invitations (id, inviter_email, inviter_name, invitee_email, status, created_at, event_id) VALUES ($1, $2, $3, $4, $5, $6, $7)',
-        [newInvite.id, newInvite.inviterEmail, newInvite.inviterName, newInvite.inviteeEmail, newInvite.status, new Date(newInvite.createdAt), newInvite.eventId]
-    );
-    
-    const config = await getEventConfig();
-    const inviteLink = `https://example.com/?inviteToken=${newInvite.id}`;
-    try {
-        const emailContent = await generateDelegateInvitationEmail(config, inviter.name, inviteLink);
-        await sendEmail({ to: inviteeEmail, ...emailContent }, config);
-    } catch (e) { console.error("Failed to send invitation email:", e); }
-    
-    return { invitation: newInvite, inviteLink };
-};
-
-export const resendInvitation = async (delegateToken: string, invitationId: string): Promise<void> => {
-    await dbReady;
-    const { user: inviter } = await verifyDelegateAccess(delegateToken);
-    
-    const { rows } = await query('SELECT * FROM invitations WHERE id = $1', [invitationId]);
-    const invitation = rowToObj<Invitation>(rows[0]);
-
-    if (!invitation) throw new Error("Invitation not found.");
-    if (invitation.inviterEmail !== inviter.email) throw new Error("You are not authorized to resend this invitation.");
-    if (invitation.status === 'accepted') throw new Error("This invitation has already been accepted.");
-
-    const config = await getEventConfig();
-    const inviteLink = `https://example.com/?inviteToken=${invitation.id}`;
-    
-    try {
-        const emailContent = await generateDelegateInvitationEmail(config, inviter.name, inviteLink);
-        await sendEmail({ to: invitation.inviteeEmail, ...emailContent }, config);
-    } catch (e) {
-        console.error("Failed to resend invitation email:", e);
-        throw new Error("Failed to resend email.");
-    }
-};
-
-export const getSentInvitations = async (delegateToken: string): Promise<Invitation[]> => {
-    await dbReady;
-    const { user } = await verifyDelegateAccess(delegateToken);
-    const { rows } = await query('SELECT * FROM invitations WHERE inviter_email = $1 ORDER BY created_at DESC', [user.email]);
-    return rows.map(r => rowToObj<Invitation>(r));
-};
-
-export const listPublicEvents = async (): Promise<PublicEvent[]> => {
-    await dbReady;
-    const config = await getEventConfig();
-    // This is a mock implementation for a single-event architecture.
-    return [{
-        id: 'main-event',
-        name: config.event.name,
-        date: config.event.date,
-        location: config.event.location,
-        logoUrl: config.theme.logoUrl,
-        colorPrimary: config.theme.colorPrimary,
-    }];
-};
-
-export const createEvent = async (adminToken: string, eventName: string, eventType: string): Promise<EventData> => {
-    await dbReady;
-    await verifyAdminAccess(adminToken, 'manage_settings');
-    // This is a mock implementation. In a real multi-event app, this would create a new event in the database.
-    console.warn("createEvent is a mock and does not persist new events.");
-    return {
-        id: `evt_${uuidv4()}`,
-        name: eventName,
-        eventType: eventType,
-    };
-};
-
-// --- TASK MANAGEMENT APIS ---
 export const getTasks = async (adminToken: string, eventId: string): Promise<Task[]> => {
-    await dbReady;
-    await verifyAdminAccess(adminToken, 'manage_tasks');
-    const { rows } = await query('SELECT * FROM tasks WHERE event_id = $1 ORDER BY created_at DESC', [eventId]);
-    return rows.map(r => rowToObj<Task>(r));
+    await delay(400);
+    const payload = verifyToken(adminToken);
+    if (!payload || payload.type !== 'admin') throw new Error("Permission denied.");
+    return store.tasks.filter(t => t.eventId === eventId);
 };
 
-export const saveTask = async (adminToken: string, data: Partial<Task>): Promise<Task> => {
-    await dbReady;
-    await verifyAdminAccess(adminToken, 'manage_tasks');
-    const { id, title, description, status, assigneeEmail, dueDate, eventId } = data;
-
-    if (id) { // Update
-        await query(
-            'UPDATE tasks SET title = $1, description = $2, status = $3, assignee_email = $4, due_date = $5, updated_at = $6 WHERE id = $7',
-            [title, description, status, assigneeEmail, dueDate, new Date(), id]
-        );
-        const { rows } = await query('SELECT * FROM tasks WHERE id = $1', [id]);
-        return rowToObj<Task>(rows[0]);
-    } else { // Create
-        if (!title || !status) throw new Error("Title and status are required for new tasks.");
-        const newTask: Task = {
-            id: `task_${uuidv4()}`,
-            eventId: eventId || 'main-event',
-            title,
-            description: description || '',
-            status,
-            assigneeEmail: assigneeEmail || undefined,
-            dueDate: dueDate || undefined,
-            createdAt: Date.now(),
-            updatedAt: Date.now(),
-        };
-        await query(
-            'INSERT INTO tasks (id, event_id, title, description, status, assignee_email, due_date, created_at, updated_at) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)',
-            [newTask.id, newTask.eventId, newTask.title, newTask.description, newTask.status, newTask.assigneeEmail, newTask.dueDate, new Date(newTask.createdAt), new Date(newTask.updatedAt)]
-        );
-        return newTask;
+export const saveTask = async (adminToken: string, taskData: Partial<Task>): Promise<Task> => {
+    await delay(500);
+    const payload = verifyToken(adminToken);
+    if (!payload || payload.type !== 'admin') throw new Error("Permission denied.");
+    if (taskData.id) {
+        const index = store.tasks.findIndex(t => t.id === taskData.id);
+        if (index > -1) {
+            store.tasks[index] = { ...store.tasks[index], ...taskData };
+            return store.tasks[index];
+        }
     }
+    const newTask: Task = {
+        id: `task_${Date.now()}`,
+        status: 'todo',
+        ...taskData
+    } as Task;
+    store.tasks.push(newTask);
+    return newTask;
 };
 
 export const deleteTask = async (adminToken: string, taskId: string): Promise<void> => {
-    await dbReady;
-    await verifyAdminAccess(adminToken, 'manage_tasks');
-    await query('DELETE FROM tasks WHERE id = $1', [taskId]);
+    await delay(500);
+    const payload = verifyToken(adminToken);
+    if (!payload || payload.type !== 'admin') throw new Error("Permission denied.");
+    store.tasks = store.tasks.filter(t => t.id !== taskId);
 };
+
+
+export const createEvent = async (adminToken: string, name: string, eventType: string): Promise<EventData> => {
+    await delay(1000);
+    const payload = verifyToken(adminToken);
+    if (!payload || payload.type !== 'admin') throw new Error("Permission denied.");
+    
+    const newEventId = name.toLowerCase().replace(/\s+/g, '-') + `-${Date.now()}`;
+    const newConfig = JSON.parse(JSON.stringify(defaultConfig));
+    newConfig.event.name = name;
+    newConfig.event.eventType = eventType;
+
+    store.events[newEventId] = {
+        config: newConfig,
+        registrations: []
+    };
+    return { id: newEventId, name, config: newConfig };
+};
+
+export const requestAdminPasswordReset = async (email: string): Promise<void> => {
+    await delay(500);
+    console.log(`Password reset requested for admin: ${email}`);
+};
+
+export const requestDelegatePasswordReset = async (email: string): Promise<void> => {
+    await delay(500);
+    console.log(`Password reset requested for delegate: ${email}`);
+};
+
+
+export const resetPassword = async (token: string, newPassword_input: string): Promise<void> => {
+    await delay(1000);
+    console.log(`Password reset for token ${token}`);
+};
+
+
+export const syncConfigFromGitHub = async (adminToken: string, eventId: string = 'main-event'): Promise<EventConfig> => {
+    await delay(1500);
+    const payload = verifyToken(adminToken);
+    if (!payload || payload.type !== 'admin') throw new Error("Permission denied.");
+    const event = store.events[eventId];
+    if (!event) throw new Error("Event not found.");
+    
+    const url = event.config.githubSync.configUrl;
+    if (!url) {
+        event.config.githubSync.lastSyncStatus = 'failure';
+        event.config.githubSync.lastSyncMessage = 'GitHub Raw JSON URL is not configured.';
+        throw new Error(event.config.githubSync.lastSyncMessage);
+    }
+
+    try {
+        const response = await fetch(url);
+        if (!response.ok) throw new Error(`Failed to fetch config from GitHub: ${response.statusText}`);
+        const githubConfig = await response.json();
+
+        // Basic validation
+        if (!githubConfig.event || !githubConfig.theme) {
+             throw new Error("Fetched JSON is not a valid EventConfig format.");
+        }
+        
+        event.config = { ...event.config, ...githubConfig, githubSync: { ...event.config.githubSync, ...githubConfig.githubSync } };
+        event.config.githubSync.lastSyncTimestamp = Date.now();
+        event.config.githubSync.lastSyncStatus = 'success';
+        event.config.githubSync.lastSyncMessage = 'Sync successful.';
+        return event.config;
+    } catch(e) {
+        const message = e instanceof Error ? e.message : 'Unknown error during sync.';
+        event.config.githubSync.lastSyncTimestamp = Date.now();
+        event.config.githubSync.lastSyncStatus = 'failure';
+        event.config.githubSync.lastSyncMessage = message;
+        throw new Error(message);
+    }
+};
+
+export const bulkImportRegistrations = async (adminToken: string, csvData: string, eventId: string = 'main-event'): Promise<{ successCount: number, errorCount: number, errors: string[] }> => {
+    await delay(2000);
+    const payload = verifyToken(adminToken);
+    if (!payload || payload.type !== 'admin') throw new Error("Permission denied.");
+
+    const event = store.events[eventId];
+    if (!event) throw new Error("Event not found");
+
+    const lines = csvData.trim().split('\n');
+    const header = lines.shift()?.trim().split(',');
+
+    if (!header || header[0]?.toLowerCase() !== 'name' || header[1]?.toLowerCase() !== 'email') {
+        throw new Error('Invalid CSV format. Header must be "name,email".');
+    }
+
+    let successCount = 0;
+    let errorCount = 0;
+    const errors: string[] = [];
+    const passwordHash = await hashPassword('password123'); // Default password
+
+    for (const line of lines) {
+        const [name, email] = line.trim().split(',');
+        if (name && email && !event.registrations.some(r => r.email === email)) {
+            event.registrations.push({ id: `reg_${Date.now()}_${successCount}`, name, email, passwordHash, createdAt: Date.now() });
+            successCount++;
+        } else {
+            errorCount++;
+            errors.push(`Skipped line (duplicate or invalid): ${line}`);
+        }
+    }
+
+    return { successCount, errorCount, errors };
+};
+
+export const saveAdminUser = async (adminToken: string, data: Partial<AdminUser> & { password?: string }): Promise<void> => {
+    await delay(500);
+    console.log("Saving user", data);
+};
+
+export const deleteAdminUser = async (adminToken: string, userId: string): Promise<void> => {
+    await delay(500);
+    console.log("Deleting user", userId);
+};
+
+export const saveRole = async (adminToken: string, data: Partial<Role>): Promise<void> => {
+    await delay(500);
+    console.log("Saving role", data);
+};
+
+export const deleteRole = async (adminToken: string, roleId: string): Promise<void> => {
+    await delay(500);
+    console.log("Deleting role", roleId);
+};
+
+export const getEventCoinStats = async (adminToken: string): Promise<EventCoinStats> => {
+    await delay(500);
+    return {
+        totalCirculation: 150000,
+        totalTransactions: 450,
+        activeWallets: 150,
+    };
+};
+export const getAllTransactions = async (adminToken: string): Promise<Transaction[]> => {
+    await delay(500);
+    return [];
+};
+
+export const generateAiContent = async (adminToken: string, type: 'hotel' | 'room' | 'menu' | 'meal_plan', context: Record<string, string>): Promise<string> => {
+    await delay(2000);
+    const payload = verifyToken(adminToken);
+    if (!payload || payload.type !== 'admin') throw new Error("Permission denied.");
+
+    return await geminiService.generateHotelContent(type, context);
+}
+
+// Placeholder functions for dining/accommodation management
+export const getHotels = async (adminToken: string): Promise<Hotel[]> => { await delay(300); return store.hotels; };
+export const saveHotel = async (adminToken: string, hotel: Partial<Hotel>): Promise<Hotel> => {
+    await delay(500);
+    if (hotel.id) {
+        const index = store.hotels.findIndex(h => h.id === hotel.id);
+        if (index > -1) {
+            store.hotels[index] = { ...store.hotels[index], ...hotel };
+            return store.hotels[index];
+        }
+    }
+    const newHotel: Hotel = { id: `hotel_${Date.now()}`, ...hotel } as Hotel;
+    store.hotels.push(newHotel);
+    return newHotel;
+};
+export const deleteHotel = async (adminToken: string, id: string): Promise<void> => { store.hotels = store.hotels.filter(h => h.id !== id); };
+
+export const getMealPlans = async (adminToken: string): Promise<MealPlan[]> => { await delay(300); return store.mealPlans; };
+export const saveMealPlan = async (adminToken: string, plan: Partial<MealPlan>): Promise<MealPlan> => {
+    await delay(500);
+     if (plan.id) {
+        const index = store.mealPlans.findIndex(p => p.id === plan.id);
+        if (index > -1) {
+            store.mealPlans[index] = { ...store.mealPlans[index], ...plan };
+            return store.mealPlans[index];
+        }
+    }
+    const newPlan: MealPlan = { id: `plan_${Date.now()}`, ...plan } as MealPlan;
+    store.mealPlans.push(newPlan);
+    return newPlan;
+};
+export const deleteMealPlan = async (adminToken: string, id: string): Promise<void> => { store.mealPlans = store.mealPlans.filter(p => p.id !== id);};
+
+export const getRestaurants = async (adminToken: string): Promise<Restaurant[]> => { await delay(300); return store.restaurants; };
+export const saveRestaurant = async (adminToken: string, restaurant: Partial<Restaurant>): Promise<Restaurant> => {
+    await delay(500);
+    if (restaurant.id) {
+        const index = store.restaurants.findIndex(r => r.id === restaurant.id);
+        if (index > -1) {
+            store.restaurants[index] = { ...store.restaurants[index], ...restaurant };
+            return store.restaurants[index];
+        }
+    }
+    const newRest: Restaurant = { id: `rest_${Date.now()}`, ...restaurant } as Restaurant;
+    store.restaurants.push(newRest);
+    return newRest;
+};
+export const deleteRestaurant = async (adminToken: string, id: string): Promise<void> => { store.restaurants = store.restaurants.filter(r => r.id !== id); };
+
+export const getReservationsForRestaurant = async (adminToken: string, restaurantId: string) => { await delay(500); return store.diningReservations.filter(r => r.restaurantId === restaurantId); };

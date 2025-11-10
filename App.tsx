@@ -1,3 +1,4 @@
+
 import React, { useState, useEffect } from 'react';
 import { type RegistrationData, type Permission } from './types';
 // Fix: Changed import for verifyToken to import from auth service directly.
@@ -25,6 +26,16 @@ interface AppContentProps {
   onAdminLogin: (token: string, user: { id: string, email: string, permissions: Permission[] }) => void;
 }
 
+// For frontend form state management
+export interface RegistrationFormState {
+  firstName: string;
+  lastName: string;
+  email: string;
+  password?: string;
+  [key: string]: any; // For custom form fields
+}
+
+
 const AppContent: React.FC<AppContentProps> = ({ onAdminLogin }) => {
   const { config, registrationCount, isLoading: isThemeLoading, error: themeError } = useTheme();
 
@@ -40,8 +51,8 @@ const AppContent: React.FC<AppContentProps> = ({ onAdminLogin }) => {
   const [isDelegateModalOpen, setDelegateModalOpen] = useState(false);
   const [delegateToken, setDelegateToken] = useState<string | null>(localStorage.getItem('delegateToken'));
 
-  const initialFormData = { name: '', email: '', password: '' };
-  const [formData, setFormData] = useState<RegistrationData>(initialFormData as RegistrationData);
+  const initialFormData: RegistrationFormState = { firstName: '', lastName: '', email: '', password: '' };
+  const [formData, setFormData] = useState<RegistrationFormState>(initialFormData);
 
   useEffect(() => {
     const urlParams = new URLSearchParams(window.location.search);
@@ -71,7 +82,7 @@ const AppContent: React.FC<AppContentProps> = ({ onAdminLogin }) => {
   };
 
   const handleReset = () => {
-    setFormData(initialFormData as RegistrationData);
+    setFormData(initialFormData);
     setError('');
   };
 
@@ -82,10 +93,22 @@ const AppContent: React.FC<AppContentProps> = ({ onAdminLogin }) => {
     }
     setError('');
     
+    // Combine firstName and lastName into a single `name` field for the backend.
+    const submissionData: RegistrationData = {
+      ...formData,
+      name: `${formData.firstName} ${formData.lastName}`.trim(),
+      createdAt: 0, // Will be set by server
+    };
+    // Clean up frontend-only fields before sending
+    delete (submissionData as any).firstName;
+    delete (submissionData as any).lastName;
+
     try {
-      const result = await registerUser(formData, inviteToken || undefined);
+      // FIX: Pass eventId for multi-event support.
+      const result = await registerUser('main-event', submissionData, inviteToken || undefined);
       if (result.success) {
-        await triggerRegistrationEmails(formData);
+        // FIX: Pass eventId for multi-event support.
+        await triggerRegistrationEmails('main-event', submissionData);
         setView('success');
       } else {
         setError(result.message);
@@ -97,7 +120,8 @@ const AppContent: React.FC<AppContentProps> = ({ onAdminLogin }) => {
   
   const handleDelegateLogin = async (email: string, password_input: string): Promise<boolean> => {
     try {
-      const result = await loginDelegate(email, password_input);
+      // FIX: Pass eventId for multi-event support.
+      const result = await loginDelegate('main-event', email, password_input);
       if (result) {
         localStorage.setItem('delegateToken', result.token);
         setDelegateToken(result.token);
@@ -220,16 +244,18 @@ const AppContent: React.FC<AppContentProps> = ({ onAdminLogin }) => {
             </div>
           )}
           
-           <footer className="mt-12 text-center text-sm text-gray-500 dark:text-gray-400 space-x-4">
-              <button onClick={() => setDelegateModalOpen(true)} className="hover:text-primary transition">Delegate Portal</button>
-              <span>&bull;</span>
-              <button onClick={() => setAdminModalOpen(true)} className="hover:text-primary transition">Admin Login</button>
-              {config?.theme.websiteUrl && (
-                  <>
-                    <span>&bull;</span>
-                    <a href={config.theme.websiteUrl} target="_blank" rel="noopener noreferrer" className="hover:text-primary transition">Event Website</a>
-                  </>
-              )}
+           <footer className="mt-12 text-center text-sm text-gray-500 dark:text-gray-400">
+              <div className="flex items-center justify-center flex-wrap gap-x-4 gap-y-2">
+                <button onClick={() => setDelegateModalOpen(true)} className="hover:text-primary transition">Delegate Portal</button>
+                <span className="hidden sm:inline">&bull;</span>
+                <button onClick={() => setAdminModalOpen(true)} className="hover:text-primary transition">Admin Login</button>
+                {config?.theme.websiteUrl && (
+                    <>
+                      <span className="hidden sm:inline">&bull;</span>
+                      <a href={config.theme.websiteUrl} target="_blank" rel="noopener noreferrer" className="hover:text-primary transition">Event Website</a>
+                    </>
+                )}
+              </div>
             </footer>
         </main>
       </div>

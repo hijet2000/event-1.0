@@ -203,3 +203,37 @@ export const generateDelegateInvitationEmail = async (
     throw new Error("Failed to generate delegate invitation email.");
   }
 };
+
+export const generateHotelContent = async (
+    type: 'hotel' | 'room' | 'menu' | 'meal_plan',
+    context: Record<string, string>
+): Promise<string> => {
+    let prompt = '';
+    switch(type) {
+        case 'hotel':
+            prompt = `Generate a compelling, professional-sounding description for a hotel named "${context.name}". The hotel is located at "${context.address}". The description should be about 2-3 sentences long and highlight its suitability for event attendees.`;
+            break;
+        case 'room':
+             prompt = `Generate a brief, appealing description for a "${context.name}" room type at a hotel. Mention some of its key features based on its name. Keep it to one sentence.`;
+            break;
+        case 'meal_plan':
+            prompt = `Generate a brief, one-sentence description for a meal plan called "${context.name}" at an event.`;
+            break;
+        case 'menu':
+            prompt = `Generate a sample dinner menu for a restaurant named "${context.name}" that serves ${context.cuisine} cuisine. Include 3 appetizers, 4 main courses, and 2 desserts. Format the output as plain text with clear headings (e.g., "Appetizers", "Main Courses", "Desserts"). Do not include prices.`;
+            break;
+        default:
+            throw new Error("Invalid content type for generation.");
+    }
+
+    try {
+        const response = await ai.models.generateContent({
+            model: 'gemini-2.5-flash',
+            contents: prompt,
+        });
+        return response.text;
+    } catch(e) {
+        console.error("Error generating content with Gemini:", e);
+        throw new Error("Failed to generate content.");
+    }
+};

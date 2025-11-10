@@ -1,22 +1,21 @@
-// types.ts
 
 export type Permission = 
-  | 'view_dashboard'
-  | 'manage_settings'
-  | 'manage_registrations'
-  | 'manage_users_roles'
-  | 'view_eventcoin_dashboard'
-  | 'manage_event_id_design'
-  | 'manage_tasks';
+  'view_dashboard' | 
+  'manage_registrations' | 
+  'manage_settings' | 
+  'manage_users' |
+  'manage_tasks' |
+  'manage_dining' |
+  'manage_accommodation';
 
 export const ALL_PERMISSIONS: Record<Permission, string> = {
-  view_dashboard: 'Can view the main admin dashboard.',
-  manage_settings: 'Can change event settings, theme, and form fields.',
-  manage_registrations: 'Can view, edit, and bulk import registrations.',
-  manage_users_roles: 'Can create, edit, and delete admin users and roles.',
-  view_eventcoin_dashboard: 'Can view the EventCoin dashboard.',
-  manage_event_id_design: 'Can customize the event ID badge.',
-  manage_tasks: 'Can create, update, and manage event tasks.',
+  view_dashboard: 'Can view the main dashboard and event statistics.',
+  manage_registrations: 'Can view, edit, and manage attendee registrations.',
+  manage_settings: 'Can change event settings, theme, and registration form.',
+  manage_users: 'Can create, edit, and delete admin users and roles.',
+  manage_tasks: 'Can manage the event task board.',
+  manage_dining: 'Can manage restaurants and meal plans.',
+  manage_accommodation: 'Can manage hotels and room types.'
 };
 
 export interface Role {
@@ -27,27 +26,20 @@ export interface Role {
 }
 
 export interface AdminUser {
-  id:string;
-  email: string;
-  password_hash: string;
-  roleId: string;
+    id: string;
+    email: string;
+    passwordHash: string;
+    roleId: string;
 }
 
 export interface FormField {
   id: string;
   label: string;
   type: 'text' | 'textarea' | 'dropdown';
-  placeholder: string;
+  placeholder?: string;
   required: boolean;
   enabled: boolean;
   options?: string[];
-}
-
-export interface BadgeConfig {
-  showName: boolean;
-  showEmail: boolean;
-  showCompany: boolean;
-  showRole: boolean;
 }
 
 export interface EventConfig {
@@ -74,23 +66,28 @@ export interface EventConfig {
   };
   formFields: FormField[];
   emailTemplates: {
-    userConfirmation: EmailContent;
-    hostNotification: EmailContent;
-    passwordReset: EmailContent;
-    delegateInvitation: EmailContent;
+    userConfirmation: { subject: string; body: string };
+    hostNotification: { subject: string; body: string };
+    passwordReset: { subject: string; body: string };
+    delegateInvitation: { subject: string; body: string };
   };
   emailProvider: 'smtp' | 'google';
   smtp: {
-      host: string;
-      port: number;
-      username: string;
-      password: string;
-      encryption: 'none' | 'ssl' | 'tls';
+    host: string;
+    port: number;
+    username: string;
+    password?: string;
+    encryption: 'none' | 'ssl' | 'tls';
   };
   googleConfig: {
       serviceAccountKeyJson: string;
   };
-  badgeConfig: BadgeConfig;
+  badgeConfig: {
+    showName: boolean;
+    showEmail: boolean;
+    showCompany: boolean;
+    showRole: boolean;
+  };
   eventCoin: {
     enabled: boolean;
     name: string;
@@ -107,16 +104,16 @@ export interface EventConfig {
   };
 }
 
+// Base registration data, used for both form state and backend
 export interface RegistrationData {
-  id: string;
+  id?: string;
   name: string;
   email: string;
   password?: string;
-  password_hash?: string;
+  passwordHash?: string;
   createdAt: number;
-  updatedAt: number;
-  emailVerified: boolean;
-  [key: string]: any; // For dynamic fields
+  verified?: boolean;
+  [key: string]: any; // For custom form fields
 }
 
 export interface EmailContent {
@@ -128,59 +125,15 @@ export interface EmailPayload extends EmailContent {
   to: string;
 }
 
-export interface Transaction {
-  id: string;
-  fromEmail: string;
-  fromName: string;
-  toEmail: string;
-  toName: string;
-  amount: number;
-  message: string;
-  type: 'initial' | 'p2p' | 'purchase';
-  timestamp: number;
-}
-
-export interface Invitation {
-  id: string; // The invite token
-  inviterEmail: string;
-  inviterName: string;
-  inviteeEmail: string;
-  status: 'pending' | 'accepted';
-  createdAt: number;
-  eventId?: string;
-}
-
-export interface EventCoinStats {
-  totalCirculation: number;
-  totalTransactions: number;
-  activeWallets: number;
-}
-
 export interface DashboardStats {
   totalRegistrations: number;
   maxAttendees: number;
   eventDate: string;
-  recentRegistrations: RegistrationData[];
-  eventCoinCirculation: number;
   eventCoinName: string;
+  eventCoinCirculation: number;
+  recentRegistrations: RegistrationData[];
 }
 
-export type TaskStatus = 'todo' | 'in_progress' | 'completed';
-
-export interface Task {
-  id: string;
-  title: string;
-  description: string;
-  status: TaskStatus;
-  assigneeEmail?: string;
-  dueDate?: string; // YYYY-MM-DD
-  createdAt: number;
-  updatedAt: number;
-  eventId: string;
-}
-
-
-// Fix: Added missing PublicEvent and EventData types for multi-event functionality.
 export interface PublicEvent {
   id: string;
   name: string;
@@ -191,7 +144,112 @@ export interface PublicEvent {
 }
 
 export interface EventData {
+    id: string;
+    name: string;
+    config: EventConfig;
+}
+
+// Delegate Portal Types
+export interface DelegateProfile {
+  user: RegistrationData;
+  mealPlanAssignment: MealPlanAssignment | null;
+  restaurants: Restaurant[];
+  accommodationBooking: AccommodationBooking | null;
+  hotels: Hotel[];
+}
+
+// Dining Types
+export interface MealPlan {
   id: string;
   name: string;
-  eventType: string;
+  description: string;
+  dailyCost: number; // in EventCoin
+}
+
+export interface Restaurant {
+  id: string;
+  name: string;
+  cuisine: string;
+  operatingHours: string;
+  menu: string;
+}
+
+export interface MealPlanAssignment {
+  id: string;
+  delegateId: string;
+  mealPlanId: string;
+  startDate: string; // YYYY-MM-DD
+  endDate: string; // YYYY-MM-DD
+  totalCost: number;
+}
+
+export interface DiningReservation {
+    id: string;
+    restaurantId: string;
+    delegateId: string;
+    delegateName: string;
+    reservationTime: string; // ISO string
+    partySize: number;
+}
+
+// Accommodation Types
+export interface Hotel {
+  id: string;
+  name: string;
+  description: string;
+  address: string;
+  bookingUrl?: string;
+  roomTypes: RoomType[];
+}
+
+export interface RoomType {
+  id: string;
+  name: string;
+  description: string;
+  amenities: string[];
+  totalRooms: number;
+}
+
+export interface AccommodationBooking {
+  id: string;
+  delegateId: string;
+  hotelId: string;
+  roomTypeId: string;
+  checkInDate: string; // YYYY-MM-DD
+  checkOutDate: string; // YYYY-MM-DD
+  totalCost: number;
+}
+
+// EventCoin Types
+export interface EventCoinStats {
+  totalCirculation: number;
+  totalTransactions: number;
+  activeWallets: number;
+}
+
+export interface Transaction {
+  id: string;
+  fromId: string;
+  fromName: string;
+  fromEmail: string;
+  toId: string;
+  toName: string;
+  toEmail: string;
+  amount: number;
+  message: string;
+  type: 'initial' | 'p2p' | 'purchase';
+  timestamp: number;
+}
+
+// Task Management Types
+export type TaskStatus = 'todo' | 'in_progress' | 'completed';
+
+export interface Task {
+    id: string;
+    eventId: string;
+    title: string;
+    description: string;
+    status: TaskStatus;
+    assigneeEmail: string;
+    dueDate: string; // YYYY-MM-DD
 }

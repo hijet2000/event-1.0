@@ -1,5 +1,7 @@
+
 import React, { useState, useRef } from 'react';
-import { type RegistrationData, type EventConfig } from '../types';
+import { type EventConfig } from '../types';
+import { type RegistrationFormState } from '../App';
 import { TextInput } from './TextInput';
 import { Spinner } from './Spinner';
 import { DynamicFormField } from './DynamicFormField';
@@ -7,7 +9,7 @@ import { checkPasswordStrength, type PasswordStrengthResult } from '../utils/pas
 import { PasswordStrengthIndicator } from './PasswordStrengthIndicator';
 
 interface RegistrationFormProps {
-  formData: RegistrationData;
+  formData: RegistrationFormState;
   onFormChange: (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement>) => void;
   onSubmit: () => void;
   onReset: () => void;
@@ -49,8 +51,12 @@ export const RegistrationForm: React.FC<RegistrationFormProps> = ({
         newErrors[fieldId] = message;
     };
     
-    if (!formData.name.trim()) {
-      setError('name', 'Full Name is required.');
+    if (!formData.firstName.trim()) {
+      setError('firstName', 'First Name is required.');
+    }
+    
+    if (!formData.lastName.trim()) {
+      setError('lastName', 'Last Name is required.');
     }
 
     if (!formData.email.trim()) {
@@ -108,7 +114,8 @@ export const RegistrationForm: React.FC<RegistrationFormProps> = ({
     if (errorKeys.length === 0) return null;
 
     const allFields = [
-      { id: 'name', label: 'Full Name' },
+      { id: 'firstName', label: 'First Name' },
+      { id: 'lastName', label: 'Last Name' },
       { id: 'email', label: 'Email Address' },
       { id: 'password', label: 'Password' },
       { id: 'confirmPassword', label: 'Confirm Password' },
@@ -155,15 +162,25 @@ export const RegistrationForm: React.FC<RegistrationFormProps> = ({
         <div className="space-y-6">
           <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
             <TextInput
-              label="Full Name"
-              name="name"
-              value={formData.name}
+              label="First Name"
+              name="firstName"
+              value={formData.firstName}
               onChange={onFormChange}
-              placeholder="e.g. Jane Doe"
+              placeholder="e.g. Jane"
               required
-              error={errors.name}
+              error={errors.firstName}
             />
             <TextInput
+              label="Last Name"
+              name="lastName"
+              value={formData.lastName}
+              onChange={onFormChange}
+              placeholder="e.g. Doe"
+              required
+              error={errors.lastName}
+            />
+          </div>
+           <TextInput
               label="Email Address"
               name="email"
               type="email"
@@ -173,7 +190,6 @@ export const RegistrationForm: React.FC<RegistrationFormProps> = ({
               required
               error={errors.email}
             />
-          </div>
           <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
             <div>
               <TextInput
