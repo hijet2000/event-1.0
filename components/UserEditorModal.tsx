@@ -53,7 +53,7 @@ export const UserEditorModal: React.FC<UserEditorModalProps> = ({ isOpen, onClos
     };
     
     if (password) {
-      data.password_hash = password; // API expects plain password, will hash on server
+      data.password = password; // API expects plain password, will hash on server
     }
     
     const success = await onSave(data);

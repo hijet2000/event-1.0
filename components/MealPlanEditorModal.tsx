@@ -44,7 +44,7 @@ export const MealPlanEditorModal: React.FC<MealPlanEditorModalProps> = ({ isOpen
         }
         setIsGenerating(true);
         try {
-            const description = await generateAiContent(adminToken, 'meal_plan', { name: formData.name });
+            const description = await generateAiContent('meal_plan', { name: formData.name });
             setFormData(prev => ({ ...prev, description }));
         } catch (e) {
             alert("Failed to generate description.");

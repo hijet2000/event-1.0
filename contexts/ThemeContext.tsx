@@ -30,28 +30,33 @@ const applyTheme = (cfg: EventConfig) => {
     }
 };
 
-export const ThemeProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
+interface ThemeProviderProps {
+    children: React.ReactNode;
+    eventId?: string;
+}
+
+export const ThemeProvider: React.FC<ThemeProviderProps> = ({ children, eventId = 'main-event' }) => {
   const [config, setConfig] = useState<EventConfig | null>(null);
   const [registrationCount, setRegistrationCount] = useState(0);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
-    getPublicEventData()
+    getPublicEventData(eventId)
       .then(({ config: cfg, registrationCount: count }) => {
         setConfig(cfg);
         setRegistrationCount(count);
         applyTheme(cfg);
         setError(null);
       })
-      .catch(() => {
-        setError('Failed to load event configuration. There might be a connection issue.');
+      .catch((err) => {
+        setError(err.message || 'Failed to load event configuration. The event might not exist or there could be a connection issue.');
         setConfig(null);
       })
       .finally(() => {
         setIsLoading(false);
       });
-  }, []);
+  }, [eventId]);
 
   const updateConfig = useCallback((newConfig: EventConfig) => {
     setConfig(newConfig);

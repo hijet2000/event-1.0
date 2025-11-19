@@ -1,10 +1,10 @@
 
-
-import React, { useState, useEffect } from 'react';
+import React from 'react';
 import { type Permission, type DashboardStats } from '../types';
 import { getDashboardStats } from '../server/api';
 import { ContentLoader } from './ContentLoader';
 import { Alert } from './Alert';
+import { useLiveQuery } from '../hooks/useLiveQuery';
 
 interface AdminDashboardProps {
   user: { email: string; permissions: Permission[] };
@@ -49,26 +49,12 @@ const StatCard: React.FC<{ title: string; value: string | number; description?: 
 );
 
 export const AdminDashboard: React.FC<AdminDashboardProps> = ({ user, adminToken }) => {
-  const [stats, setStats] = useState<DashboardStats | null>(null);
-  const [isLoading, setIsLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
-
-  const fetchData = async () => {
-    try {
-      setIsLoading(true);
-      setError(null);
-      const data = await getDashboardStats(adminToken);
-      setStats(data);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to load dashboard data.');
-    } finally {
-      setIsLoading(false);
-    }
-  };
-  
-  useEffect(() => {
-    fetchData();
-  }, [adminToken]);
+  // Use Live Query to watch registrations and transactions tables
+  const { data: stats, isLoading, error } = useLiveQuery<DashboardStats>(
+      () => getDashboardStats(adminToken),
+      ['registrations', 'transactions', 'events'],
+      [adminToken]
+  );
 
   const calculateDaysLeft = (dateString: string) => {
     try {
@@ -83,9 +69,9 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ user, adminToken
         const diffTime = eventDate.getTime() - now.getTime();
         const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
         
-        if (diffDays < 0) return { text: "Event has passed", days: diffDays };
+        if (diffDays < 0) return { text: "Event Over", days: diffDays };
         if (diffDays === 0) return { text: "Today!", days: 0 };
-        return { text: `${diffDays} days left`, days: diffDays };
+        return { text: `${diffDays} days to go`, days: diffDays };
     } catch {
         return { text: dateString, days: null };
     }
@@ -93,6 +79,8 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ user, adminToken
   
   const countdown = stats ? calculateDaysLeft(stats.eventDate) : null;
   const capacityPercent = stats && stats.maxAttendees > 0 ? (stats.totalRegistrations / stats.maxAttendees) * 100 : 0;
+  
+  // Explicitly label the registration count vs max attendees
   const registrationsValue = stats?.maxAttendees > 0 
       ? `${stats.totalRegistrations.toLocaleString()} / ${stats.maxAttendees.toLocaleString()}` 
       : stats?.totalRegistrations.toLocaleString();
@@ -107,7 +95,13 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ user, adminToken
 
   return (
     <div>
-      <h2 className="text-2xl font-bold text-gray-900 dark:text-white">Dashboard</h2>
+      <div className="flex items-center justify-between">
+          <h2 className="text-2xl font-bold text-gray-900 dark:text-white">Dashboard</h2>
+          <span className="flex items-center text-xs text-green-600 bg-green-100 dark:bg-green-900/30 dark:text-green-400 px-2 py-1 rounded-full animate-pulse">
+              <span className="w-2 h-2 bg-green-500 rounded-full mr-2"></span>
+              Live Updates
+          </span>
+      </div>
       <p className="mt-2 text-gray-600 dark:text-gray-400">
         Welcome back, <span className="font-medium text-primary">{user.email}</span>! Here's a snapshot of your event.
       </p>
@@ -115,13 +109,13 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ user, adminToken
       {/* Stats Cards */}
       <div className="mt-8 grid grid-cols-1 gap-5 sm:grid-cols-2 lg:grid-cols-3">
         <StatCard 
-            title="Total Registrations" 
-            value={registrationsValue}
+            title={stats && stats.maxAttendees > 0 ? "Registered / Max Attendees" : "Total Registrations"} 
+            value={registrationsValue || 0}
             icon={<svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.653-.125-1.274-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.653.125-1.274.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0zm6 3a2 2 0 11-4 0 2 2 0 014 0zM7 10a2 2 0 11-4 0 2 2 0 014 0z" /></svg>}
             progress={capacityPercent}
         />
         <StatCard 
-            title="Event Countdown"
+            title="Event Date"
             value={countdown?.text || '...'}
             icon={<svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z" /></svg>}
         />
@@ -134,7 +128,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ user, adminToken
 
       {/* Recent Activity */}
       <div className="mt-8 bg-white dark:bg-gray-800 shadow-md rounded-lg">
-        <h3 className="text-lg font-semibold p-5 border-b border-gray-200 dark:border-gray-700">Recent Activity</h3>
+        <h3 className="text-lg font-semibold p-5 border-b border-gray-200 dark:border-gray-700">Recent Registrations</h3>
         {stats && stats.recentRegistrations.length > 0 ? (
           <ul className="divide-y divide-gray-200 dark:divide-gray-700">
             {stats.recentRegistrations.map(reg => (

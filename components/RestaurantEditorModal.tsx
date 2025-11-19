@@ -44,7 +44,7 @@ export const RestaurantEditorModal: React.FC<RestaurantEditorModalProps> = ({ is
         }
         setIsGenerating(true);
         try {
-            const menu = await generateAiContent(adminToken, 'menu', { name: formData.name, cuisine: formData.cuisine });
+            const menu = await generateAiContent('menu', { name: formData.name, cuisine: formData.cuisine });
             setFormData(prev => ({ ...prev, menu }));
         } catch(e) {
             alert("Failed to generate menu.");

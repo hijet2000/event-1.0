@@ -1,5 +1,4 @@
 
-
 import React, { useState, useEffect } from 'react';
 import { type EventConfig, type FormField } from '../types';
 import { getEventConfig, saveConfig, syncConfigFromGitHub } from '../server/api';
@@ -53,7 +52,9 @@ const TemplateEditor: React.FC<{
 
 
 export const SettingsForm: React.FC<SettingsFormProps> = ({ adminToken }) => {
-  const { updateConfig } = useTheme();
+  // Now safe to use because AdminPortal wraps this in ThemeProvider
+  const { config: contextConfig, updateConfig, isLoading: isContextLoading } = useTheme();
+  
   const [config, setConfig] = useState<EventConfig | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [isSaving, setIsSaving] = useState(false);
@@ -66,21 +67,21 @@ export const SettingsForm: React.FC<SettingsFormProps> = ({ adminToken }) => {
   const [editingField, setEditingField] = useState<FormField | null>(null);
   const [editingFieldIndex, setEditingFieldIndex] = useState<number | null>(null);
 
-
   useEffect(() => {
-    const loadConfig = async () => {
-      try {
-        setIsLoading(true);
-        const configData = await getEventConfig();
-        setConfig(configData);
-      } catch (err) {
-        setError('Failed to load event settings.');
-      } finally {
-        setIsLoading(false);
+      // If we have config from context, use it directly to avoid another fetch
+      if (contextConfig) {
+          setConfig(contextConfig);
+          setIsLoading(false);
+      } else if (isContextLoading) {
+          setIsLoading(true);
+      } else {
+          // Fallback fetch if context failed or empty for some reason
+           getEventConfig()
+            .then(setConfig)
+            .catch(err => setError('Failed to load event settings.'))
+            .finally(() => setIsLoading(false));
       }
-    };
-    loadConfig();
-  }, []);
+  }, [contextConfig, isContextLoading]);
   
   const handleInputChange = (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement>, section: 'event' | 'host' | 'theme' | 'smtp' | 'githubSync') => {
     if (!config) return;
@@ -141,6 +142,28 @@ export const SettingsForm: React.FC<SettingsFormProps> = ({ adminToken }) => {
         return newConfig;
     });
   };
+
+  const handleWhatsappChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    if (!config) return;
+    const { name, value } = e.target;
+    setConfig(prevConfig => {
+        if (!prevConfig) return null;
+        const newConfig = JSON.parse(JSON.stringify(prevConfig));
+        newConfig.whatsapp[name as keyof EventConfig['whatsapp']] = value;
+        return newConfig;
+    });
+  };
+
+  const handleSmsChange = (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>) => {
+    if (!config) return;
+    const { name, value } = e.target;
+    setConfig(prevConfig => {
+        if (!prevConfig) return null;
+        const newConfig = JSON.parse(JSON.stringify(prevConfig));
+        newConfig.sms[name as keyof EventConfig['sms']] = value;
+        return newConfig;
+    });
+  };
   
   const handleImageChange = (field: 'logoUrl' | 'pageImageUrl' | 'badgeImageUrl', dataUrl: string) => {
     if (!config) return;
@@ -160,6 +183,26 @@ export const SettingsForm: React.FC<SettingsFormProps> = ({ adminToken }) => {
         if (!prevConfig) return null;
         const newConfig = JSON.parse(JSON.stringify(prevConfig));
         newConfig.githubSync.enabled = enabled;
+        return newConfig;
+    });
+  };
+
+  const handleWhatsappToggle = (enabled: boolean) => {
+    if (!config) return;
+    setConfig(prevConfig => {
+        if (!prevConfig) return null;
+        const newConfig = JSON.parse(JSON.stringify(prevConfig));
+        newConfig.whatsapp.enabled = enabled;
+        return newConfig;
+    });
+  };
+
+  const handleSmsToggle = (enabled: boolean) => {
+    if (!config) return;
+    setConfig(prevConfig => {
+        if (!prevConfig) return null;
+        const newConfig = JSON.parse(JSON.stringify(prevConfig));
+        newConfig.sms.enabled = enabled;
         return newConfig;
     });
   };
@@ -185,9 +228,39 @@ export const SettingsForm: React.FC<SettingsFormProps> = ({ adminToken }) => {
     e.preventDefault();
     if (!config) return;
     
-    setIsSaving(true);
     setError(null);
     setSuccessMessage(null);
+
+    // Validation for Event Details
+    if (!config.event.name?.trim()) {
+        setError("Event Name is required.");
+        return;
+    }
+    if (!config.event.date?.trim()) {
+        setError("Event Date is required.");
+        return;
+    }
+    if (!config.event.location?.trim()) {
+        setError("Event Location is required.");
+        return;
+    }
+
+    // Validation for Communication Channels
+    if (config.whatsapp.enabled) {
+        if (!config.whatsapp.accessToken?.trim() || !config.whatsapp.phoneNumberId?.trim()) {
+            setError("WhatsApp is enabled but requires Access Token and Phone Number ID.");
+            return;
+        }
+    }
+    
+    if (config.sms.enabled) {
+         if (!config.sms.accountSid?.trim() || !config.sms.authToken?.trim() || !config.sms.fromNumber?.trim()) {
+             setError("SMS is enabled but requires Account SID, Auth Token and From Number.");
+             return;
+         }
+    }
+    
+    setIsSaving(true);
     try {
       const saved = await saveConfig(adminToken, config);
       setConfig(saved);
@@ -277,19 +350,57 @@ export const SettingsForm: React.FC<SettingsFormProps> = ({ adminToken }) => {
         {/* Event Details */}
         <div className="border-t border-gray-200 dark:border-gray-700 p-6 space-y-4">
             <h3 className="text-lg font-medium">Event Details</h3>
+            <div>
+                <label htmlFor="event.name" className="block text-sm font-medium">Event Name</label>
+                <input 
+                    type="text" 
+                    name="name" 
+                    id="event.name" 
+                    value={config.event.name} 
+                    onChange={(e) => handleInputChange(e, 'event')} 
+                    className="mt-1 block w-full rounded-md border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 shadow-sm" 
+                    required
+                />
+            </div>
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                <div className="md:col-span-2">
-                    <label htmlFor="event.name" className="block text-sm font-medium">Event Name</label>
-                    <input type="text" name="name" id="event.name" value={config.event.name} onChange={(e) => handleInputChange(e, 'event')} className="mt-1 block w-full rounded-md border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 shadow-sm" />
-                </div>
                 <div>
                     <label htmlFor="event.date" className="block text-sm font-medium">Date</label>
-                    <input type="text" name="date" id="event.date" value={config.event.date} onChange={(e) => handleInputChange(e, 'event')} className="mt-1 block w-full rounded-md border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 shadow-sm" />
+                    <input 
+                        type="text" 
+                        name="date" 
+                        id="event.date" 
+                        value={config.event.date} 
+                        onChange={(e) => handleInputChange(e, 'event')} 
+                        className="mt-1 block w-full rounded-md border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 shadow-sm" 
+                        required
+                    />
                 </div>
                  <div>
                     <label htmlFor="event.location" className="block text-sm font-medium">Location</label>
-                    <input type="text" name="location" id="event.location" value={config.event.location} onChange={(e) => handleInputChange(e, 'event')} className="mt-1 block w-full rounded-md border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 shadow-sm" />
+                    <input 
+                        type="text" 
+                        name="location" 
+                        id="event.location" 
+                        value={config.event.location} 
+                        onChange={(e) => handleInputChange(e, 'event')} 
+                        className="mt-1 block w-full rounded-md border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 shadow-sm" 
+                        required
+                    />
                 </div>
+            </div>
+             <div>
+                <label htmlFor="event.description" className="block text-sm font-medium">Event Description</label>
+                <textarea
+                    name="description"
+                    id="event.description"
+                    rows={4}
+                    value={config.event.description || ''}
+                    onChange={(e) => handleInputChange(e, 'event')}
+                    className="mt-1 block w-full rounded-md border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 shadow-sm"
+                    placeholder="Tell people what this event is about..."
+                />
+            </div>
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                 <div>
                     <label htmlFor="event.eventType" className="block text-sm font-medium">Event Type</label>
                     <select name="eventType" id="event.eventType" value={config.event.eventType} onChange={(e) => handleInputChange(e, 'event')} className="mt-1 block w-full rounded-md border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 shadow-sm">
@@ -301,6 +412,11 @@ export const SettingsForm: React.FC<SettingsFormProps> = ({ adminToken }) => {
                     <input type="number" name="maxAttendees" id="event.maxAttendees" value={config.event.maxAttendees} onChange={(e) => handleInputChange(e, 'event')} className="mt-1 block w-full rounded-md border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 shadow-sm" />
                     <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">Set to 0 for unlimited attendees.</p>
                 </div>
+            </div>
+            <div>
+                <label htmlFor="event.publicUrl" className="block text-sm font-medium">Public Event URL</label>
+                <input type="url" name="publicUrl" id="event.publicUrl" value={config.event.publicUrl} onChange={(e) => handleInputChange(e, 'event')} className="mt-1 block w-full rounded-md border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 shadow-sm" placeholder="https://register.yourdomain.com" />
+                <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">The base URL where delegates will access this event. Used for generating links in emails.</p>
             </div>
         </div>
 
@@ -379,6 +495,76 @@ export const SettingsForm: React.FC<SettingsFormProps> = ({ adminToken }) => {
                 </button>
             </div>
         </div>
+        
+        {/* Communication Channels */}
+        <div className="border-t border-gray-200 dark:border-gray-700 p-6 space-y-4">
+            <h3 className="text-lg font-medium">Communication Channels</h3>
+            
+            {/* WhatsApp Integration */}
+            <div className="bg-gray-50 dark:bg-gray-700/50 rounded-md p-4 border border-gray-200 dark:border-gray-600">
+                <div className="flex items-center justify-between mb-4">
+                    <div>
+                        <h4 className="text-md font-medium text-gray-900 dark:text-white">WhatsApp Integration</h4>
+                        <p className="text-sm text-gray-500 dark:text-gray-400">Enable automated messages via Meta WhatsApp API.</p>
+                    </div>
+                    <ToggleSwitch
+                        label={config.whatsapp.enabled ? 'Enabled' : 'Disabled'}
+                        name="enabled"
+                        enabled={config.whatsapp.enabled}
+                        onChange={handleWhatsappToggle}
+                    />
+                </div>
+                <fieldset disabled={!config.whatsapp.enabled} className="space-y-4 disabled:opacity-50">
+                    <div>
+                        <label htmlFor="whatsapp.accessToken" className="block text-sm font-medium">Access Token</label>
+                        <input type="password" name="accessToken" id="whatsapp.accessToken" value={config.whatsapp.accessToken} onChange={handleWhatsappChange} className="mt-1 block w-full rounded-md border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 shadow-sm" placeholder="Enter your Meta API Access Token" />
+                    </div>
+                    <div>
+                        <label htmlFor="whatsapp.phoneNumberId" className="block text-sm font-medium">Phone Number ID</label>
+                        <input type="text" name="phoneNumberId" id="whatsapp.phoneNumberId" value={config.whatsapp.phoneNumberId} onChange={handleWhatsappChange} className="mt-1 block w-full rounded-md border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 shadow-sm" placeholder="e.g., 10567..." />
+                    </div>
+                </fieldset>
+            </div>
+
+            {/* SMS Integration */}
+            <div className="bg-gray-50 dark:bg-gray-700/50 rounded-md p-4 border border-gray-200 dark:border-gray-600">
+                <div className="flex items-center justify-between mb-4">
+                    <div>
+                        <h4 className="text-md font-medium text-gray-900 dark:text-white">SMS Integration</h4>
+                        <p className="text-sm text-gray-500 dark:text-gray-400">Enable SMS notifications via Twilio.</p>
+                    </div>
+                    <ToggleSwitch
+                        label={config.sms.enabled ? 'Enabled' : 'Disabled'}
+                        name="enabled"
+                        enabled={config.sms.enabled}
+                        onChange={handleSmsToggle}
+                    />
+                </div>
+                <fieldset disabled={!config.sms.enabled} className="space-y-4 disabled:opacity-50">
+                    <div>
+                        <label htmlFor="sms.provider" className="block text-sm font-medium">Provider</label>
+                        <select name="provider" id="sms.provider" value={config.sms.provider} onChange={handleSmsChange} className="mt-1 block w-full rounded-md border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 shadow-sm">
+                            <option value="twilio">Twilio</option>
+                        </select>
+                    </div>
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                        <div>
+                            <label htmlFor="sms.accountSid" className="block text-sm font-medium">Account SID</label>
+                            <input type="text" name="accountSid" id="sms.accountSid" value={config.sms.accountSid} onChange={handleSmsChange} className="mt-1 block w-full rounded-md border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 shadow-sm" placeholder="AC..." />
+                        </div>
+                        <div>
+                            <label htmlFor="sms.authToken" className="block text-sm font-medium">Auth Token</label>
+                            <input type="password" name="authToken" id="sms.authToken" value={config.sms.authToken} onChange={handleSmsChange} className="mt-1 block w-full rounded-md border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 shadow-sm" placeholder="Auth Token" />
+                        </div>
+                    </div>
+                    <div>
+                        <label htmlFor="sms.fromNumber" className="block text-sm font-medium">From Number</label>
+                        <input type="text" name="fromNumber" id="sms.fromNumber" value={config.sms.fromNumber} onChange={handleSmsChange} className="mt-1 block w-full rounded-md border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 shadow-sm" placeholder="e.g., +1555..." />
+                    </div>
+                </fieldset>
+            </div>
+        </div>
+
 
         {/* Email Templates */}
         <div className="border-t border-gray-200 dark:border-gray-700 p-6 space-y-4">

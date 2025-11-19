@@ -26,7 +26,7 @@ export const RoomTypeEditorModal: React.FC<RoomTypeEditorModalProps> = ({ isOpen
 
     useEffect(() => {
         if (isOpen) {
-            setFormData(roomType ? { ...roomType } : { name: '', description: '', costPerNight: 100, totalRooms: 10 });
+            setFormData(roomType ? { ...roomType } : { name: '', description: '', totalRooms: 10, costPerNight: 100, capacity: 2 });
             setAmenitiesString(roomType?.amenities?.join(', ') || '');
         }
     }, [isOpen, roomType]);
@@ -45,7 +45,7 @@ export const RoomTypeEditorModal: React.FC<RoomTypeEditorModalProps> = ({ isOpen
         }
         setIsGenerating(true);
         try {
-            const description = await generateAiContent(adminToken, 'room', { name: formData.name });
+            const description = await generateAiContent('room', { name: formData.name });
             setFormData(prev => ({ ...prev, description }));
         } catch (e) {
             alert("Failed to generate description.");
@@ -65,7 +65,7 @@ export const RoomTypeEditorModal: React.FC<RoomTypeEditorModalProps> = ({ isOpen
     };
 
     return (
-        <div className="fixed inset-0 bg-black bg-opacity-60 z-40 flex items-center justify-center p-4" onClick={onClose}>
+        <div className="fixed inset-0 bg-black bg-opacity-60 z-50 flex items-center justify-center p-4" onClick={onClose}>
             <div className="bg-white dark:bg-gray-800 p-6 rounded-lg shadow-xl w-full max-w-md" onClick={e => e.stopPropagation()}>
                 <form onSubmit={handleSave}>
                     <h2 className="text-xl font-bold">{roomType ? 'Edit' : 'Add'} Room Type</h2>
@@ -79,7 +79,11 @@ export const RoomTypeEditorModal: React.FC<RoomTypeEditorModalProps> = ({ isOpen
                             </button>
                         </div>
                         <InputField label="Amenities (comma-separated)" id="amenities" name="amenities" type="text" value={amenitiesString} onChange={e => setAmenitiesString(e.target.value)} placeholder="e.g., WiFi, Ocean View, Minibar" />
-                        <InputField label="Total Available Rooms" id="totalRooms" name="totalRooms" type="number" value={formData.totalRooms || 0} onChange={handleChange} required />
+                        <div className="grid grid-cols-2 gap-4">
+                           <InputField label="Guest Capacity" id="capacity" name="capacity" type="number" min="1" value={formData.capacity || 0} onChange={handleChange} required />
+                           <InputField label="Total Rooms" id="totalRooms" name="totalRooms" type="number" min="0" value={formData.totalRooms || 0} onChange={handleChange} required />
+                        </div>
+                        <InputField label="Cost Per Night (in EventCoin)" id="costPerNight" name="costPerNight" type="number" value={formData.costPerNight || 0} onChange={handleChange} required />
                     </div>
                     <div className="mt-6 flex justify-end gap-3">
                         <button type="button" onClick={onClose} className="py-2 px-4 border border-gray-300 dark:border-gray-600 rounded-md shadow-sm text-sm">Cancel</button>

@@ -3,6 +3,7 @@ import { type Transaction, type EventCoinStats } from '../types';
 import { getEventCoinStats, getAllTransactions, getEventConfig } from '../server/api';
 import { ContentLoader } from './ContentLoader';
 import { Alert } from './Alert';
+import { useLiveQuery } from '../hooks/useLiveQuery';
 
 interface EventCoinDashboardProps {
   adminToken: string;
@@ -30,37 +31,28 @@ const TransactionTypeBadge: React.FC<{ type: Transaction['type'] }> = ({ type })
 };
 
 export const EventCoinDashboard: React.FC<EventCoinDashboardProps> = ({ adminToken }) => {
-    const [stats, setStats] = useState<EventCoinStats | null>(null);
-    const [transactions, setTransactions] = useState<Transaction[]>([]);
     const [currencyName, setCurrencyName] = useState('EventCoin');
-    const [isLoading, setIsLoading] = useState(true);
-    const [error, setError] = useState<string | null>(null);
     const [filter, setFilter] = useState('');
 
-    const fetchData = async () => {
-        try {
-            setIsLoading(true);
-            setError(null);
-            const [statsData, transactionsData, configData] = await Promise.all([
-                getEventCoinStats(adminToken),
-                getAllTransactions(adminToken),
-                getEventConfig(),
-            ]);
-            setStats(statsData);
-            setTransactions(transactionsData);
-            setCurrencyName(configData.eventCoin.name);
-        } catch (err) {
-            setError(err instanceof Error ? err.message : 'Failed to load EventCoin data.');
-        } finally {
-            setIsLoading(false);
-        }
-    };
+    // Live Queries
+    const { data: stats, isLoading: statsLoading, error: statsError } = useLiveQuery(
+        () => getEventCoinStats(adminToken),
+        ['transactions'],
+        [adminToken]
+    );
+
+    const { data: transactions, isLoading: txLoading, error: txError } = useLiveQuery(
+        () => getAllTransactions(adminToken),
+        ['transactions'],
+        [adminToken]
+    );
 
     useEffect(() => {
-        fetchData();
-    }, [adminToken]);
+        getEventConfig().then(cfg => setCurrencyName(cfg.eventCoin.name));
+    }, []);
 
     const filteredTransactions = useMemo(() => {
+        if (!transactions) return [];
         if (!filter) return transactions;
         const lowerFilter = filter.toLowerCase();
         return transactions.filter(tx =>
@@ -72,24 +64,30 @@ export const EventCoinDashboard: React.FC<EventCoinDashboardProps> = ({ adminTok
         );
     }, [transactions, filter]);
 
-    if (isLoading) {
+    const isLoading = statsLoading || txLoading;
+    const error = statsError || txError;
+
+    if (isLoading && !stats && !transactions) {
         return <ContentLoader text="Loading EventCoin data..." />;
     }
 
-    if (error) {
+    if (error && !stats) {
         return (
              <div className="bg-white dark:bg-gray-800 rounded-lg shadow-md p-8 text-center">
               <Alert type="error" message={error} />
-              <button onClick={fetchData} className="mt-6 py-2 px-5 border border-transparent rounded-md shadow-sm text-sm font-medium text-white bg-primary hover:bg-primary/90">
-                Try Again
-              </button>
             </div>
         );
     }
     
     return (
         <div>
-            <h2 className="text-2xl font-bold text-gray-900 dark:text-white">EventCoin Dashboard</h2>
+             <div className="flex items-center justify-between">
+                <h2 className="text-2xl font-bold text-gray-900 dark:text-white">EventCoin Dashboard</h2>
+                <span className="flex items-center text-xs text-green-600 bg-green-100 dark:bg-green-900/30 dark:text-green-400 px-2 py-1 rounded-full animate-pulse">
+                    <span className="w-2 h-2 bg-green-500 rounded-full mr-2"></span>
+                    Live Updates
+                </span>
+            </div>
 
             {/* Stats Cards */}
             <div className="mt-6 grid grid-cols-1 gap-6 sm:grid-cols-2 lg:grid-cols-3">
@@ -148,7 +146,7 @@ export const EventCoinDashboard: React.FC<EventCoinDashboardProps> = ({ adminTok
                             )) : (
                                 <tr>
                                     <td colSpan={5} className="text-center py-12 text-gray-500 dark:text-gray-400">
-                                        {transactions.length === 0 ? 'No transactions have been recorded yet.' : 'No transactions match your filter.'}
+                                        {transactions && transactions.length === 0 ? 'No transactions have been recorded yet.' : 'No transactions match your filter.'}
                                     </td>
                                 </tr>
                             )}

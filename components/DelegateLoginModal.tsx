@@ -6,10 +6,11 @@ interface DelegateLoginModalProps {
   isOpen: boolean;
   onClose: () => void;
   onLogin: (email: string, password_input: string) => Promise<boolean>;
+  eventId: string;
 }
 
-export const DelegateLoginModal: React.FC<DelegateLoginModalProps> = ({ isOpen, onClose, onLogin }) => {
-  const [email, setEmail] = useState('');
+export const DelegateLoginModal: React.FC<DelegateLoginModalProps> = ({ isOpen, onClose, onLogin, eventId }) => {
+  const [userEmail, setUserEmail] = useState('');
   const [password, setPassword] = useState('');
   const [error, setError] = useState('');
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -24,7 +25,7 @@ export const DelegateLoginModal: React.FC<DelegateLoginModalProps> = ({ isOpen, 
     setError('');
     setIsSubmitting(true);
     try {
-        const success = await onLogin(email, password);
+        const success = await onLogin(userEmail, password);
         if (!success) {
             setError('Invalid email or password.');
         }
@@ -41,7 +42,7 @@ export const DelegateLoginModal: React.FC<DelegateLoginModalProps> = ({ isOpen, 
     setError('');
     setIsSubmitting(true);
     try {
-        await requestDelegatePasswordReset(email);
+        await requestDelegatePasswordReset(eventId, userEmail);
         setView('forgot_sent');
     } catch (err) {
         setError('An error occurred. Please try again.');
@@ -51,7 +52,7 @@ export const DelegateLoginModal: React.FC<DelegateLoginModalProps> = ({ isOpen, 
   };
 
   const handleClose = () => {
-      setEmail('');
+      setUserEmail('');
       setPassword('');
       setError('');
       setView('login');
@@ -66,7 +67,7 @@ export const DelegateLoginModal: React.FC<DelegateLoginModalProps> = ({ isOpen, 
             Check Your Email
           </h2>
           <p className="mt-4 text-sm text-gray-500 dark:text-gray-400">
-            If an account with the email <strong className="text-gray-800 dark:text-gray-200">{email}</strong> exists, you will receive password reset instructions.
+            If an account with the email <strong className="text-gray-800 dark:text-gray-200">{userEmail}</strong> exists, you will receive password reset instructions.
           </p>
           <button
             type="button"
@@ -99,8 +100,8 @@ export const DelegateLoginModal: React.FC<DelegateLoginModalProps> = ({ isOpen, 
                 type="email"
                 autoComplete="email"
                 required
-                value={email}
-                onChange={(e) => setEmail(e.target.value)}
+                value={userEmail}
+                onChange={(e) => setUserEmail(e.target.value)}
                 className="appearance-none relative block w-full px-3 py-2 border border-gray-300 dark:border-gray-600 placeholder-gray-500 text-gray-900 dark:text-white bg-white dark:bg-gray-700 rounded-md focus:outline-none focus:ring-primary focus:border-primary sm:text-sm"
                 placeholder="Email"
               />
@@ -134,7 +135,7 @@ export const DelegateLoginModal: React.FC<DelegateLoginModalProps> = ({ isOpen, 
             Delegate Portal
           </h2>
           <p className="mt-1 text-sm text-gray-500 dark:text-gray-400">
-            Access your event details and wallet.
+            Access your event details.
           </p>
         </div>
         
@@ -144,7 +145,7 @@ export const DelegateLoginModal: React.FC<DelegateLoginModalProps> = ({ isOpen, 
               <label htmlFor="email" className="sr-only">Email</label>
               <input
                 id="email" name="email" type="email" autoComplete="email" required
-                value={email} onChange={(e) => setEmail(e.target.value)}
+                value={userEmail} onChange={(e) => setUserEmail(e.target.value)}
                 className="appearance-none rounded-none relative block w-full px-3 py-2 border border-gray-300 dark:border-gray-600 placeholder-gray-500 text-gray-900 dark:text-white bg-white dark:bg-gray-700 rounded-t-md focus:outline-none focus:ring-primary focus:border-primary focus:z-10 sm:text-sm"
                 placeholder="Email Address" disabled={isSubmitting}
               />

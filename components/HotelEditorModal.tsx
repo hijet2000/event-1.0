@@ -3,7 +3,6 @@ import { type Hotel, type RoomType } from '../types';
 import { Spinner } from './Spinner';
 import { RoomTypeEditorModal } from './RoomTypeEditorModal';
 import { generateAiContent } from '../server/api';
-import { v4 as uuidv4 } from 'https://jspm.dev/uuid';
 
 interface HotelEditorModalProps {
     isOpen: boolean;
@@ -55,7 +54,7 @@ export const HotelEditorModal: React.FC<HotelEditorModalProps> = ({ isOpen, onCl
         }
         setIsGenerating(true);
         try {
-            const description = await generateAiContent(adminToken, 'hotel', { name: formData.name, address: formData.address });
+            const description = await generateAiContent('hotel', { name: formData.name, address: formData.address });
             setFormData(prev => ({ ...prev, description }));
         } catch (e) {
             alert("Failed to generate description.");
@@ -85,7 +84,7 @@ export const HotelEditorModal: React.FC<HotelEditorModalProps> = ({ isOpen, onCl
         if (index > -1) {
             roomTypes[index] = room;
         } else {
-            roomTypes.push({ ...room, id: room.id || `room_${uuidv4()}` });
+            roomTypes.push({ ...room, id: room.id || `room_${Date.now().toString(36)}_${Math.random().toString(36).substring(2)}` });
         }
         setFormData(prev => ({ ...prev, roomTypes }));
     };
@@ -123,7 +122,7 @@ export const HotelEditorModal: React.FC<HotelEditorModalProps> = ({ isOpen, onCl
                              <div className="space-y-2">
                                 {(formData.roomTypes || []).map(room => (
                                     <div key={room.id} className="p-2 flex justify-between items-center bg-gray-50 dark:bg-gray-700/50 rounded-md">
-                                        <p>{room.name} ({room.totalRooms} rooms)</p>
+                                        <p>{room.name} (Capacity: {room.capacity}, {room.totalRooms} rooms)</p>
                                         <div className="space-x-2">
                                             <button type="button" onClick={() => openRoomModal(room)} className="text-xs font-medium text-primary hover:underline">Edit</button>
                                             <button type="button" onClick={() => handleDeleteRoom(room.id)} className="text-xs font-medium text-red-500 hover:underline">Delete</button>

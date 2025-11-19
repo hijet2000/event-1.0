@@ -3,7 +3,6 @@ import { type FormField } from '../types';
 import { Spinner } from './Spinner';
 import { ToggleSwitch } from './ToggleSwitch';
 import { Alert } from './Alert';
-import { v4 as uuidv4 } from 'https://jspm.dev/uuid';
 
 interface FormFieldEditorModalProps {
   isOpen: boolean;
@@ -30,7 +29,7 @@ export const FormFieldEditorModal: React.FC<FormFieldEditorModalProps> = ({ isOp
   useEffect(() => {
     if (isOpen) {
       setFormData(field ? { ...field } : {
-        id: `custom_${uuidv4()}`,
+        id: `custom_${Date.now().toString(36)}_${Math.random().toString(36).substring(2)}`,
         label: '',
         type: 'text',
         placeholder: '',

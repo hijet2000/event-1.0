@@ -6,6 +6,7 @@ interface TextInputProps {
   name: string;
   value: string;
   onChange: (e: React.ChangeEvent<HTMLInputElement>) => void;
+  onBlur?: (e: React.FocusEvent<HTMLInputElement>) => void;
   type?: string;
   placeholder?: string;
   required?: boolean;
@@ -17,6 +18,7 @@ export const TextInput: React.FC<TextInputProps> = ({
   name,
   value,
   onChange,
+  onBlur,
   type = 'text',
   placeholder,
   required = false,
@@ -37,6 +39,7 @@ export const TextInput: React.FC<TextInputProps> = ({
         name={name}
         value={value}
         onChange={onChange}
+        onBlur={onBlur}
         placeholder={placeholder}
         required={required}
         aria-required={required}
@@ -45,7 +48,7 @@ export const TextInput: React.FC<TextInputProps> = ({
         aria-describedby={error ? `${name}-error` : undefined}
       />
       {error && (
-        <p id={`${name}-error`} className="mt-2 text-sm text-red-600 dark:text-red-400">
+        <p id={`${name}-error`} className="mt-2 text-sm text-red-600 dark:text-red-400 animate-fade-in-down">
           {error}
         </p>
       )}

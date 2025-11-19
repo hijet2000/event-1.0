@@ -15,15 +15,23 @@
     
     <!-- Import Map for JS Modules -->
     <script type="importmap">
-    {
-      "imports": {
-        "react": "https://aistudiocdn.com/react@^19.2.0",
-        "react-dom/": "https://aistudiocdn.com/react-dom@^19.2.0/",
-        "react/": "https://aistudiocdn.com/react@^19.2.0/",
-        "@google/genai": "https://aistudiocdn.com/@google/genai@^1.27.0"
-      }
-    }
-    </script>
+{
+  "imports": {
+    "react": "https://aistudiocdn.com/react@^19.2.0",
+    "react-dom/": "https://aistudiocdn.com/react-dom@^19.2.0/",
+    "react/": "https://aistudiocdn.com/react@^19.2.0/",
+    "@google/genai": "https://aistudiocdn.com/@google/genai@^1.27.0",
+    "cors": "https://aistudiocdn.com/cors@^2.8.5",
+    "dotenv": "https://aistudiocdn.com/dotenv@^17.2.3",
+    "bcrypt": "https://aistudiocdn.com/bcrypt@^6.0.0",
+    "express": "https://aistudiocdn.com/express@^5.1.0",
+    "jsonwebtoken": "https://aistudiocdn.com/jsonwebtoken@^9.0.2",
+    "pg": "https://aistudiocdn.com/pg@^8.16.3",
+    "jspdf": "https://aistudiocdn.com/jspdf@^2.5.1",
+    "cookie-parser": "https://aistudiocdn.com/cookie-parser@^1.4.7"
+  }
+}
+</script>
     
     <style>
       :root {
@@ -39,6 +47,19 @@
       body {
         font-family: var(--font-family);
         background-color: var(--color-background-color);
+      }
+      @keyframes fadeInDown {
+        from {
+          opacity: 0;
+          transform: translateY(-5px);
+        }
+        to {
+          opacity: 1;
+          transform: translateY(0);
+        }
+      }
+      .animate-fade-in-down {
+        animation: fadeInDown 0.3s ease-out;
       }
     </style>
 </head>

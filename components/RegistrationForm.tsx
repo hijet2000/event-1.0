@@ -1,4 +1,6 @@
 
+
+
 import React, { useState, useRef } from 'react';
 import { type EventConfig } from '../types';
 import { type RegistrationFormState } from '../App';
@@ -40,50 +42,64 @@ export const RegistrationForm: React.FC<RegistrationFormProps> = ({
     onFormChange(e); // Propagate the change up to the parent
   };
 
+  const validateField = (name: string, value: string | undefined, currentData: RegistrationFormState, currentConfirmPassword: string) => {
+    switch (name) {
+      case 'firstName':
+        return !value?.trim() ? 'First Name is required.' : '';
+      case 'lastName':
+        return !value?.trim() ? 'Last Name is required.' : '';
+      case 'email':
+        if (!value?.trim()) return 'Email Address is required.';
+        if (!/\S+@\S+\.\S+/.test(value)) return 'Please enter a valid email address.';
+        return '';
+      case 'password':
+        if (!value) return 'Password is required.';
+        if (value.length < 8) return 'Password must be at least 8 characters long.';
+        if (!/^(?=.*[A-Za-z])(?=.*\d).+$/.test(value)) return 'Password must contain at least one letter and one number.';
+        return '';
+      case 'confirmPassword':
+        return currentData.password !== currentConfirmPassword ? 'Passwords do not match.' : '';
+      default:
+        const fieldConfig = config.find(field => field.id === name);
+        if (fieldConfig?.enabled && fieldConfig?.required && !String(value || '').trim()) {
+            return `${fieldConfig.label} is required.`;
+        }
+        return '';
+    }
+  };
+  
+  const handleBlur = (e: React.FocusEvent<HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement>) => {
+    const { name, value } = e.target;
+    
+    const currentConfirmPassword = name === 'confirmPassword' ? value : confirmPassword;
+    const error = validateField(name, value, formData, currentConfirmPassword);
+    
+    setErrors(prev => {
+        const newErrors: FormErrors = { ...prev, [name]: error };
+        // If password is changed, re-validate confirm password if it exists
+        if (name === 'password' && confirmPassword) {
+            const confirmError = validateField('confirmPassword', confirmPassword, { ...formData, password: value }, confirmPassword);
+            newErrors.confirmPassword = confirmError;
+        }
+        return newErrors;
+    });
+  };
+
   const validate = (): boolean => {
     const newErrors: FormErrors = {};
     let firstErrorId: string | null = null;
     
-    const setError = (fieldId: string, message: string) => {
-        if (!firstErrorId) {
-            firstErrorId = fieldId;
+    const allFieldIds = ['firstName', 'lastName', 'email', 'password', 'confirmPassword', ...config.filter(f => f.enabled).map(f => f.id)];
+
+    for (const id of allFieldIds) {
+        const value = id === 'confirmPassword' ? confirmPassword : formData[id];
+        const error = validateField(id, value, formData, confirmPassword);
+        if (error) {
+            if (!firstErrorId) firstErrorId = id;
+            newErrors[id] = error;
         }
-        newErrors[fieldId] = message;
-    };
-    
-    if (!formData.firstName.trim()) {
-      setError('firstName', 'First Name is required.');
     }
     
-    if (!formData.lastName.trim()) {
-      setError('lastName', 'Last Name is required.');
-    }
-
-    if (!formData.email.trim()) {
-      setError('email', 'Email Address is required.');
-    } else if (!/\S+@\S+\.\S+/.test(formData.email)) {
-      setError('email', 'Please enter a valid email address.');
-    }
-
-    if (!formData.password) {
-      setError('password', 'Password is required.');
-    } else if (formData.password.length < 8) {
-      setError('password', 'Password must be at least 8 characters long.');
-    } else if (!/^(?=.*[A-Za-z])(?=.*\d).+$/.test(formData.password)) {
-      setError('password', 'Password must contain at least one letter and one number.');
-    }
-    
-    if (formData.password !== confirmPassword) {
-        setError('confirmPassword', 'Passwords do not match.');
-    }
-
-    // Dynamic field validation
-    config.forEach(field => {
-      if (field.enabled && field.required && !formData[field.id]?.trim()) {
-        setError(field.id, `${field.label} is required.`);
-      }
-    });
-
     setErrors(newErrors);
 
     if (firstErrorId) {
@@ -110,7 +126,7 @@ export const RegistrationForm: React.FC<RegistrationFormProps> = ({
   };
   
   const renderErrorSummary = () => {
-    const errorKeys = Object.keys(errors);
+    const errorKeys = Object.keys(errors).filter(key => errors[key]);
     if (errorKeys.length === 0) return null;
 
     const allFields = [
@@ -128,7 +144,7 @@ export const RegistrationForm: React.FC<RegistrationFormProps> = ({
     };
 
     return (
-        <div role="alert" className="p-4 mb-6 border-l-4 rounded-r-lg bg-red-100 dark:bg-red-900 border-red-400 dark:border-red-600 text-red-700 dark:text-red-200">
+        <div role="alert" className="p-4 mb-6 border-l-4 rounded-r-lg bg-red-100 dark:bg-red-900 border-red-400 dark:border-red-600 text-red-700 dark:text-red-200 animate-fade-in-down">
             <h3 className="font-bold">Please fix {errorKeys.length === 1 ? '1 error' : `${errorKeys.length} errors`} to continue:</h3>
             <ul className="list-disc list-inside mt-2 space-y-1">
                 {errorKeys.map(key => {
@@ -166,6 +182,7 @@ export const RegistrationForm: React.FC<RegistrationFormProps> = ({
               name="firstName"
               value={formData.firstName}
               onChange={onFormChange}
+              onBlur={handleBlur}
               placeholder="e.g. Jane"
               required
               error={errors.firstName}
@@ -175,6 +192,7 @@ export const RegistrationForm: React.FC<RegistrationFormProps> = ({
               name="lastName"
               value={formData.lastName}
               onChange={onFormChange}
+              onBlur={handleBlur}
               placeholder="e.g. Doe"
               required
               error={errors.lastName}
@@ -186,6 +204,7 @@ export const RegistrationForm: React.FC<RegistrationFormProps> = ({
               type="email"
               value={formData.email}
               onChange={onFormChange}
+              onBlur={handleBlur}
               placeholder="e.g. jane.doe@example.com"
               required
               error={errors.email}
@@ -198,6 +217,7 @@ export const RegistrationForm: React.FC<RegistrationFormProps> = ({
                 type="password"
                 value={formData.password || ''}
                 onChange={handleFormChangeInternal}
+                onBlur={handleBlur}
                 placeholder="••••••••"
                 required
                 error={errors.password}
@@ -210,6 +230,7 @@ export const RegistrationForm: React.FC<RegistrationFormProps> = ({
               type="password"
               value={confirmPassword}
               onChange={(e) => setConfirmPassword(e.target.value)}
+              onBlur={handleBlur}
               placeholder="••••••••"
               required
               error={errors.confirmPassword}
@@ -221,7 +242,7 @@ export const RegistrationForm: React.FC<RegistrationFormProps> = ({
       {/* Custom Fields */}
       {enabledCustomFields.length > 0 && (
         <fieldset className="pt-6 border-t border-gray-200 dark:border-gray-700">
-           <legend className="text-lg font-medium text-gray-900 dark:text-white mb-2">Event Specific Information</legend>
+           <legend className="text-lg font-medium text-gray-900 dark:text-white mb-2">Additional Information</legend>
           <div className="space-y-6">
             {enabledCustomFields.map(field => (
               <DynamicFormField
@@ -229,6 +250,7 @@ export const RegistrationForm: React.FC<RegistrationFormProps> = ({
                 field={field}
                 value={formData[field.id]}
                 onChange={onFormChange}
+                onBlur={handleBlur}
                 error={errors[field.id]}
               />
             ))}

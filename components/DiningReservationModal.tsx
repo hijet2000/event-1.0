@@ -1,14 +1,16 @@
 import React, { useState } from 'react';
 import { type Restaurant } from '../types';
 import { Spinner } from './Spinner';
+import { makeDiningReservation } from '../server/api';
 
 interface DiningReservationModalProps {
     isOpen: boolean;
     onClose: () => void;
     restaurant: Restaurant;
+    delegateToken: string;
 }
 
-export const DiningReservationModal: React.FC<DiningReservationModalProps> = ({ isOpen, onClose, restaurant }) => {
+export const DiningReservationModal: React.FC<DiningReservationModalProps> = ({ isOpen, onClose, restaurant, delegateToken }) => {
     const [partySize, setPartySize] = useState(1);
     const [dateTime, setDateTime] = useState('');
     const [isBooking, setIsBooking] = useState(false);
@@ -17,24 +19,30 @@ export const DiningReservationModal: React.FC<DiningReservationModalProps> = ({ 
     
     if (!isOpen) return null;
 
-    const handleBooking = (e: React.FormEvent) => {
+    const handleBooking = async (e: React.FormEvent) => {
         e.preventDefault();
-        setIsBooking(true);
         setError('');
-        // Mock booking
-        setTimeout(() => {
-            if (partySize > 0 && dateTime) {
-                setSuccess(true);
-            } else {
-                setError('Please fill all fields');
-            }
+        if (partySize <= 0 || !dateTime) {
+            setError('Please fill all fields with valid values.');
+            return;
+        }
+        
+        setIsBooking(true);
+        try {
+            await makeDiningReservation(delegateToken, restaurant.id, new Date(dateTime).toISOString(), partySize);
+            setSuccess(true);
+        } catch (err) {
+            setError(err instanceof Error ? err.message : 'Failed to make reservation.');
+        } finally {
             setIsBooking(false);
-        }, 1000);
+        }
     }
     
     const handleClose = () => {
         setSuccess(false);
         setError('');
+        setPartySize(1);
+        setDateTime('');
         onClose();
     }
 
@@ -44,8 +52,9 @@ export const DiningReservationModal: React.FC<DiningReservationModalProps> = ({ 
                 <h2 className="text-xl font-bold">Book a Table at {restaurant.name}</h2>
                 {success ? (
                     <div className="text-center py-8">
-                        <p className="text-green-600">Booking confirmed!</p>
-                        <button onClick={handleClose} className="mt-4 py-2 px-4 bg-primary text-white rounded-md">Close</button>
+                        <p className="text-lg text-green-600 dark:text-green-400">Booking confirmed!</p>
+                        <p className="text-sm text-gray-600 dark:text-gray-300 mt-2">Your reservation for {partySize} at {new Date(dateTime).toLocaleString()} has been made.</p>
+                        <button onClick={handleClose} className="mt-6 py-2 px-6 border border-transparent rounded-md shadow-sm text-sm font-medium text-white bg-primary hover:bg-primary/90">Close</button>
                     </div>
                 ) : (
                     <form onSubmit={handleBooking} className="mt-6 space-y-4">
@@ -60,7 +69,7 @@ export const DiningReservationModal: React.FC<DiningReservationModalProps> = ({ 
                         {error && <p className="text-sm text-red-500">{error}</p>}
                         <div className="flex justify-end gap-3 pt-4">
                             <button type="button" onClick={handleClose} className="py-2 px-4 border border-gray-300 dark:border-gray-600 rounded-md text-sm">Cancel</button>
-                            <button type="submit" disabled={isBooking} className="py-2 px-4 bg-primary text-white rounded-md text-sm flex items-center disabled:opacity-50">
+                            <button type="submit" disabled={isBooking} className="py-2 px-4 bg-primary text-white rounded-md text-sm flex items-center disabled:opacity-50 w-36 justify-center">
                                 {isBooking ? <><Spinner /> Booking...</> : 'Confirm Booking'}
                             </button>
                         </div>

@@ -1,4 +1,5 @@
-import React, { useState } from 'react';
+
+import React, { useState, useRef, useEffect } from 'react';
 import { loginAdmin, requestAdminPasswordReset } from '../server/api';
 import { Spinner } from './Spinner';
 import { type Permission } from '../types';
@@ -21,6 +22,14 @@ export const AdminLoginModal: React.FC<AdminLoginModalProps> = ({ isOpen, onClos
   const [error, setError] = useState('');
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [view, setView] = useState<'login' | 'forgot' | 'forgot_sent'>('login');
+  
+  // Ref to track if component is mounted to prevent state updates after unmount
+  const isMounted = useRef(false);
+
+  useEffect(() => {
+      isMounted.current = true;
+      return () => { isMounted.current = false; };
+  }, []);
 
   if (!isOpen) return null;
 
@@ -30,16 +39,23 @@ export const AdminLoginModal: React.FC<AdminLoginModalProps> = ({ isOpen, onClos
     setIsSubmitting(true);
     try {
         const result = await loginAdmin(email, password);
+        
+        // Check if component is still mounted before updating state or calling callbacks
+        if (!isMounted.current) return;
+
         if (result) {
           localStorage.setItem('adminToken', result.token);
           onLoginSuccess(result.token, result.user);
         } else {
           setError('Incorrect email or password.');
+          setIsSubmitting(false);
         }
     } catch (err) {
-        setError('An error occurred during login.');
-    } finally {
-        setIsSubmitting(false);
+        console.error("Login Error Details:", err);
+        if (isMounted.current) {
+            setError('An error occurred during login. Check console for details.');
+            setIsSubmitting(false);
+        }
     }
   };
   
@@ -49,11 +65,15 @@ export const AdminLoginModal: React.FC<AdminLoginModalProps> = ({ isOpen, onClos
     setIsSubmitting(true);
     try {
         await requestAdminPasswordReset(email);
-        setView('forgot_sent');
+        if (isMounted.current) {
+             setView('forgot_sent');
+             setIsSubmitting(false);
+        }
     } catch (err) {
-        setError('An error occurred. Please try again.');
-    } finally {
-        setIsSubmitting(false);
+        if (isMounted.current) {
+            setError('An error occurred. Please try again.');
+            setIsSubmitting(false);
+        }
     }
   };
   
@@ -201,15 +221,15 @@ export const AdminLoginModal: React.FC<AdminLoginModalProps> = ({ isOpen, onClos
   };
 
   return (
-    <div
-      className="fixed inset-0 bg-black bg-opacity-60 z-50 flex items-center justify-center p-4"
+    <div 
+      className="fixed inset-0 bg-black bg-opacity-60 z-[1000] flex items-center justify-center p-4"
       onClick={handleClose}
       role="dialog"
       aria-modal="true"
       aria-labelledby="admin-login-title"
     >
-      <div
-        className="bg-white dark:bg-gray-800 rounded-2xl shadow-2xl w-full max-w-xs p-8"
+      <div 
+        className="bg-white dark:bg-gray-800 rounded-2xl shadow-2xl w-full max-w-sm p-8 z-[1001] relative"
         onClick={(e) => e.stopPropagation()}
       >
         {renderContent()}

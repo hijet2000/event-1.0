@@ -1,8 +1,7 @@
 
 import React, { useState, useEffect } from 'react';
-import { type RegistrationData, type Permission } from './types';
-// Fix: Changed import for verifyToken to import from auth service directly.
-import { registerUser, loginDelegate, triggerRegistrationEmails, getInvitationDetails } from './server/api';
+import { type RegistrationData, type Permission, type Session, type Speaker, type Sponsor } from './types';
+import { registerUser, loginDelegate, triggerRegistrationEmails, getInvitationDetails, getPublicEventData } from './server/api';
 import { verifyToken } from './server/auth';
 import { RegistrationForm } from './components/RegistrationForm';
 import { Alert } from './components/Alert';
@@ -14,45 +13,121 @@ import { DelegateLoginModal } from './components/DelegateLoginModal';
 import { DelegatePortal } from './components/DelegatePortal';
 import { ThemeProvider, useTheme } from './contexts/ThemeContext';
 import { AdminPortal } from './components/AdminPortal';
+import { EventSelectionPage } from './components/EventSelectionPage';
+import { CountdownTimer } from './components/CountdownTimer';
+import { AgendaView } from './components/AgendaView';
+import { DirectoryView } from './components/DirectoryView';
+import { PublicHome } from './components/PublicHome';
 
 type View = 'registration' | 'success' | 'passwordReset';
+type PublicTab = 'home' | 'agenda' | 'speakers' | 'register';
 
 interface AdminSession {
   token: string;
   user: { email: string; permissions: Permission[] };
 }
 
-interface AppContentProps {
-  onAdminLogin: (token: string, user: { id: string, email: string, permissions: Permission[] }) => void;
-}
-
-// For frontend form state management
 export interface RegistrationFormState {
   firstName: string;
   lastName: string;
   email: string;
   password?: string;
-  [key: string]: any; // For custom form fields
+  [key: string]: any;
 }
 
+class ErrorBoundary extends React.Component<{ children: React.ReactNode }, { hasError: boolean, error: Error | null }> {
+  constructor(props: { children: React.ReactNode }) {
+    super(props);
+    this.state = { hasError: false, error: null };
+  }
 
-const AppContent: React.FC<AppContentProps> = ({ onAdminLogin }) => {
+  static getDerivedStateFromError(error: Error) {
+    return { hasError: true, error };
+  }
+
+  componentDidCatch(error: Error, errorInfo: React.ErrorInfo) {
+    console.error("Uncaught error:", error, errorInfo);
+  }
+
+  render() {
+    if (this.state.hasError) {
+      return (
+        <div className="min-h-screen flex items-center justify-center bg-gray-50 dark:bg-gray-900 p-4">
+          <div className="bg-white dark:bg-gray-800 p-8 rounded-lg shadow-xl max-w-lg w-full">
+            <h2 className="text-2xl font-bold text-red-600 mb-4">Something went wrong</h2>
+            <p className="text-gray-600 dark:text-gray-300 mb-4">The application encountered an unexpected error.</p>
+            <div className="bg-gray-100 dark:bg-gray-900 p-4 rounded overflow-auto text-sm font-mono text-red-500 mb-6 max-h-40">
+              {this.state.error?.message || "Unknown error"}
+            </div>
+            <button 
+              onClick={() => { localStorage.clear(); window.location.href = '/'; }}
+              className="w-full py-2 px-4 bg-indigo-600 text-white rounded hover:bg-indigo-700"
+            >
+              Clear Cache & Reload
+            </button>
+          </div>
+        </div>
+      );
+    }
+
+    return this.props.children;
+  }
+}
+
+interface EventPageContentProps {
+  onAdminLogin: (token: string, user: { id: string; email: string; permissions: Permission[]; }) => void;
+  eventId: string;
+  onNavigate: (path: string) => void;
+}
+
+const EventPageContent: React.FC<EventPageContentProps> = ({ onAdminLogin, eventId, onNavigate }) => {
   const { config, registrationCount, isLoading: isThemeLoading, error: themeError } = useTheme();
+  
+  // Public Data State
+  const [sessions, setSessions] = useState<Session[]>([]);
+  const [speakers, setSpeakers] = useState<Speaker[]>([]);
+  const [sponsors, setSponsors] = useState<Sponsor[]>([]);
+  const [publicDataLoading, setPublicDataLoading] = useState(true);
+
+  // Navigation State
+  const [publicTab, setPublicTab] = useState<PublicTab>('home');
 
   const [view, setView] = useState<View>('registration');
   const [error, setError] = useState<string>('');
   const [resetToken, setResetToken] = useState<string | null>(null);
   const [inviteToken, setInviteToken] = useState<string | null>(null);
 
-  // Admin State - only for opening the modal
   const [isAdminModalOpen, setAdminModalOpen] = useState(false);
-  
-  // Delegate State
   const [isDelegateModalOpen, setDelegateModalOpen] = useState(false);
-  const [delegateToken, setDelegateToken] = useState<string | null>(localStorage.getItem('delegateToken'));
+  const [delegateToken, setDelegateToken] = useState<string | null>(() => {
+    const token = localStorage.getItem('delegateToken');
+    if (token) {
+        const payload = verifyToken(token);
+        if (payload && payload.type === 'delegate' && payload.eventId === eventId) {
+            return token;
+        }
+        localStorage.removeItem('delegateToken');
+    }
+    return null;
+  });
 
   const initialFormData: RegistrationFormState = { firstName: '', lastName: '', email: '', password: '' };
   const [formData, setFormData] = useState<RegistrationFormState>(initialFormData);
+
+  // Load Public Data (Sessions, Speakers)
+  useEffect(() => {
+      if (eventId) {
+          getPublicEventData(eventId).then(data => {
+              setSessions(data.sessions);
+              setSpeakers(data.speakers);
+              setSponsors(data.sponsors);
+              setPublicDataLoading(false);
+          }).catch(e => {
+              console.warn("Failed to load public data for event:", eventId);
+              setPublicDataLoading(false);
+          });
+      }
+  }, [eventId]);
 
   useEffect(() => {
     const urlParams = new URLSearchParams(window.location.search);
@@ -62,19 +137,22 @@ const AppContent: React.FC<AppContentProps> = ({ onAdminLogin }) => {
     if (resetTokenParam) {
         setResetToken(resetTokenParam);
         setView('passwordReset');
+        setPublicTab('register'); // Force register view for reset for simplicity
     } else if (inviteTokenParam) {
         setInviteToken(inviteTokenParam);
+        setPublicTab('register');
         getInvitationDetails(inviteTokenParam).then(details => {
-            if (details) {
+            if (details && details.eventId === eventId) {
                 setFormData(prev => ({ ...prev, email: details.inviteeEmail }));
-                // Clean up URL
-                window.history.replaceState({}, document.title, `/`);
+                try {
+                    window.history.replaceState({}, document.title, `/${eventId}`);
+                } catch (e) {
+                    // Ignore history errors in sandboxed environments
+                }
             }
         });
-    } else {
-      setView('registration');
     }
-  }, []);
+  }, [eventId]);
 
   const handleFormChange = (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement>) => {
     const { name, value } = e.target;
@@ -93,22 +171,18 @@ const AppContent: React.FC<AppContentProps> = ({ onAdminLogin }) => {
     }
     setError('');
     
-    // Combine firstName and lastName into a single `name` field for the backend.
     const submissionData: RegistrationData = {
       ...formData,
       name: `${formData.firstName} ${formData.lastName}`.trim(),
-      createdAt: 0, // Will be set by server
+      createdAt: 0,
     };
-    // Clean up frontend-only fields before sending
     delete (submissionData as any).firstName;
     delete (submissionData as any).lastName;
 
     try {
-      // FIX: Pass eventId for multi-event support.
-      const result = await registerUser('main-event', submissionData, inviteToken || undefined);
+      const result = await registerUser(eventId, submissionData, inviteToken || undefined);
       if (result.success) {
-        // FIX: Pass eventId for multi-event support.
-        await triggerRegistrationEmails('main-event', submissionData);
+        await triggerRegistrationEmails(eventId, submissionData);
         setView('success');
       } else {
         setError(result.message);
@@ -120,8 +194,7 @@ const AppContent: React.FC<AppContentProps> = ({ onAdminLogin }) => {
   
   const handleDelegateLogin = async (email: string, password_input: string): Promise<boolean> => {
     try {
-      // FIX: Pass eventId for multi-event support.
-      const result = await loginDelegate('main-event', email, password_input);
+      const result = await loginDelegate(eventId, email, password_input);
       if (result) {
         localStorage.setItem('delegateToken', result.token);
         setDelegateToken(result.token);
@@ -147,11 +220,31 @@ const AppContent: React.FC<AppContentProps> = ({ onAdminLogin }) => {
   
   const isSoldOut = config && config.event.maxAttendees > 0 && registrationCount >= config.event.maxAttendees;
 
+  // Render Logic Helpers
+  const renderFooter = () => (
+    <footer className="mt-12 text-center text-sm text-gray-500 dark:text-gray-400 pb-8 border-t border-gray-200 dark:border-gray-700 pt-8">
+      <div className="flex items-center justify-center flex-wrap gap-x-4 gap-y-2">
+        <button type="button" onClick={() => setDelegateModalOpen(true)} className="hover:text-primary transition cursor-pointer">Delegate Portal</button>
+        <span className="hidden sm:inline">&bull;</span>
+        <button type="button" onClick={() => setAdminModalOpen(true)} className="hover:text-primary transition cursor-pointer">Admin Login</button>
+        {config?.theme.websiteUrl && (
+            <>
+              <span className="hidden sm:inline">&bull;</span>
+              <a href={config.theme.websiteUrl} target="_blank" rel="noopener noreferrer" className="hover:text-primary transition">Event Website</a>
+            </>
+        )}
+          <span className="hidden sm:inline">&bull;</span>
+          <button type="button" onClick={() => onNavigate('/')} className="hover:text-primary transition cursor-pointer">All Events</button>
+      </div>
+      <p className="mt-4">&copy; {new Date().getFullYear()} {config?.host.name || 'Event Platform'}. All rights reserved.</p>
+    </footer>
+  );
+
   if (delegateToken) {
     return <DelegatePortal onLogout={handleDelegateLogout} delegateToken={delegateToken} />;
   }
   
-  if (isThemeLoading) {
+  if (isThemeLoading || publicDataLoading) {
     return (
       <div className="bg-background-color min-h-screen flex items-center justify-center">
         <ContentLoader />
@@ -161,102 +254,152 @@ const AppContent: React.FC<AppContentProps> = ({ onAdminLogin }) => {
 
   if (themeError && !config) {
     return (
-      <div className="bg-background-color min-h-screen flex items-center justify-center p-4">
-        <div className="max-w-md mx-auto">
-          <Alert type="error" message={themeError} />
+      <div className="bg-gray-50 dark:bg-gray-900 min-h-screen flex flex-col items-center justify-center p-4 text-center">
+        <div className="max-w-md w-full bg-white dark:bg-gray-800 shadow-lg rounded-lg p-8 mb-8">
+           <div className="mx-auto flex items-center justify-center h-12 w-12 rounded-full bg-red-100 dark:bg-red-900 mb-4">
+              <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6 text-red-600 dark:text-red-200" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
+              </svg>
+           </div>
+           <h3 className="text-lg font-medium text-gray-900 dark:text-white mb-2">Event Not Found</h3>
+           <p className="text-sm text-gray-500 dark:text-gray-400 mb-6">{themeError}</p>
+           <button 
+              onClick={() => onNavigate('/')}
+              className="inline-flex justify-center w-full rounded-md border border-transparent shadow-sm px-4 py-2 bg-primary text-base font-medium text-white hover:bg-primary/90 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-primary sm:text-sm"
+           >
+             View All Events
+           </button>
         </div>
+        {renderFooter()}
+        <AdminLoginModal 
+            isOpen={isAdminModalOpen}
+            onClose={() => setAdminModalOpen(false)}
+            onLoginSuccess={handleAdminLoginSuccess}
+        />
       </div>
     );
   }
 
   return (
-    <div className="bg-background-color min-h-screen font-sans text-gray-800 dark:text-gray-200">
-      <div 
-        className="absolute inset-0 bg-cover bg-center bg-no-repeat z-0" 
-        style={{ backgroundImage: `url(${config?.theme.pageImageUrl})`, opacity: 0.1 }}
-      ></div>
-      <div className="relative z-10 container mx-auto px-4 sm:px-6 lg:px-8 py-12 sm:py-16 md:py-20">
-        <main className="max-w-3xl mx-auto">
-          {view === 'passwordReset' && config && resetToken && (
-             <PasswordResetForm token={resetToken} />
-          )}
-          
-          {(view === 'registration' || view === 'success') && config && (
-            <div className="bg-white dark:bg-gray-800 shadow-2xl rounded-2xl overflow-hidden animate-fade-in">
-              <div className="p-8 sm:p-12">
-                <header className="text-center">
-                  <Logo />
-                  <h1 className="text-3xl font-bold tracking-tight text-primary sm:text-4xl" style={{ color: config.theme.colorPrimary }}>
-                    {config.event.name}
-                  </h1>
-                  <div className="mt-4 flex items-center justify-center flex-wrap gap-x-6 gap-y-2 text-lg text-secondary" style={{ color: config.theme.colorSecondary }}>
-                      <div className="flex items-center space-x-2">
-                          <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z" /></svg>
-                          <span>{config.event.date}</span>
-                      </div>
-                      <div className="flex items-center space-x-2">
-                          <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17.657 16.657L13.414 20.9a1.998 1.998 0 01-2.827 0l-4.244-4.243a8 8 0 1111.314 0z" /><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 11a3 3 0 11-6 0 3 3 0 016 0z" /></svg>
-                          <span>{config.event.location}</span>
-                      </div>
-                      <div className="flex items-center space-x-2">
-                          <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.653-.125-1.274-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.653.125-1.274.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0zm6 3a2 2 0 11-4 0 2 2 0 014 0zM7 10a2 2 0 11-4 0 2 2 0 014 0z" /></svg>
-                          <span>
-                            {registrationCount}
-                            {config.event.maxAttendees > 0 && ` / ${config.event.maxAttendees}`} Attendees
-                          </span>
-                      </div>
-                  </div>
-                </header>
-                
-                <div className="mt-10">
-                  {error && <div className="mb-6"><Alert type="error" message={error} /></div>}
-
-                  {view === 'success' ? (
-                    <div className="text-center">
-                      <Alert type="success" message="Registration Successful! Please check your email for a confirmation message." />
-                       <button
-                        onClick={() => {
-                          setView('registration');
-                          handleReset();
-                        }}
-                        className="mt-6 w-full sm:w-auto inline-flex justify-center items-center py-3 px-6 border border-transparent rounded-md shadow-sm text-sm font-medium text-white bg-primary hover:bg-primary/90"
-                      >
-                        Register Another Person
-                      </button>
+    <div className="bg-background-color min-h-screen font-sans text-gray-800 dark:text-gray-200 flex flex-col">
+        {/* Navbar */}
+        <nav className="bg-white dark:bg-gray-800 shadow-sm sticky top-0 z-40">
+            <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+                <div className="flex justify-between h-16">
+                    <div className="flex items-center cursor-pointer" onClick={() => setPublicTab('home')}>
+                        {config?.theme.logoUrl ? (
+                            <img src={config.theme.logoUrl} alt="Logo" className="h-8 w-auto mr-3" />
+                        ) : (
+                            <div className="h-8 w-8 bg-primary rounded-full mr-3 flex items-center justify-center text-white font-bold">E</div>
+                        )}
+                        <span className="font-bold text-xl text-gray-900 dark:text-white hidden sm:block truncate max-w-xs">{config?.event.name}</span>
                     </div>
-                  ) : isSoldOut ? (
-                    <div className="text-center p-8 bg-yellow-50 dark:bg-yellow-900/20 rounded-lg">
-                        <h2 className="text-2xl font-bold text-gray-800 dark:text-gray-200">Registration Closed</h2>
-                        <p className="mt-2 text-gray-600 dark:text-gray-400">We're sorry, but this event has reached its maximum capacity. Registration is no longer available.</p>
+                    <div className="flex items-center space-x-1 sm:space-x-4">
+                         {['Home', 'Agenda', 'Speakers'].map(tab => (
+                             <button 
+                                key={tab}
+                                onClick={() => setPublicTab(tab.toLowerCase() as PublicTab)}
+                                className={`px-3 py-2 rounded-md text-sm font-medium transition-colors ${publicTab === tab.toLowerCase() ? 'text-primary bg-primary/10' : 'text-gray-500 hover:text-gray-900 dark:hover:text-gray-200 hover:bg-gray-100 dark:hover:bg-gray-700'}`}
+                             >
+                                 {tab}
+                             </button>
+                         ))}
+                         <button 
+                             onClick={() => setPublicTab('register')}
+                             className={`ml-2 px-4 py-2 rounded-full text-sm font-bold transition-all ${publicTab === 'register' ? 'bg-primary text-white shadow-md' : 'bg-gray-100 dark:bg-gray-700 text-gray-900 dark:text-white hover:bg-gray-200 dark:hover:bg-gray-600'}`}
+                         >
+                             Register
+                         </button>
                     </div>
-                  ) : (
-                    <RegistrationForm
-                      formData={formData}
-                      onFormChange={handleFormChange}
-                      onSubmit={handleSubmit}
-                      onReset={handleReset}
-                      isLoading={false}
-                      config={config.formFields}
-                    />
-                  )}
                 </div>
-              </div>
             </div>
+        </nav>
+
+      <div className="relative z-10 flex-grow container mx-auto px-4 sm:px-6 lg:px-8 py-8 sm:py-12">
+        <main className="max-w-5xl mx-auto">
+            {publicTab === 'home' && config && (
+                <PublicHome 
+                    config={config} 
+                    speakers={speakers} 
+                    sponsors={sponsors}
+                    onRegister={() => setPublicTab('register')} 
+                />
+            )}
+
+            {publicTab === 'agenda' && (
+                <div className="animate-fade-in">
+                    <h2 className="text-3xl font-bold mb-8 text-center text-gray-900 dark:text-white">Event Schedule</h2>
+                    <div className="bg-white dark:bg-gray-800 rounded-xl shadow-lg p-6">
+                        <AgendaView sessions={sessions} speakers={speakers} readOnly />
+                    </div>
+                </div>
+            )}
+
+            {publicTab === 'speakers' && (
+                <div className="animate-fade-in">
+                    <div className="bg-white dark:bg-gray-800 rounded-xl shadow-lg p-6">
+                        <DirectoryView speakers={speakers} sponsors={sponsors} />
+                    </div>
+                </div>
+            )}
+
+          {publicTab === 'register' && config && (
+             <div className="max-w-3xl mx-auto animate-fade-in">
+                {view === 'passwordReset' && resetToken && (
+                    <PasswordResetForm token={resetToken} />
+                )}
+                
+                {(view === 'registration' || view === 'success') && (
+                    <div className="bg-white dark:bg-gray-800 shadow-2xl rounded-2xl overflow-hidden">
+                    <div className="p-8 sm:p-12">
+                        <header className="text-center">
+                        <h1 className="text-3xl font-bold tracking-tight text-primary sm:text-4xl" style={{ color: config.theme.colorPrimary }}>
+                            Register for {config.event.name}
+                        </h1>
+                         <p className="mt-4 text-gray-600 dark:text-gray-400">
+                            Secure your spot today.
+                        </p>
+                        </header>
+                        
+                        <div className="mt-10">
+                        {error && <div className="mb-6"><Alert type="error" message={error} /></div>}
+
+                        {view === 'success' ? (
+                            <div className="text-center">
+                            <Alert type="success" message="Registration Successful! Please check your email for a confirmation message." />
+                            <button
+                                onClick={() => {
+                                setView('registration');
+                                handleReset();
+                                }}
+                                className="mt-6 w-full sm:w-auto inline-flex justify-center items-center py-3 px-6 border border-transparent rounded-md shadow-sm text-sm font-medium text-white bg-primary hover:bg-primary/90"
+                            >
+                                Register Another Person
+                            </button>
+                            </div>
+                        ) : isSoldOut ? (
+                            <div className="text-center p-8 bg-yellow-50 dark:bg-yellow-900/20 rounded-lg">
+                                <h2 className="text-2xl font-bold text-gray-800 dark:text-gray-200">Registration Closed</h2>
+                                <p className="mt-2 text-gray-600 dark:text-gray-400">We're sorry, but this event has reached its maximum capacity. Registration is no longer available.</p>
+                            </div>
+                        ) : (
+                            <RegistrationForm
+                            formData={formData}
+                            onFormChange={handleFormChange}
+                            onSubmit={handleSubmit}
+                            onReset={handleReset}
+                            isLoading={false}
+                            config={config.formFields}
+                            />
+                        )}
+                        </div>
+                    </div>
+                    </div>
+                )}
+             </div>
           )}
           
-           <footer className="mt-12 text-center text-sm text-gray-500 dark:text-gray-400">
-              <div className="flex items-center justify-center flex-wrap gap-x-4 gap-y-2">
-                <button onClick={() => setDelegateModalOpen(true)} className="hover:text-primary transition">Delegate Portal</button>
-                <span className="hidden sm:inline">&bull;</span>
-                <button onClick={() => setAdminModalOpen(true)} className="hover:text-primary transition">Admin Login</button>
-                {config?.theme.websiteUrl && (
-                    <>
-                      <span className="hidden sm:inline">&bull;</span>
-                      <a href={config.theme.websiteUrl} target="_blank" rel="noopener noreferrer" className="hover:text-primary transition">Event Website</a>
-                    </>
-                )}
-              </div>
-            </footer>
+           {renderFooter()}
         </main>
       </div>
 
@@ -269,17 +412,23 @@ const AppContent: React.FC<AppContentProps> = ({ onAdminLogin }) => {
         isOpen={isDelegateModalOpen}
         onClose={() => setDelegateModalOpen(false)}
         onLogin={handleDelegateLogin}
+        eventId={eventId}
       />
     </div>
   );
-}
+};
 
+const EventPage: React.FC<EventPageContentProps> = (props) => (
+    <ThemeProvider eventId={props.eventId}>
+        <EventPageContent {...props} />
+    </ThemeProvider>
+);
 
 function App() {
   const [adminSession, setAdminSession] = useState<AdminSession | null>(() => {
     const token = localStorage.getItem('adminToken');
     if (token) {
-      const payload = verifyToken(token); // Using a synchronous mock verify for initial load
+      const payload = verifyToken(token);
       if (payload && payload.type === 'admin') {
         return {
           token,
@@ -291,7 +440,30 @@ function App() {
     return null;
   });
 
+  // Routing State
+  const [currentPath, setCurrentPath] = useState(window.location.pathname);
+
+  useEffect(() => {
+    const handleLocationChange = () => {
+      setCurrentPath(window.location.pathname);
+    };
+
+    window.addEventListener('popstate', handleLocationChange);
+    return () => window.removeEventListener('popstate', handleLocationChange);
+  }, []);
+
+  const navigate = (path: string) => {
+    try {
+        window.history.pushState({}, '', path);
+    } catch (e) {
+        console.warn("Navigation URL update failed (likely due to sandbox environment):", e);
+    }
+    setCurrentPath(path);
+    window.scrollTo(0, 0);
+  };
+
   const handleAdminLogin = (token: string, user: { id: string, email: string, permissions: Permission[] }) => {
+    localStorage.setItem('adminToken', token);
     const { id, ...userForSession } = user;
     setAdminSession({ token, user: userForSession });
   };
@@ -299,16 +471,39 @@ function App() {
   const handleAdminLogout = () => {
     localStorage.removeItem('adminToken');
     setAdminSession(null);
+    navigate('/');
   };
-  
-  if (adminSession) {
-    return <AdminPortal onLogout={handleAdminLogout} adminToken={adminSession.token} user={adminSession.user} />;
-  }
 
   return (
-    <ThemeProvider>
-        <AppContent onAdminLogin={handleAdminLogin} />
-    </ThemeProvider>
+    <ErrorBoundary>
+      {adminSession ? (
+        <AdminPortal onLogout={handleAdminLogout} adminToken={adminSession.token} user={adminSession.user} />
+      ) : (
+        (() => {
+          const ignoredPaths = [
+            'assets', 'src', 'components', 'node_modules', 'static', 'public', 'json', 
+            'manifest.json', 'favicon.ico', 'robots.txt', 'sitemap.xml', 
+            'index.js', 'main.js', 'index.css', 'App.tsx', 
+            '@vite', '@fs', '@react-refresh', 
+            'admin' // Explicitly ignore 'admin'
+          ];
+
+          const pathParts = currentPath.split('/').filter(p => p && p !== 'index.html');
+          const candidateId = pathParts[0];
+          
+          // Strict check: if path is 'admin' or starts with 'admin', do NOT treat as event ID
+          const isSystemPath = candidateId === 'admin' || candidateId === 'api';
+          
+          const eventId = (candidateId && !candidateId.includes('.') && !candidateId.startsWith('@') && !ignoredPaths.includes(candidateId) && !isSystemPath) ? candidateId : undefined;
+
+          if (eventId) {
+              return <EventPage onAdminLogin={handleAdminLogin} eventId={eventId} onNavigate={navigate} />;
+          }
+
+          return <EventSelectionPage onAdminLogin={handleAdminLogin} onNavigate={navigate} />;
+        })()
+      )}
+    </ErrorBoundary>
   );
 }
 
