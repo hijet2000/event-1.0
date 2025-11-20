@@ -1,3 +1,4 @@
+
 /**
  * PRODUCTION SERVER ENTRY POINT
  * 
@@ -80,7 +81,7 @@ const rateLimit = new Map<string, { count: number, startTime: number }>();
 const RATE_LIMIT_WINDOW = 15 * 60 * 1000; // 15 minutes
 const RATE_LIMIT_MAX = 100; // 100 requests per window
 
-const rateLimiter: express.RequestHandler = (req, res, next) => {
+const rateLimiter = (req: Request, res: Response, next: NextFunction) => {
     const ip = (req.headers['x-forwarded-for'] as string) || req.socket.remoteAddress || 'unknown';
     const now = Date.now();
     const record = rateLimit.get(ip);
@@ -104,7 +105,7 @@ const rateLimiter: express.RequestHandler = (req, res, next) => {
 };
 
 // 2. Security Headers (Manual Helmet)
-const securityHeaders: express.RequestHandler = (req, res, next) => {
+const securityHeaders = (req: Request, res: Response, next: NextFunction) => {
     res.setHeader('X-Content-Type-Options', 'nosniff');
     res.setHeader('X-Frame-Options', 'DENY');
     res.setHeader('X-XSS-Protection', '1; mode=block');
@@ -118,10 +119,10 @@ const securityHeaders: express.RequestHandler = (req, res, next) => {
 app.use(cors({
     origin: FRONTEND_URL, // Dynamic origin
     credentials: true
-}) as express.RequestHandler);
+}) as any);
 app.use(securityHeaders);
-app.use(express.json({ limit: '50mb' }) as express.RequestHandler); // Increased limit for video uploads
-app.use(cookieParser() as express.RequestHandler);
+app.use(express.json({ limit: '50mb' }) as any); // Increased limit for video uploads
+app.use(cookieParser() as any);
 
 // Serve Uploaded Files Statically
 app.use('/uploads', express.static(UPLOADS_DIR));
@@ -147,8 +148,38 @@ const pool = new Pool({
   ssl: IS_PROD ? { rejectUnauthorized: false } : false
 });
 
-// AI Client
-const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
+// --- Secure Secret Retrieval ---
+const getSecureApiKey = (): string => {
+    // Priority 1: Docker Secret / File-based secret (Secure Production)
+    // Checks if a file path is provided in env var GEMINI_API_KEY_FILE
+    if (process.env.GEMINI_API_KEY_FILE) {
+        try {
+            if (fs.existsSync(process.env.GEMINI_API_KEY_FILE)) {
+                return fs.readFileSync(process.env.GEMINI_API_KEY_FILE, 'utf8').trim();
+            }
+        } catch (error) {
+            logger.warn(`Failed to read secret file at ${process.env.GEMINI_API_KEY_FILE}`);
+        }
+    }
+
+    // Priority 2: Standard Environment Variable (Development / Standard PaaS)
+    if (process.env.API_KEY) {
+        return process.env.API_KEY;
+    }
+
+    // Priority 3: Integration point for AWS/GCP Secret Manager SDKs would go here
+    
+    logger.error("CRITICAL: Gemini API Key not found in environment variables or secret files.");
+    return ""; 
+};
+
+// AI Client Initialization
+const apiKey = getSecureApiKey();
+if (!apiKey && IS_PROD) {
+    logger.error("Server starting without API Key. AI features will fail.");
+}
+// Initialize with found key or a dummy if missing to allow server startup (requests will fail gracefully)
+const ai = new GoogleGenAI({ apiKey: apiKey || 'missing_key' });
 
 // --- Helper Functions ---
 
@@ -316,7 +347,7 @@ setInterval(runMaintenance, 60 * 60 * 1000);
 
 
 // 3. Authenticate: Verifies JWT from HttpOnly Cookie
-const authenticate: express.RequestHandler = (req: any, res: any, next: any) => {
+const authenticate = (req: any, res: any, next: NextFunction) => {
     const token = req.cookies.token; // Read from cookie, not header
     
     if (!token) return res.status(401).json({ message: 'Unauthorized' });
@@ -329,8 +360,8 @@ const authenticate: express.RequestHandler = (req: any, res: any, next: any) => 
 };
 
 // 4. Require Permission: Granular RBAC Check
-const requirePermission = (requiredPermission: string): express.RequestHandler => {
-    return (req: any, res: any, next: any) => {
+const requirePermission = (requiredPermission: string) => {
+    return (req: any, res: any, next: NextFunction) => {
         if (!req.user) return res.sendStatus(401);
         
         // Super Admins (or specific role checks) can bypass, but relying on permissions list is best
@@ -356,7 +387,7 @@ const setAuthCookie = (res: any, token: string) => {
 // --- Routes ---
 
 // Health Check
-app.get('/api/health', async (req, res) => {
+app.get('/api/health', async (req: any, res: any) => {
     try {
         await pool.query('SELECT 1');
         res.json({ status: 'ok', timestamp: Date.now(), db: 'connected' });
@@ -364,10 +395,10 @@ app.get('/api/health', async (req, res) => {
         logger.error("Health check failed:", e);
         res.status(503).json({ status: 'error', message: 'Database unavailable', timestamp: Date.now() });
     }
-});
+} as any);
 
 // --- AI Proxy Endpoints (Secure) ---
-app.post('/api/ai/generate', authenticate, async (req, res) => {
+app.post('/api/ai/generate', authenticate, async (req: any, res: any) => {
     const { model, contents, config } = req.body;
     try {
         // Determine model based on use case if not provided
@@ -386,9 +417,9 @@ app.post('/api/ai/generate', authenticate, async (req, res) => {
         logger.error("AI Generation Failed", e);
         res.status(500).json({ message: 'AI generation failed', details: e.message });
     }
-});
+} as any);
 
-app.post('/api/ai/generate-images', authenticate, async (req, res) => {
+app.post('/api/ai/generate-images', authenticate, async (req: any, res: any) => {
     const { prompt, config } = req.body;
     try {
         const response = await ai.models.generateImages({
@@ -401,14 +432,18 @@ app.post('/api/ai/generate-images', authenticate, async (req, res) => {
         logger.error("AI Image Generation Failed", e);
         res.status(500).json({ message: 'AI image generation failed', details: e.message });
     }
-});
+} as any);
 
 // Endpoint to securely provide API Key to authenticated clients for Live API usage
-app.get('/api/auth/ai-token', authenticate, (req, res) => {
+app.get('/api/auth/ai-token', authenticate, (req: any, res: any) => {
     // In a real production environment, this should issue a short-lived token
     // or STS token. For this prototype, we send the key but only to authenticated users.
-    res.json({ apiKey: process.env.API_KEY });
-});
+    const key = getSecureApiKey();
+    if (!key) {
+        return res.status(500).json({ message: "AI configuration missing on server." });
+    }
+    res.json({ apiKey: key });
+} as any);
 
 // --- Email Testing Endpoint ---
 app.post('/api/admin/test-email', authenticate, requirePermission('manage_settings'), async (req: any, res: any) => {
@@ -437,7 +472,7 @@ app.post('/api/admin/test-email', authenticate, requirePermission('manage_settin
         logger.error("Test email failed", e);
         res.status(400).json({ message: msg });
     }
-});
+} as any);
 
 // --- Bulk Broadcast (Admin) ---
 app.post('/api/admin/broadcast', authenticate, requirePermission('send_invitations'), async (req: any, res: any) => {
@@ -522,12 +557,12 @@ app.post('/api/admin/broadcast', authenticate, requirePermission('send_invitatio
         logger.error("Broadcast failed", e);
         res.status(500).json({ message: "Failed to queue broadcast." });
     }
-});
+} as any);
 
 // --- Authentication ---
 
 // Admin Login
-app.post('/api/login/admin', rateLimiter, async (req, res) => {
+app.post('/api/login/admin', rateLimiter as any, async (req: any, res: any) => {
     const { email, password } = req.body;
     try {
         const result = await query('SELECT * FROM admin_users WHERE email = $1', [email]);
@@ -562,10 +597,10 @@ app.post('/api/login/admin', rateLimiter, async (req, res) => {
         logger.error('Admin login error', e);
         res.status(500).json({ message: 'Internal server error' });
     }
-});
+} as any);
 
 // Delegate Login
-app.post('/api/login/delegate', rateLimiter, async (req, res) => {
+app.post('/api/login/delegate', rateLimiter as any, async (req: any, res: any) => {
     const { email, password, eventId } = req.body;
     try {
         const result = await query('SELECT * FROM registrations WHERE email = $1 AND event_id = $2', [email, eventId]);
@@ -589,20 +624,20 @@ app.post('/api/login/delegate', rateLimiter, async (req, res) => {
         logger.error('Delegate login error', e);
         res.status(500).json({ message: 'Internal server error' });
     }
-});
+} as any);
 
-app.post('/api/logout', (req, res) => {
+app.post('/api/logout', (req: any, res: any) => {
     res.clearCookie('token');
     res.json({ success: true });
-});
+} as any);
 
 // Check Session
-app.get('/api/auth/me', authenticate, (req: any, res) => {
+app.get('/api/auth/me', authenticate, (req: any, res: any) => {
     res.json({ user: req.user });
-});
+} as any);
 
 // Forgot Password
-app.post('/api/auth/forgot-password', rateLimiter, async (req, res) => {
+app.post('/api/auth/forgot-password', rateLimiter as any, async (req: any, res: any) => {
     const { email, eventId, type } = req.body;
     try {
         let user;
@@ -644,10 +679,10 @@ app.post('/api/auth/forgot-password', rateLimiter, async (req, res) => {
         logger.error("Forgot password error", e);
         res.status(500).json({ message: "Error processing request" });
     }
-});
+} as any);
 
 // Reset Password
-app.post('/api/auth/reset-password', rateLimiter, async (req, res) => {
+app.post('/api/auth/reset-password', rateLimiter as any, async (req: any, res: any) => {
     const { token, newPassword } = req.body;
     try {
         const tokenRes = await query('SELECT * FROM password_reset_tokens WHERE token = $1 AND expiry > $2', [token, Date.now()]);
@@ -670,13 +705,13 @@ app.post('/api/auth/reset-password', rateLimiter, async (req, res) => {
         logger.error("Reset password error", e);
         res.status(500).json({ message: "Error resetting password" });
     }
-});
+} as any);
 
 
 // --- Events ---
 
 // List Public Events
-app.get('/api/events', async (req, res) => {
+app.get('/api/events', async (req: any, res: any) => {
     try {
         const result = await query('SELECT id, name, config FROM events');
         const publicEvents = result.rows.map(row => ({
@@ -691,10 +726,10 @@ app.get('/api/events', async (req, res) => {
     } catch (e) {
         res.status(500).json({ message: 'Error fetching events' });
     }
-});
+} as any);
 
 // Get Event Config
-app.get('/api/events/:id', async (req, res) => {
+app.get('/api/events/:id', async (req: any, res: any) => {
     try {
         const result = await query('SELECT config FROM events WHERE id = $1', [req.params.id]);
         if (result.rows.length === 0) return res.status(404).json({ message: 'Event not found' });
@@ -716,7 +751,7 @@ app.get('/api/events/:id', async (req, res) => {
     } catch (e) {
         res.status(500).json({ message: 'Error fetching event' });
     }
-});
+} as any);
 
 // Save Event Config - Protected
 app.put('/api/events/:id/config', authenticate, requirePermission('manage_settings'), async (req: any, res: any) => {
@@ -727,7 +762,7 @@ app.put('/api/events/:id/config', authenticate, requirePermission('manage_settin
     } catch (e) {
         res.status(500).json({ message: 'Error saving config' });
     }
-});
+} as any);
 
 // Create Event - Protected
 app.post('/api/events', authenticate, requirePermission('manage_settings'), async (req: any, res: any) => {
@@ -744,7 +779,7 @@ app.post('/api/events', authenticate, requirePermission('manage_settings'), asyn
     } catch (e) {
         res.status(500).json({ message: 'Error creating event' });
     }
-});
+} as any);
 
 // --- Admin Dashboard ---
 
@@ -792,7 +827,7 @@ app.get('/api/admin/dashboard-stats', authenticate, requirePermission('view_dash
     } catch (e) {
         res.status(500).json({ message: 'Error fetching stats' });
     }
-});
+} as any);
 
 // --- Registrations ---
 
@@ -805,9 +840,9 @@ app.get('/api/admin/registrations', authenticate, requirePermission('manage_regi
     } catch (e) {
         res.status(500).json({ message: 'Error fetching registrations' });
     }
-});
+} as any);
 
-app.post('/api/registrations', rateLimiter, async (req, res) => {
+app.post('/api/registrations', rateLimiter as any, async (req: any, res: any) => {
     const { eventId, data, inviteToken } = req.body;
     const { name, email, password, ...customFields } = data;
 
@@ -846,7 +881,7 @@ app.post('/api/registrations', rateLimiter, async (req, res) => {
                 const config = configRes.rows[0]?.config;
                 if (config) {
                      // Generate AI content
-                     const prompt = `Generate a confirmation email for event ${config.event.name}. User: ${name}.`;
+                     // const prompt = `Generate a confirmation email for event ${config.event.name}. User: ${name}.`;
                      // For now using a simple template if AI call is too complex to inline here without context
                      const subject = `Registration Confirmed: ${config.event.name}`;
                      const body = `Hi ${name},\n\nThanks for registering! Your ID is ${id}.`;
@@ -865,7 +900,7 @@ app.post('/api/registrations', rateLimiter, async (req, res) => {
     } finally {
         client.release();
     }
-});
+} as any);
 
 // Invitation (Admin)
 app.post('/api/admin/invite', authenticate, requirePermission('send_invitations'), async (req: any, res: any) => {
@@ -888,7 +923,7 @@ app.post('/api/admin/invite', authenticate, requirePermission('send_invitations'
         logger.error("Invitation failed", e);
         res.status(500).json({ message: "Failed to send invitation" });
     }
-});
+} as any);
 
 
 // Update Registration (Admin)
@@ -907,7 +942,7 @@ app.put('/api/admin/registrations/:id', authenticate, requirePermission('manage_
         logger.error('Error updating registration', e);
         res.status(500).json({ message: 'Update failed' });
     }
-});
+} as any);
 
 // Delete Registration (Admin)
 app.delete('/api/admin/registrations/:id', authenticate, requirePermission('manage_registrations'), async (req: any, res: any) => {
@@ -931,7 +966,7 @@ app.delete('/api/admin/registrations/:id', authenticate, requirePermission('mana
         logger.error('Error deleting registration', e);
         res.status(500).json({ message: 'Delete failed' });
     }
-});
+} as any);
 
 // --- Admin Wallet Management ---
 app.post('/api/admin/wallet/transaction', authenticate, requirePermission('manage_settings'), async (req: any, res: any) => {
@@ -985,7 +1020,7 @@ app.post('/api/admin/wallet/transaction', authenticate, requirePermission('manag
     } finally {
         client.release();
     }
-});
+} as any);
 
 // --- Secure Payment Processing (Stripe Simulation) ---
 app.post('/api/payments/purchase', authenticate, async (req: any, res: any) => {
@@ -1027,18 +1062,18 @@ app.post('/api/payments/purchase', authenticate, async (req: any, res: any) => {
     } finally {
         client.release();
     }
-});
+} as any);
 
 // --- Users & Roles ---
 
-app.get('/api/admin/users', authenticate, requirePermission('manage_users'), async (req, res) => {
+app.get('/api/admin/users', authenticate, requirePermission('manage_users'), async (req: any, res: any) => {
     try {
         const result = await query('SELECT * FROM admin_users');
         res.json(result.rows);
     } catch (e) { res.status(500).json({ message: 'Error' }); }
-});
+} as any);
 
-app.post('/api/admin/users', authenticate, requirePermission('manage_users'), async (req, res) => {
+app.post('/api/admin/users', authenticate, requirePermission('manage_users'), async (req: any, res: any) => {
     const { id, email, password, roleId } = req.body;
     try {
         if (id) {
@@ -1050,29 +1085,29 @@ app.post('/api/admin/users', authenticate, requirePermission('manage_users'), as
         }
         res.json({ success: true });
     } catch(e) { res.status(500).json({ message: 'Error saving user' }); }
-});
+} as any);
 
-app.delete('/api/admin/users/:id', authenticate, requirePermission('manage_users'), async (req, res) => {
+app.delete('/api/admin/users/:id', authenticate, requirePermission('manage_users'), async (req: any, res: any) => {
     await query('DELETE FROM admin_users WHERE id = $1', [req.params.id]);
     res.json({ success: true });
-});
+} as any);
 
-app.get('/api/admin/roles', authenticate, requirePermission('manage_users'), async (req, res) => {
+app.get('/api/admin/roles', authenticate, requirePermission('manage_users'), async (req: any, res: any) => {
     try {
         const result = await query('SELECT * FROM roles');
         res.json(result.rows);
     } catch (e) { res.status(500).json({ message: 'Error' }); }
-});
+} as any);
 
 // --- Tasks ---
-app.get('/api/tasks', authenticate, requirePermission('manage_tasks'), async (req, res) => {
+app.get('/api/tasks', authenticate, requirePermission('manage_tasks'), async (req: any, res: any) => {
     try {
         const eventId = req.query.eventId || 'main-event';
         const result = await query('SELECT * FROM tasks WHERE event_id = $1', [eventId]);
         res.json(result.rows);
     } catch (e) { res.status(500).json({ message: 'Error' }); }
-});
-app.post('/api/tasks', authenticate, requirePermission('manage_tasks'), async (req, res) => {
+} as any);
+app.post('/api/tasks', authenticate, requirePermission('manage_tasks'), async (req: any, res: any) => {
     const task = req.body;
     try {
         if (task.id) {
@@ -1082,23 +1117,23 @@ app.post('/api/tasks', authenticate, requirePermission('manage_tasks'), async (r
         }
         res.json({ success: true });
     } catch (e) { res.status(500).json({ message: 'Error' }); }
-});
-app.delete('/api/tasks/:id', authenticate, requirePermission('manage_tasks'), async (req, res) => {
+} as any);
+app.delete('/api/tasks/:id', authenticate, requirePermission('manage_tasks'), async (req: any, res: any) => {
     await query('DELETE FROM tasks WHERE id = $1', [req.params.id]);
     res.json({ success: true });
-});
+} as any);
 
 // --- Agenda (Sessions) ---
-app.get('/api/sessions', async (req, res) => {
+app.get('/api/sessions', async (req: any, res: any) => {
     try {
         const eventId = req.query.eventId || 'main-event';
         const result = await query('SELECT * FROM sessions WHERE event_id = $1 ORDER BY start_time ASC', [eventId]);
         res.json(result.rows);
     } catch (e) { res.status(500).json({ message: 'Error' }); }
-});
+} as any);
 
 // Calendar Export (ICS)
-app.get('/api/sessions/:id/ics', async (req, res) => {
+app.get('/api/sessions/:id/ics', async (req: any, res: any) => {
     try {
         const sessionId = req.params.id;
         const result = await query('SELECT * FROM sessions WHERE id = $1', [sessionId]);
@@ -1134,9 +1169,9 @@ app.get('/api/sessions/:id/ics', async (req, res) => {
         logger.error("ICS Export Failed", e);
         res.status(500).send("Error generating calendar file");
     }
-});
+} as any);
 
-app.post('/api/sessions', authenticate, requirePermission('manage_agenda'), async (req, res) => {
+app.post('/api/sessions', authenticate, requirePermission('manage_agenda'), async (req: any, res: any) => {
     const s = req.body;
     const eventId = s.eventId || 'main-event';
     try {
@@ -1147,21 +1182,21 @@ app.post('/api/sessions', authenticate, requirePermission('manage_agenda'), asyn
         }
         res.json({ success: true });
     } catch (e) { res.status(500).json({ message: 'Error' }); }
-});
-app.delete('/api/sessions/:id', authenticate, requirePermission('manage_agenda'), async (req, res) => {
+} as any);
+app.delete('/api/sessions/:id', authenticate, requirePermission('manage_agenda'), async (req: any, res: any) => {
     await query('DELETE FROM sessions WHERE id = $1', [req.params.id]);
     res.json({ success: true });
-});
+} as any);
 
 // --- Speakers ---
-app.get('/api/speakers', async (req, res) => {
+app.get('/api/speakers', async (req: any, res: any) => {
     try {
         const eventId = req.query.eventId || 'main-event';
         const result = await query('SELECT * FROM speakers WHERE event_id = $1', [eventId]);
         res.json(result.rows);
     } catch (e) { res.status(500).json({ message: 'Error' }); }
-});
-app.post('/api/speakers', authenticate, requirePermission('manage_speakers_sponsors'), async (req, res) => {
+} as any);
+app.post('/api/speakers', authenticate, requirePermission('manage_speakers_sponsors'), async (req: any, res: any) => {
     const s = req.body;
     const eventId = s.eventId || 'main-event';
     try {
@@ -1172,21 +1207,21 @@ app.post('/api/speakers', authenticate, requirePermission('manage_speakers_spons
         }
         res.json({ success: true });
     } catch (e) { res.status(500).json({ message: 'Error' }); }
-});
-app.delete('/api/speakers/:id', authenticate, requirePermission('manage_speakers_sponsors'), async (req, res) => {
+} as any);
+app.delete('/api/speakers/:id', authenticate, requirePermission('manage_speakers_sponsors'), async (req: any, res: any) => {
     await query('DELETE FROM speakers WHERE id = $1', [req.params.id]);
     res.json({ success: true });
-});
+} as any);
 
 // --- Sponsors ---
-app.get('/api/sponsors', async (req, res) => {
+app.get('/api/sponsors', async (req: any, res: any) => {
     try {
         const eventId = req.query.eventId || 'main-event';
         const result = await query('SELECT * FROM sponsors WHERE event_id = $1', [eventId]);
         res.json(result.rows);
     } catch (e) { res.status(500).json({ message: 'Error' }); }
-});
-app.post('/api/sponsors', authenticate, requirePermission('manage_speakers_sponsors'), async (req, res) => {
+} as any);
+app.post('/api/sponsors', authenticate, requirePermission('manage_speakers_sponsors'), async (req: any, res: any) => {
     const s = req.body;
     const eventId = s.eventId || 'main-event';
     try {
@@ -1197,20 +1232,20 @@ app.post('/api/sponsors', authenticate, requirePermission('manage_speakers_spons
         }
         res.json({ success: true });
     } catch (e) { res.status(500).json({ message: 'Error' }); }
-});
-app.delete('/api/sponsors/:id', authenticate, requirePermission('manage_speakers_sponsors'), async (req, res) => {
+} as any);
+app.delete('/api/sponsors/:id', authenticate, requirePermission('manage_speakers_sponsors'), async (req: any, res: any) => {
     await query('DELETE FROM sponsors WHERE id = $1', [req.params.id]);
     res.json({ success: true });
-});
+} as any);
 
 // --- Logistics (Hotels, Dining) ---
-app.get('/api/hotels', async (req, res) => {
+app.get('/api/hotels', async (req: any, res: any) => {
     try {
         const result = await query('SELECT * FROM hotels'); 
         res.json(result.rows);
     } catch (e) { res.status(500).json({ message: 'Error' }); }
-});
-app.post('/api/hotels', authenticate, requirePermission('manage_accommodation'), async (req, res) => {
+} as any);
+app.post('/api/hotels', authenticate, requirePermission('manage_accommodation'), async (req: any, res: any) => {
     const h = req.body;
     try {
         if (h.id) {
@@ -1220,19 +1255,19 @@ app.post('/api/hotels', authenticate, requirePermission('manage_accommodation'),
         }
         res.json({ success: true });
     } catch (e) { res.status(500).json({ message: 'Error' }); }
-});
-app.delete('/api/hotels/:id', authenticate, requirePermission('manage_accommodation'), async (req, res) => {
+} as any);
+app.delete('/api/hotels/:id', authenticate, requirePermission('manage_accommodation'), async (req: any, res: any) => {
     await query('DELETE FROM hotels WHERE id = $1', [req.params.id]);
     res.json({ success: true });
-});
+} as any);
 
-app.get('/api/meal-plans', async (req, res) => {
+app.get('/api/meal-plans', async (req: any, res: any) => {
     try {
         const result = await query('SELECT * FROM meal_plans');
         res.json(result.rows);
     } catch (e) { res.status(500).json({ message: 'Error' }); }
-});
-app.post('/api/meal-plans', authenticate, requirePermission('manage_dining'), async (req, res) => {
+} as any);
+app.post('/api/meal-plans', authenticate, requirePermission('manage_dining'), async (req: any, res: any) => {
     const p = req.body;
     try {
         if (p.id) {
@@ -1242,19 +1277,19 @@ app.post('/api/meal-plans', authenticate, requirePermission('manage_dining'), as
         }
         res.json({ success: true });
     } catch (e) { res.status(500).json({ message: 'Error' }); }
-});
-app.delete('/api/meal-plans/:id', authenticate, requirePermission('manage_dining'), async (req, res) => {
+} as any);
+app.delete('/api/meal-plans/:id', authenticate, requirePermission('manage_dining'), async (req: any, res: any) => {
     await query('DELETE FROM meal_plans WHERE id = $1', [req.params.id]);
     res.json({ success: true });
-});
+} as any);
 
-app.get('/api/restaurants', async (req, res) => {
+app.get('/api/restaurants', async (req: any, res: any) => {
     try {
         const result = await query('SELECT * FROM restaurants');
         res.json(result.rows);
     } catch (e) { res.status(500).json({ message: 'Error' }); }
-});
-app.post('/api/restaurants', authenticate, requirePermission('manage_dining'), async (req, res) => {
+} as any);
+app.post('/api/restaurants', authenticate, requirePermission('manage_dining'), async (req: any, res: any) => {
     const r = req.body;
     try {
         if (r.id) {
@@ -1264,11 +1299,11 @@ app.post('/api/restaurants', authenticate, requirePermission('manage_dining'), a
         }
         res.json({ success: true });
     } catch (e) { res.status(500).json({ message: 'Error' }); }
-});
-app.delete('/api/restaurants/:id', authenticate, requirePermission('manage_dining'), async (req, res) => {
+} as any);
+app.delete('/api/restaurants/:id', authenticate, requirePermission('manage_dining'), async (req: any, res: any) => {
     await query('DELETE FROM restaurants WHERE id = $1', [req.params.id]);
     res.json({ success: true });
-});
+} as any);
 
 // Add Reservation (Admin)
 app.post('/api/admin/dining/reservations', authenticate, requirePermission('manage_dining'), async (req: any, res: any) => {
@@ -1281,23 +1316,23 @@ app.post('/api/admin/dining/reservations', authenticate, requirePermission('mana
             [`res_${Date.now()}`, restaurantId, delegateId, delegateName, reservationTime, partySize]);
         res.json({ success: true });
     } catch (e) { res.status(500).json({ message: 'Error' }); }
-});
+} as any);
 
 // Delete Reservation
-app.delete('/api/dining/reservations/:id', authenticate, requirePermission('manage_dining'), async (req, res) => {
+app.delete('/api/dining/reservations/:id', authenticate, requirePermission('manage_dining'), async (req: any, res: any) => {
     await query('DELETE FROM dining_reservations WHERE id = $1', [req.params.id]);
     res.json({ success: true });
-});
+} as any);
 
 // --- Engagement (Scavenger Hunt) ---
-app.get('/api/scavenger-hunt-items', async (req, res) => {
+app.get('/api/scavenger-hunt-items', async (req: any, res: any) => {
     try {
         const result = await query('SELECT * FROM scavenger_hunt_items');
         // Hide secret code if not admin (check handled by client logic but secure here if needed)
         res.json(result.rows);
     } catch (e) { res.status(500).json({ message: 'Error' }); }
-});
-app.post('/api/scavenger-hunt-items', authenticate, requirePermission('manage_settings'), async (req, res) => {
+} as any);
+app.post('/api/scavenger-hunt-items', authenticate, requirePermission('manage_settings'), async (req: any, res: any) => {
     const i = req.body;
     try {
         if (i.id) {
@@ -1307,17 +1342,17 @@ app.post('/api/scavenger-hunt-items', authenticate, requirePermission('manage_se
         }
         res.json({ success: true });
     } catch (e) { res.status(500).json({ message: 'Error' }); }
-});
-app.delete('/api/scavenger-hunt-items/:id', authenticate, requirePermission('manage_settings'), async (req, res) => {
+} as any);
+app.delete('/api/scavenger-hunt-items/:id', authenticate, requirePermission('manage_settings'), async (req: any, res: any) => {
     await query('DELETE FROM scavenger_hunt_items WHERE id = $1', [req.params.id]);
     res.json({ success: true });
-});
-app.get('/api/scavenger-hunt/progress', authenticate, async (req: any, res) => {
+} as any);
+app.get('/api/scavenger-hunt/progress', authenticate, async (req: any, res: any) => {
     try {
         const result = await query('SELECT item_id FROM scavenger_hunt_logs WHERE user_id = $1', [req.user.id]);
         res.json(result.rows.map(r => r.item_id));
     } catch (e) { res.status(500).json({ message: 'Error' }); }
-});
+} as any);
 app.post('/api/scavenger-hunt/claim', authenticate, async (req: any, res: any) => {
     const { secretCode } = req.body;
     const client = await pool.connect();
@@ -1352,7 +1387,7 @@ app.post('/api/scavenger-hunt/claim', authenticate, async (req: any, res: any) =
     } finally {
         client.release();
     }
-});
+} as any);
 // Leaderboard
 app.get('/api/scavenger-hunt/leaderboard', authenticate, async (req: any, res: any) => {
     try {
@@ -1383,16 +1418,16 @@ app.get('/api/scavenger-hunt/leaderboard', authenticate, async (req: any, res: a
         logger.error("Leaderboard error", e);
         res.status(500).json({ message: 'Error' }); 
     }
-});
+} as any);
 
 // --- Networking ---
-app.get('/api/networking/profile', authenticate, async (req: any, res) => {
+app.get('/api/networking/profile', authenticate, async (req: any, res: any) => {
     try {
         const result = await query('SELECT * FROM networking_profiles WHERE user_id = $1', [req.user.id]);
         res.json(result.rows[0] || null);
     } catch (e) { res.status(500).json({ message: 'Error' }); }
-});
-app.post('/api/networking/profile', authenticate, async (req: any, res) => {
+} as any);
+app.post('/api/networking/profile', authenticate, async (req: any, res: any) => {
     const p = req.body;
     try {
         const check = await query('SELECT * FROM networking_profiles WHERE user_id = $1', [req.user.id]);
@@ -1403,8 +1438,8 @@ app.post('/api/networking/profile', authenticate, async (req: any, res) => {
         }
         res.json(p);
     } catch (e) { res.status(500).json({ message: 'Error' }); }
-});
-app.get('/api/networking/candidates', authenticate, async (req: any, res) => {
+} as any);
+app.get('/api/networking/candidates', authenticate, async (req: any, res: any) => {
     try {
         const result = await query('SELECT * FROM networking_profiles WHERE user_id != $1 AND is_visible = true', [req.user.id]);
         // Enrich with user names
@@ -1417,7 +1452,7 @@ app.get('/api/networking/candidates', authenticate, async (req: any, res) => {
         }
         res.json(profiles);
     } catch (e) { res.status(500).json({ message: 'Error' }); }
-});
+} as any);
 
 // Start Server
 app.listen(port, () => {
