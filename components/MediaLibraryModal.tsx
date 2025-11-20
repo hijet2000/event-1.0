@@ -44,8 +44,9 @@ export const MediaLibraryModal: React.FC<MediaLibraryModalProps> = ({ isOpen, on
       const file = e.target.files?.[0];
       if (!file) return;
       
-      if (file.size > 5 * 1024 * 1024) {
-          alert("File is too large. Max 5MB.");
+      // Client-side check for 50MB, matching backend limit
+      if (file.size > 50 * 1024 * 1024) {
+          alert("File is too large. Max 50MB.");
           return;
       }
 
@@ -109,7 +110,7 @@ export const MediaLibraryModal: React.FC<MediaLibraryModalProps> = ({ isOpen, on
                         type="file" 
                         ref={fileInputRef} 
                         onChange={handleFileUpload} 
-                        accept="image/*" 
+                        accept="image/*,video/*" 
                         className="hidden" 
                     />
                     <button 
@@ -139,7 +140,13 @@ export const MediaLibraryModal: React.FC<MediaLibraryModalProps> = ({ isOpen, on
                                 className="group relative aspect-square bg-white dark:bg-gray-800 rounded-lg shadow-sm border border-gray-200 dark:border-gray-700 overflow-hidden cursor-pointer hover:ring-2 hover:ring-primary hover:shadow-md transition-all"
                                 onClick={() => { onSelect(item.url); onClose(); }}
                             >
-                                <img src={item.url} alt={item.name} className="w-full h-full object-cover" />
+                                <div className="w-full h-full flex items-center justify-center bg-gray-100 dark:bg-black">
+                                     {item.type.startsWith('video/') ? (
+                                        <video src={item.url} className="w-full h-full object-cover pointer-events-none" />
+                                     ) : (
+                                        <img src={item.url} alt={item.name} className="w-full h-full object-cover" />
+                                     )}
+                                </div>
                                 
                                 {/* Overlay Info */}
                                 <div className="absolute inset-x-0 bottom-0 bg-black/60 p-2 translate-y-full group-hover:translate-y-0 transition-transform duration-200">

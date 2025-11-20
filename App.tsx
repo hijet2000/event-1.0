@@ -1,5 +1,4 @@
-
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, Suspense } from 'react';
 import { type RegistrationData, type Permission, type Session, type Speaker, type Sponsor } from './types';
 import { registerUser, loginDelegate, triggerRegistrationEmails, getInvitationDetails, getPublicEventData } from './server/api';
 import { verifyToken } from './server/auth';
@@ -10,14 +9,16 @@ import { ContentLoader } from './components/ContentLoader';
 import { AdminLoginModal } from './components/AdminLoginModal';
 import { PasswordResetForm } from './components/PasswordResetForm';
 import { DelegateLoginModal } from './components/DelegateLoginModal';
-import { DelegatePortal } from './components/DelegatePortal';
 import { ThemeProvider, useTheme } from './contexts/ThemeContext';
-import { AdminPortal } from './components/AdminPortal';
 import { EventSelectionPage } from './components/EventSelectionPage';
 import { CountdownTimer } from './components/CountdownTimer';
 import { AgendaView } from './components/AgendaView';
 import { DirectoryView } from './components/DirectoryView';
 import { PublicHome } from './components/PublicHome';
+
+// Lazy load heavy portals to improve initial page load speed
+const AdminPortal = React.lazy(() => import('./components/AdminPortal').then(module => ({ default: module.AdminPortal })));
+const DelegatePortal = React.lazy(() => import('./components/DelegatePortal').then(module => ({ default: module.DelegatePortal })));
 
 type View = 'registration' | 'success' | 'passwordReset';
 type PublicTab = 'home' | 'agenda' | 'speakers' | 'register';
@@ -35,13 +36,20 @@ export interface RegistrationFormState {
   [key: string]: any;
 }
 
-class ErrorBoundary extends React.Component<{ children: React.ReactNode }, { hasError: boolean, error: Error | null }> {
-  constructor(props: { children: React.ReactNode }) {
-    super(props);
-    this.state = { hasError: false, error: null };
-  }
+interface ErrorBoundaryProps {
+  children?: React.ReactNode;
+}
 
-  static getDerivedStateFromError(error: Error) {
+interface ErrorBoundaryState {
+  hasError: boolean;
+  error: Error | null;
+}
+
+class ErrorBoundary extends React.Component<ErrorBoundaryProps, ErrorBoundaryState> {
+  state: ErrorBoundaryState = { hasError: false, error: null };
+  declare props: Readonly<ErrorBoundaryProps>;
+
+  static getDerivedStateFromError(error: Error): ErrorBoundaryState {
     return { hasError: true, error };
   }
 
@@ -241,7 +249,11 @@ const EventPageContent: React.FC<EventPageContentProps> = ({ onAdminLogin, event
   );
 
   if (delegateToken) {
-    return <DelegatePortal onLogout={handleDelegateLogout} delegateToken={delegateToken} />;
+    return (
+        <Suspense fallback={<div className="min-h-screen flex items-center justify-center"><ContentLoader text="Loading portal..." /></div>}>
+            <DelegatePortal onLogout={handleDelegateLogout} delegateToken={delegateToken} />
+        </Suspense>
+    );
   }
   
   if (isThemeLoading || publicDataLoading) {
@@ -477,7 +489,9 @@ function App() {
   return (
     <ErrorBoundary>
       {adminSession ? (
-        <AdminPortal onLogout={handleAdminLogout} adminToken={adminSession.token} user={adminSession.user} />
+        <Suspense fallback={<div className="min-h-screen flex items-center justify-center"><ContentLoader text="Loading dashboard..." /></div>}>
+             <AdminPortal onLogout={handleAdminLogout} adminToken={adminSession.token} user={adminSession.user} />
+        </Suspense>
       ) : (
         (() => {
           const ignoredPaths = [

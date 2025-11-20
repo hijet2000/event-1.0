@@ -1,13 +1,4 @@
 
-
-
-
-
-
-
-
-
-
 export type Permission = 
   'view_dashboard' | 
   'manage_registrations' | 
@@ -164,6 +155,8 @@ export interface DashboardStats {
   eventCoinName: string;
   eventCoinCirculation: number;
   recentRegistrations: RegistrationData[];
+  registrationTrend: { date: string; count: number }[];
+  taskStats: { total: number; completed: number; pending: number };
 }
 
 export interface PublicEvent {
@@ -305,12 +298,13 @@ export interface Transaction {
   toEmail: string;
   amount: number;
   message: string;
-  type: 'initial' | 'p2p' | 'purchase' | 'reward';
+  type: 'initial' | 'p2p' | 'purchase' | 'reward' | 'admin_adjustment';
   timestamp: number;
 }
 
 // Task Management Types
 export type TaskStatus = 'todo' | 'in_progress' | 'completed';
+export type TaskPriority = 'low' | 'medium' | 'high';
 
 export interface Task {
     id: string;
@@ -318,6 +312,7 @@ export interface Task {
     title: string;
     description: string;
     status: TaskStatus;
+    priority: TaskPriority;
     assigneeEmail: string;
     dueDate: string; // YYYY-MM-DD
 }
@@ -331,6 +326,8 @@ export interface Session {
   endTime: string; // ISO String
   location: string;
   speakerIds: string[];
+  track?: string; // e.g. "Workshop", "Main Stage"
+  capacity?: number;
 }
 
 export interface SessionFeedback {
@@ -404,4 +401,11 @@ export interface ScavengerHuntLog {
     userId: string;
     itemId: string;
     timestamp: number;
+}
+
+export interface LeaderboardEntry {
+    userId: string;
+    name: string;
+    score: number;
+    itemsFound: number;
 }

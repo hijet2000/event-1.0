@@ -37,8 +37,9 @@ export const MediaDashboard: React.FC<MediaDashboardProps> = ({ adminToken }) =>
       const file = e.target.files?.[0];
       if (!file) return;
       
-      if (file.size > 5 * 1024 * 1024) {
-          alert("File is too large. Max 5MB.");
+      // Simple client-side limit check, though backend supports 50MB
+      if (file.size > 50 * 1024 * 1024) {
+          alert("File is too large. Max 50MB.");
           return;
       }
 
@@ -75,14 +76,14 @@ export const MediaDashboard: React.FC<MediaDashboardProps> = ({ adminToken }) =>
         <div className="flex justify-between items-center mb-6">
              <div>
                 <h2 className="text-2xl font-bold text-gray-900 dark:text-white">Media Library</h2>
-                <p className="mt-1 text-sm text-gray-500 dark:text-gray-400">Manage all images and files uploaded to your event platform.</p>
+                <p className="mt-1 text-sm text-gray-500 dark:text-gray-400">Manage all images and videos uploaded to your event platform.</p>
             </div>
             <div>
                 <input 
                     type="file" 
                     ref={fileInputRef} 
                     onChange={handleFileUpload} 
-                    accept="image/*" 
+                    accept="image/*,video/*" 
                     className="hidden" 
                 />
                 <button 
@@ -109,12 +110,16 @@ export const MediaDashboard: React.FC<MediaDashboardProps> = ({ adminToken }) =>
             <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-4">
                 {filteredMedia.map(item => (
                     <div key={item.id} className="group relative bg-white dark:bg-gray-800 rounded-lg shadow-md border border-gray-200 dark:border-gray-700 overflow-hidden flex flex-col">
-                        <div className="aspect-square bg-gray-100 dark:bg-black/30 relative">
-                            <img src={item.url} alt={item.name} className="w-full h-full object-cover" />
-                            <div className="absolute inset-0 bg-black/0 group-hover:bg-black/30 transition-colors flex items-center justify-center opacity-0 group-hover:opacity-100">
+                        <div className="aspect-square bg-gray-100 dark:bg-black/30 relative flex items-center justify-center">
+                            {item.type.startsWith('video/') ? (
+                                <video src={item.url} className="w-full h-full object-cover" controls />
+                            ) : (
+                                <img src={item.url} alt={item.name} className="w-full h-full object-cover" />
+                            )}
+                            <div className="absolute inset-0 bg-black/0 group-hover:bg-black/30 transition-colors flex items-center justify-center opacity-0 group-hover:opacity-100 pointer-events-none">
                                 <button 
                                     onClick={() => handleDelete(item.id)}
-                                    className="bg-red-500 text-white p-2 rounded-full shadow-lg hover:bg-red-600 transform hover:scale-110 transition-all"
+                                    className="bg-red-500 text-white p-2 rounded-full shadow-lg hover:bg-red-600 transform hover:scale-110 transition-all pointer-events-auto"
                                     title="Delete"
                                 >
                                     <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" /></svg>

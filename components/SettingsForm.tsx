@@ -1,7 +1,7 @@
 
 import React, { useState, useEffect } from 'react';
 import { type EventConfig, type FormField } from '../types';
-import { getEventConfig, saveConfig, syncConfigFromGitHub } from '../server/api';
+import { getEventConfig, saveConfig, syncConfigFromGitHub, sendTestEmail } from '../server/api';
 import { ContentLoader } from './ContentLoader';
 import { Spinner } from './Spinner';
 import { Alert } from './Alert';
@@ -17,42 +17,62 @@ interface SettingsFormProps {
 const FONT_OPTIONS = ['Inter', 'Roboto', 'Lato', 'Montserrat'];
 const EVENT_TYPES = ['Conference', 'Workshop', 'Webinar', 'Meetup', 'Other'];
 
+type Tab = 'general' | 'registration' | 'theme' | 'communications' | 'economy' | 'integrations';
+
 const TemplateEditor: React.FC<{
     templateKey: keyof EventConfig['emailTemplates'],
     label: string;
     config: EventConfig;
     onChange: (templateKey: keyof EventConfig['emailTemplates'], field: 'subject' | 'body', value: string) => void;
     placeholders: string[];
-}> = ({ templateKey, label, config, onChange, placeholders }) => (
-    <div className="p-4 rounded-md bg-gray-50 dark:bg-gray-700/50 border border-gray-200 dark:border-gray-600">
-        <h4 className="text-md font-medium text-gray-800 dark:text-gray-200">{label}</h4>
-        <div className="mt-3 space-y-2">
-            <input 
-                type="text" 
-                name="subject" 
-                value={config.emailTemplates[templateKey].subject}
-                onChange={(e) => onChange(templateKey, 'subject', e.target.value)}
-                placeholder="Email Subject"
-                className="block w-full rounded-md border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 shadow-sm sm:text-sm" 
-            />
-            <textarea 
-                name="body" 
-                rows={6}
-                value={config.emailTemplates[templateKey].body}
-                onChange={(e) => onChange(templateKey, 'body', e.target.value)}
-                placeholder="Email Body..."
-                className="block w-full rounded-md border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 shadow-sm sm:text-sm font-mono text-sm"
-            />
-            <p className="text-xs text-gray-500 dark:text-gray-400">
-                <span className="font-semibold">Placeholders:</span> {placeholders.join(', ')}
-            </p>
-        </div>
-    </div>
-);
+}> = ({ templateKey, label, config, onChange, placeholders }) => {
+    const [isOpen, setIsOpen] = useState(false);
 
+    return (
+        <div className="border border-gray-200 dark:border-gray-700 rounded-md overflow-hidden">
+            <button 
+                type="button"
+                onClick={() => setIsOpen(!isOpen)}
+                className="w-full px-4 py-3 bg-gray-50 dark:bg-gray-700/50 flex justify-between items-center text-left"
+            >
+                <span className="font-medium text-gray-800 dark:text-gray-200">{label}</span>
+                <svg className={`w-5 h-5 text-gray-500 transform transition-transform ${isOpen ? 'rotate-180' : ''}`} fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+                </svg>
+            </button>
+            
+            {isOpen && (
+                <div className="p-4 space-y-3 bg-white dark:bg-gray-800 border-t border-gray-200 dark:border-gray-700 animate-fade-in">
+                    <div>
+                        <label className="block text-xs font-medium text-gray-500 mb-1">Subject Line</label>
+                        <input 
+                            type="text" 
+                            name="subject" 
+                            value={config.emailTemplates[templateKey].subject}
+                            onChange={(e) => onChange(templateKey, 'subject', e.target.value)}
+                            className="block w-full rounded-md border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 shadow-sm sm:text-sm focus:ring-primary focus:border-primary" 
+                        />
+                    </div>
+                    <div>
+                        <label className="block text-xs font-medium text-gray-500 mb-1">Email Body</label>
+                        <textarea 
+                            name="body" 
+                            rows={6}
+                            value={config.emailTemplates[templateKey].body}
+                            onChange={(e) => onChange(templateKey, 'body', e.target.value)}
+                            className="block w-full rounded-md border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 shadow-sm sm:text-sm font-mono text-sm focus:ring-primary focus:border-primary"
+                        />
+                    </div>
+                    <p className="text-xs text-gray-500 dark:text-gray-400 bg-gray-50 dark:bg-gray-900 p-2 rounded">
+                        <span className="font-semibold">Available Variables:</span> {placeholders.join(', ')}
+                    </p>
+                </div>
+            )}
+        </div>
+    );
+};
 
 export const SettingsForm: React.FC<SettingsFormProps> = ({ adminToken }) => {
-  // Now safe to use because AdminPortal wraps this in ThemeProvider
   const { config: contextConfig, updateConfig, isLoading: isContextLoading } = useTheme();
   
   const [config, setConfig] = useState<EventConfig | null>(null);
@@ -61,6 +81,12 @@ export const SettingsForm: React.FC<SettingsFormProps> = ({ adminToken }) => {
   const [isSyncing, setIsSyncing] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
+  const [activeTab, setActiveTab] = useState<Tab>('general');
+
+  // Test Email State
+  const [testEmailTo, setTestEmailTo] = useState('');
+  const [isSendingTest, setIsSendingTest] = useState(false);
+  const [testEmailResult, setTestEmailResult] = useState<{type: 'success'|'error', message: string}|null>(null);
 
   // State for Form Field Editor Modal
   const [isFieldModalOpen, setIsFieldModalOpen] = useState(false);
@@ -68,14 +94,12 @@ export const SettingsForm: React.FC<SettingsFormProps> = ({ adminToken }) => {
   const [editingFieldIndex, setEditingFieldIndex] = useState<number | null>(null);
 
   useEffect(() => {
-      // If we have config from context, use it directly to avoid another fetch
       if (contextConfig) {
           setConfig(contextConfig);
           setIsLoading(false);
       } else if (isContextLoading) {
           setIsLoading(true);
       } else {
-          // Fallback fetch if context failed or empty for some reason
            getEventConfig()
             .then(setConfig)
             .catch(err => setError('Failed to load event settings.'))
@@ -143,6 +167,16 @@ export const SettingsForm: React.FC<SettingsFormProps> = ({ adminToken }) => {
     });
   };
 
+  const handleEventCoinToggle = (enabled: boolean) => {
+    if (!config) return;
+    setConfig(prevConfig => {
+        if (!prevConfig) return null;
+        const newConfig = JSON.parse(JSON.stringify(prevConfig));
+        newConfig.eventCoin.enabled = enabled;
+        return newConfig;
+    });
+  };
+
   const handleWhatsappChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     if (!config) return;
     const { name, value } = e.target;
@@ -167,10 +201,8 @@ export const SettingsForm: React.FC<SettingsFormProps> = ({ adminToken }) => {
   
   const handleImageChange = (field: 'logoUrl' | 'pageImageUrl' | 'badgeImageUrl', dataUrl: string) => {
     if (!config) return;
-
     setConfig(prevConfig => {
       if (!prevConfig) return null;
-      
       const newConfig = JSON.parse(JSON.stringify(prevConfig));
       newConfig.theme[field] = dataUrl;
       return newConfig;
@@ -214,7 +246,7 @@ export const SettingsForm: React.FC<SettingsFormProps> = ({ adminToken }) => {
     try {
         const syncedConfig = await syncConfigFromGitHub(adminToken);
         setConfig(syncedConfig);
-        updateConfig(syncedConfig); // Update global theme context
+        updateConfig(syncedConfig);
         setSuccessMessage('Successfully synced configuration from GitHub!');
     } catch (err) {
         setError(err instanceof Error ? err.message : 'Failed to sync from GitHub.');
@@ -231,48 +263,40 @@ export const SettingsForm: React.FC<SettingsFormProps> = ({ adminToken }) => {
     setError(null);
     setSuccessMessage(null);
 
-    // Validation for Event Details
-    if (!config.event.name?.trim()) {
-        setError("Event Name is required.");
-        return;
-    }
-    if (!config.event.date?.trim()) {
-        setError("Event Date is required.");
-        return;
-    }
-    if (!config.event.location?.trim()) {
-        setError("Event Location is required.");
-        return;
-    }
-
-    // Validation for Communication Channels
-    if (config.whatsapp.enabled) {
-        if (!config.whatsapp.accessToken?.trim() || !config.whatsapp.phoneNumberId?.trim()) {
-            setError("WhatsApp is enabled but requires Access Token and Phone Number ID.");
-            return;
-        }
-    }
-    
-    if (config.sms.enabled) {
-         if (!config.sms.accountSid?.trim() || !config.sms.authToken?.trim() || !config.sms.fromNumber?.trim()) {
-             setError("SMS is enabled but requires Account SID, Auth Token and From Number.");
-             return;
-         }
-    }
+    if (!config.event.name?.trim()) { setError("Event Name is required."); return; }
+    if (!config.event.date?.trim()) { setError("Event Date is required."); return; }
     
     setIsSaving(true);
     try {
       const saved = await saveConfig(adminToken, config);
       setConfig(saved);
-      updateConfig(saved); // Update global theme context
+      updateConfig(saved);
       setSuccessMessage('Settings saved successfully!');
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to save settings.');
     } finally {
       setIsSaving(false);
-      setTimeout(() => setSuccessMessage(null), 3000); // Clear message after 3 seconds
+      setTimeout(() => setSuccessMessage(null), 3000);
     }
   };
+
+  const handleTestEmail = async () => {
+      if (!testEmailTo || !config) {
+          setTestEmailResult({ type: 'error', message: 'Please enter a recipient email.' });
+          return;
+      }
+      setIsSendingTest(true);
+      setTestEmailResult(null);
+      try {
+          // Pass the CURRENT config state to test what's in the form, not just what's saved
+          await sendTestEmail(adminToken, testEmailTo, config);
+          setTestEmailResult({ type: 'success', message: 'Test email sent successfully!' });
+      } catch (e) {
+          setTestEmailResult({ type: 'error', message: e instanceof Error ? e.message : 'Failed to send test email.' });
+      } finally {
+          setIsSendingTest(false);
+      }
+  }
   
   // --- Form Field Handlers ---
   const openFieldModal = (field: FormField | null, index: number | null) => {
@@ -283,15 +307,12 @@ export const SettingsForm: React.FC<SettingsFormProps> = ({ adminToken }) => {
 
   const handleSaveField = (fieldData: FormField) => {
       if (!config) return;
-
       setConfig(prevConfig => {
           if (!prevConfig) return null;
           const newFields = [...(prevConfig.formFields || [])];
           if (editingFieldIndex !== null && editingFieldIndex > -1) {
-              // Update existing
               newFields[editingFieldIndex] = fieldData;
           } else {
-              // Add new
               newFields.push(fieldData);
           }
           return { ...prevConfig, formFields: newFields };
@@ -300,7 +321,7 @@ export const SettingsForm: React.FC<SettingsFormProps> = ({ adminToken }) => {
 
   const handleDeleteField = (index: number) => {
       if (!config) return;
-      if (window.confirm('Are you sure you want to delete this field? This change will be permanent once you save.')) {
+      if (window.confirm('Delete this field?')) {
           setConfig(prevConfig => {
               if (!prevConfig) return null;
               const newFields = prevConfig.formFields.filter((_, i) => i !== index);
@@ -311,460 +332,400 @@ export const SettingsForm: React.FC<SettingsFormProps> = ({ adminToken }) => {
 
   const handleMoveField = (index: number, direction: 'up' | 'down') => {
       if (!config) return;
-      
       const newIndex = direction === 'up' ? index - 1 : index + 1;
       if (newIndex < 0 || newIndex >= config.formFields.length) return;
-
       setConfig(prevConfig => {
           if (!prevConfig) return null;
           const newFields = [...prevConfig.formFields];
-          // Simple swap
           [newFields[index], newFields[newIndex]] = [newFields[newIndex], newFields[index]];
           return { ...prevConfig, formFields: newFields };
       });
   };
 
-  if (isLoading) {
-    return <ContentLoader text="Loading settings..." />;
-  }
+  if (isLoading) return <ContentLoader text="Loading settings..." />;
+  if (error && !config) return <Alert type="error" message={error} />;
+  if (!config) return <Alert type="error" message="Could not load configuration." />;
 
-  if (error && !config) {
-    return <Alert type="error" message={error} />;
-  }
-  
-  if (!config) {
-      return <Alert type="error" message="Could not load configuration." />;
-  }
+  const tabs: { id: Tab, label: string }[] = [
+      { id: 'general', label: 'General' },
+      { id: 'registration', label: 'Registration' },
+      { id: 'theme', label: 'Theme' },
+      { id: 'communications', label: 'Communications' },
+      { id: 'economy', label: 'Economy' },
+      { id: 'integrations', label: 'Integrations' },
+  ];
 
   return (
     <>
-    <form onSubmit={handleSave}>
-      <div className="bg-white dark:bg-gray-800 shadow-md rounded-lg">
-        <div className="p-6">
-          <h2 className="text-2xl font-bold text-gray-900 dark:text-white">Event Settings</h2>
-          <p className="mt-2 text-gray-600 dark:text-gray-400">
-            Manage the core details, theme, and registration form for your event.
-          </p>
-        </div>
-        
-        {/* Event Details */}
-        <div className="border-t border-gray-200 dark:border-gray-700 p-6 space-y-4">
-            <h3 className="text-lg font-medium">Event Details</h3>
-            <div>
-                <label htmlFor="event.name" className="block text-sm font-medium">Event Name</label>
-                <input 
-                    type="text" 
-                    name="name" 
-                    id="event.name" 
-                    value={config.event.name} 
-                    onChange={(e) => handleInputChange(e, 'event')} 
-                    className="mt-1 block w-full rounded-md border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 shadow-sm" 
-                    required
-                />
-            </div>
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+    <div className="bg-white dark:bg-gray-800 shadow-md rounded-lg flex flex-col h-[calc(100vh-150px)]">
+        <div className="p-6 pb-0 flex-shrink-0">
+            <div className="flex justify-between items-center mb-6">
                 <div>
-                    <label htmlFor="event.date" className="block text-sm font-medium">Date</label>
-                    <input 
-                        type="text" 
-                        name="date" 
-                        id="event.date" 
-                        value={config.event.date} 
-                        onChange={(e) => handleInputChange(e, 'event')} 
-                        className="mt-1 block w-full rounded-md border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 shadow-sm" 
-                        required
-                    />
+                    <h2 className="text-2xl font-bold text-gray-900 dark:text-white">Event Settings</h2>
+                    <p className="mt-1 text-sm text-gray-500 dark:text-gray-400">Configure your event platform.</p>
                 </div>
-                 <div>
-                    <label htmlFor="event.location" className="block text-sm font-medium">Location</label>
-                    <input 
-                        type="text" 
-                        name="location" 
-                        id="event.location" 
-                        value={config.event.location} 
-                        onChange={(e) => handleInputChange(e, 'event')} 
-                        className="mt-1 block w-full rounded-md border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 shadow-sm" 
-                        required
-                    />
-                </div>
-            </div>
-             <div>
-                <label htmlFor="event.description" className="block text-sm font-medium">Event Description</label>
-                <textarea
-                    name="description"
-                    id="event.description"
-                    rows={4}
-                    value={config.event.description || ''}
-                    onChange={(e) => handleInputChange(e, 'event')}
-                    className="mt-1 block w-full rounded-md border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 shadow-sm"
-                    placeholder="Tell people what this event is about..."
-                />
-            </div>
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                <div>
-                    <label htmlFor="event.eventType" className="block text-sm font-medium">Event Type</label>
-                    <select name="eventType" id="event.eventType" value={config.event.eventType} onChange={(e) => handleInputChange(e, 'event')} className="mt-1 block w-full rounded-md border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 shadow-sm">
-                        {EVENT_TYPES.map(type => <option key={type} value={type}>{type}</option>)}
-                    </select>
-                </div>
-                <div>
-                    <label htmlFor="event.maxAttendees" className="block text-sm font-medium">Max Attendees</label>
-                    <input type="number" name="maxAttendees" id="event.maxAttendees" value={config.event.maxAttendees} onChange={(e) => handleInputChange(e, 'event')} className="mt-1 block w-full rounded-md border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 shadow-sm" />
-                    <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">Set to 0 for unlimited attendees.</p>
-                </div>
-            </div>
-            <div>
-                <label htmlFor="event.publicUrl" className="block text-sm font-medium">Public Event URL</label>
-                <input type="url" name="publicUrl" id="event.publicUrl" value={config.event.publicUrl} onChange={(e) => handleInputChange(e, 'event')} className="mt-1 block w-full rounded-md border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 shadow-sm" placeholder="https://register.yourdomain.com" />
-                <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">The base URL where delegates will access this event. Used for generating links in emails.</p>
-            </div>
-        </div>
-
-         {/* Theme Settings */}
-        <div className="border-t border-gray-200 dark:border-gray-700 p-6 space-y-6">
-            <h3 className="text-lg font-medium">Theme & Appearance</h3>
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                <ColorPickerInput label="Primary Color" name="colorPrimary" value={config.theme.colorPrimary} onChange={(e) => handleInputChange(e, 'theme')} />
-                <ColorPickerInput label="Secondary Color" name="colorSecondary" value={config.theme.colorSecondary} onChange={(e) => handleInputChange(e, 'theme')} />
-                <ColorPickerInput label="Background Color (Light Mode)" name="backgroundColor" value={config.theme.backgroundColor} onChange={(e) => handleInputChange(e, 'theme')} />
-
-                <div>
-                    <label htmlFor="theme.fontFamily" className="block text-sm font-medium">Font Family</label>
-                    <select name="fontFamily" id="theme.fontFamily" value={config.theme.fontFamily} onChange={(e) => handleInputChange(e, 'theme')} className="mt-1 block w-full rounded-md border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 shadow-sm">
-                        {FONT_OPTIONS.map(font => <option key={font} value={font}>{font}</option>)}
-                    </select>
-                </div>
-                <div className="md:col-span-2">
-                    <label htmlFor="theme.websiteUrl" className="block text-sm font-medium">Event Website URL</label>
-                    <input type="text" name="websiteUrl" id="theme.websiteUrl" placeholder="https://example.com" value={config.theme.websiteUrl} onChange={(e) => handleInputChange(e, 'theme')} className="mt-1 block w-full rounded-md border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 shadow-sm" />
-                </div>
-            </div>
-            <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 pt-6 border-t border-gray-200 dark:border-gray-700">
-                <ImageUpload 
-                    label="Logo Image"
-                    value={config.theme.logoUrl}
-                    onChange={(dataUrl) => handleImageChange('logoUrl', dataUrl)}
-                />
-                <ImageUpload 
-                    label="Page Background Image"
-                    value={config.theme.pageImageUrl}
-                    onChange={(dataUrl) => handleImageChange('pageImageUrl', dataUrl)}
-                />
-                <ImageUpload 
-                    label="ID Badge Background"
-                    value={config.theme.badgeImageUrl}
-                    onChange={(dataUrl) => handleImageChange('badgeImageUrl', dataUrl)}
-                />
-            </div>
-        </div>
-
-        {/* Custom Registration Fields */}
-        <div className="border-t border-gray-200 dark:border-gray-700 p-6 space-y-4">
-            <h3 className="text-lg font-medium">Custom Registration Fields</h3>
-            <div className="space-y-3">
-                {config.formFields && config.formFields.length > 0 ? (
-                    config.formFields.map((field, index) => (
-                        <div key={field.id} className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 p-3 rounded-md bg-gray-50 dark:bg-gray-700/50 border border-gray-200 dark:border-gray-600">
-                            <div className="flex-1">
-                                <p className="font-medium text-gray-900 dark:text-white">{field.label}</p>
-                                <p className="text-sm text-gray-500 dark:text-gray-400">
-                                    Type: {field.type} &bull; {field.required ? 'Required' : 'Optional'} &bull; {field.enabled ? 'Enabled' : 'Disabled'}
-                                </p>
-                            </div>
-                            <div className="flex items-center space-x-2 self-end sm:self-center">
-                                <div className="flex flex-col">
-                                    <button type="button" onClick={() => handleMoveField(index, 'up')} disabled={index === 0} className="p-1 text-gray-400 hover:text-gray-700 dark:hover:text-gray-200 disabled:opacity-30 disabled:cursor-not-allowed">
-                                        <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 15l7-7 7 7" /></svg>
-                                    </button>
-                                    <button type="button" onClick={() => handleMoveField(index, 'down')} disabled={index === config.formFields.length - 1} className="p-1 text-gray-400 hover:text-gray-700 dark:hover:text-gray-200 disabled:opacity-30 disabled:cursor-not-allowed">
-                                        <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" /></svg>
-                                    </button>
-                                </div>
-                                <button type="button" onClick={() => openFieldModal(field, index)} className="text-sm font-medium text-primary hover:underline">Edit</button>
-                                <button type="button" onClick={() => handleDeleteField(index)} className="text-sm font-medium text-red-600 dark:text-red-500 hover:underline">Delete</button>
-                            </div>
-                        </div>
-                    ))
-                ) : (
-                    <p className="text-sm text-gray-500 dark:text-gray-400 italic">No custom fields have been added yet.</p>
-                )}
-            </div>
-            <div className="pt-2">
-                <button type="button" onClick={() => openFieldModal(null, null)} className="py-2 px-4 border border-dashed border-gray-300 dark:border-gray-600 rounded-md text-sm font-medium text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-700/50 w-full">
-                    + Add New Field
+                <button
+                    onClick={handleSave}
+                    disabled={isSaving}
+                    className="py-2 px-6 border border-transparent rounded-md shadow-sm text-sm font-medium text-white bg-primary hover:bg-primary/90 flex items-center justify-center disabled:opacity-50"
+                >
+                    {isSaving ? <><Spinner /> Saving...</> : 'Save Changes'}
                 </button>
             </div>
-        </div>
-        
-        {/* Communication Channels */}
-        <div className="border-t border-gray-200 dark:border-gray-700 p-6 space-y-4">
-            <h3 className="text-lg font-medium">Communication Channels</h3>
             
-            {/* WhatsApp Integration */}
-            <div className="bg-gray-50 dark:bg-gray-700/50 rounded-md p-4 border border-gray-200 dark:border-gray-600">
-                <div className="flex items-center justify-between mb-4">
-                    <div>
-                        <h4 className="text-md font-medium text-gray-900 dark:text-white">WhatsApp Integration</h4>
-                        <p className="text-sm text-gray-500 dark:text-gray-400">Enable automated messages via Meta WhatsApp API.</p>
-                    </div>
-                    <ToggleSwitch
-                        label={config.whatsapp.enabled ? 'Enabled' : 'Disabled'}
-                        name="enabled"
-                        enabled={config.whatsapp.enabled}
-                        onChange={handleWhatsappToggle}
-                    />
-                </div>
-                <fieldset disabled={!config.whatsapp.enabled} className="space-y-4 disabled:opacity-50">
-                    <div>
-                        <label htmlFor="whatsapp.accessToken" className="block text-sm font-medium">Access Token</label>
-                        <input type="password" name="accessToken" id="whatsapp.accessToken" value={config.whatsapp.accessToken} onChange={handleWhatsappChange} className="mt-1 block w-full rounded-md border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 shadow-sm" placeholder="Enter your Meta API Access Token" />
-                    </div>
-                    <div>
-                        <label htmlFor="whatsapp.phoneNumberId" className="block text-sm font-medium">Phone Number ID</label>
-                        <input type="text" name="phoneNumberId" id="whatsapp.phoneNumberId" value={config.whatsapp.phoneNumberId} onChange={handleWhatsappChange} className="mt-1 block w-full rounded-md border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 shadow-sm" placeholder="e.g., 10567..." />
-                    </div>
-                </fieldset>
-            </div>
+            {successMessage && <div className="mb-4"><Alert type="success" message={successMessage} /></div>}
+            {error && <div className="mb-4"><Alert type="error" message={error} /></div>}
 
-            {/* SMS Integration */}
-            <div className="bg-gray-50 dark:bg-gray-700/50 rounded-md p-4 border border-gray-200 dark:border-gray-600">
-                <div className="flex items-center justify-between mb-4">
-                    <div>
-                        <h4 className="text-md font-medium text-gray-900 dark:text-white">SMS Integration</h4>
-                        <p className="text-sm text-gray-500 dark:text-gray-400">Enable SMS notifications via Twilio.</p>
-                    </div>
-                    <ToggleSwitch
-                        label={config.sms.enabled ? 'Enabled' : 'Disabled'}
-                        name="enabled"
-                        enabled={config.sms.enabled}
-                        onChange={handleSmsToggle}
-                    />
-                </div>
-                <fieldset disabled={!config.sms.enabled} className="space-y-4 disabled:opacity-50">
-                    <div>
-                        <label htmlFor="sms.provider" className="block text-sm font-medium">Provider</label>
-                        <select name="provider" id="sms.provider" value={config.sms.provider} onChange={handleSmsChange} className="mt-1 block w-full rounded-md border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 shadow-sm">
-                            <option value="twilio">Twilio</option>
-                        </select>
-                    </div>
-                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                        <div>
-                            <label htmlFor="sms.accountSid" className="block text-sm font-medium">Account SID</label>
-                            <input type="text" name="accountSid" id="sms.accountSid" value={config.sms.accountSid} onChange={handleSmsChange} className="mt-1 block w-full rounded-md border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 shadow-sm" placeholder="AC..." />
-                        </div>
-                        <div>
-                            <label htmlFor="sms.authToken" className="block text-sm font-medium">Auth Token</label>
-                            <input type="password" name="authToken" id="sms.authToken" value={config.sms.authToken} onChange={handleSmsChange} className="mt-1 block w-full rounded-md border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 shadow-sm" placeholder="Auth Token" />
-                        </div>
-                    </div>
-                    <div>
-                        <label htmlFor="sms.fromNumber" className="block text-sm font-medium">From Number</label>
-                        <input type="text" name="fromNumber" id="sms.fromNumber" value={config.sms.fromNumber} onChange={handleSmsChange} className="mt-1 block w-full rounded-md border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 shadow-sm" placeholder="e.g., +1555..." />
-                    </div>
-                </fieldset>
-            </div>
-        </div>
-
-
-        {/* Email Templates */}
-        <div className="border-t border-gray-200 dark:border-gray-700 p-6 space-y-4">
-            <h3 className="text-lg font-medium">Email Templates</h3>
-            <div className="space-y-4">
-                <TemplateEditor
-                    templateKey="userConfirmation"
-                    label="User Confirmation Email"
-                    config={config}
-                    onChange={handleTemplateChange}
-                    placeholders={['{{name}}', '{{eventName}}', '{{eventDate}}', '{{eventLocation}}', '{{customFields}}', '{{verificationLink}}', '{{hostName}}']}
-                />
-                 <TemplateEditor
-                    templateKey="hostNotification"
-                    label="Host Notification Email"
-                    config={config}
-                    onChange={handleTemplateChange}
-                    placeholders={['{{name}}', '{{email}}', '{{eventName}}', '{{customFields}}']}
-                />
-                 <TemplateEditor
-                    templateKey="passwordReset"
-                    label="Password Reset Email"
-                    config={config}
-                    onChange={handleTemplateChange}
-                    placeholders={['{{eventName}}', '{{resetLink}}', '{{hostName}}']}
-                />
-                 <TemplateEditor
-                    templateKey="delegateInvitation"
-                    label="Delegate Invitation Email"
-                    config={config}
-                    onChange={handleTemplateChange}
-                    placeholders={['{{eventName}}', '{{inviterName}}', '{{inviteLink}}', '{{hostName}}']}
-                />
+            {/* Tabs */}
+            <div className="border-b border-gray-200 dark:border-gray-700">
+                <nav className="-mb-px flex space-x-8 overflow-x-auto" aria-label="Tabs">
+                    {tabs.map(tab => (
+                        <button
+                            key={tab.id}
+                            onClick={() => setActiveTab(tab.id)}
+                            className={`whitespace-nowrap py-4 px-1 border-b-2 font-medium text-sm transition-colors ${
+                                activeTab === tab.id
+                                ? 'border-primary text-primary'
+                                : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300 dark:text-gray-400 dark:hover:text-gray-300'
+                            }`}
+                        >
+                            {tab.label}
+                        </button>
+                    ))}
+                </nav>
             </div>
         </div>
         
-        {/* EventCoin Settings */}
-        <div className="border-t border-gray-200 dark:border-gray-700 p-6 space-y-4">
-            <div className="flex items-center justify-between">
-                <div>
-                    <h3 className="text-lg font-medium">EventCoin Settings</h3>
-                    <p className="text-sm text-gray-500 dark:text-gray-400">Manage the virtual currency for your event.</p>
-                </div>
-                <label htmlFor="eventCoin.enabled" className="flex items-center cursor-pointer">
-                    <span className="mr-3 text-sm font-medium">{config.eventCoin.enabled ? 'Enabled' : 'Disabled'}</span>
-                    <div className="relative">
-                        <input type="checkbox" id="eventCoin.enabled" name="enabled" checked={config.eventCoin.enabled} onChange={handleEventCoinChange} className="sr-only" />
-                        <div className="block bg-gray-200 dark:bg-gray-600 w-14 h-8 rounded-full"></div>
-                        <div className={`dot absolute left-1 top-1 bg-white w-6 h-6 rounded-full transition-transform ${config.eventCoin.enabled ? 'translate-x-6 bg-primary' : ''}`}></div>
-                    </div>
-                </label>
-            </div>
-            
-            <fieldset disabled={!config.eventCoin.enabled} className="pt-4 border-t border-gray-200 dark:border-gray-700 disabled:opacity-50">
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                    <div>
-                        <label htmlFor="eventCoin.name" className="block text-sm font-medium">Currency Name</label>
-                        <input type="text" name="name" id="eventCoin.name" value={config.eventCoin.name} onChange={handleEventCoinChange} className="mt-1 block w-full rounded-md border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 shadow-sm" />
-                    </div>
-                     <div>
-                        <label htmlFor="eventCoin.startingBalance" className="block text-sm font-medium">Starting Balance</label>
-                        <input type="number" name="startingBalance" id="eventCoin.startingBalance" value={config.eventCoin.startingBalance} onChange={handleEventCoinChange} className="mt-1 block w-full rounded-md border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 shadow-sm" />
-                    </div>
-                    <div>
-                        <label htmlFor="eventCoin.peggedCurrency" className="block text-sm font-medium">Pegged Currency</label>
-                        <input type="text" name="peggedCurrency" placeholder="e.g., USD" id="eventCoin.peggedCurrency" value={config.eventCoin.peggedCurrency} onChange={handleEventCoinChange} className="mt-1 block w-full rounded-md border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 shadow-sm" />
-                    </div>
-                    <div>
-                        <label htmlFor="eventCoin.exchangeRate" className="block text-sm font-medium">Exchange Rate (1 EC = X)</label>
-                        <input type="number" name="exchangeRate" step="0.01" id="eventCoin.exchangeRate" value={config.eventCoin.exchangeRate} onChange={handleEventCoinChange} className="mt-1 block w-full rounded-md border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 shadow-sm" />
-                    </div>
-                </div>
-            </fieldset>
-        </div>
-
-        {/* GitHub Synchronization */}
-        <div className="border-t border-gray-200 dark:border-gray-700 p-6 space-y-4">
-            <div className="flex items-center justify-between">
-                <div>
-                    <h3 className="text-lg font-medium">GitHub Synchronization</h3>
-                    <p className="text-sm text-gray-500 dark:text-gray-400">Keep event settings in sync with a JSON file on GitHub.</p>
-                </div>
-                <ToggleSwitch
-                    label={config.githubSync.enabled ? 'Enabled' : 'Disabled'}
-                    name="enabled"
-                    enabled={config.githubSync.enabled}
-                    onChange={handleGithubSyncToggle}
-                />
-            </div>
-
-            <fieldset disabled={!config.githubSync.enabled} className="pt-4 border-t border-gray-200 dark:border-gray-700 disabled:opacity-50 space-y-4">
-                <div>
-                    <label htmlFor="githubSync.configUrl" className="block text-sm font-medium">GitHub Raw JSON URL</label>
-                    <input 
-                        type="url" 
-                        name="configUrl" 
-                        id="githubSync.configUrl" 
-                        value={config.githubSync.configUrl} 
-                        onChange={(e) => handleInputChange(e, 'githubSync')} 
-                        className="mt-1 block w-full rounded-md border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 shadow-sm"
-                        placeholder="https://raw.githubusercontent.com/..."
-                    />
-                    <p className="mt-2 text-xs text-gray-500 dark:text-gray-400">
-                        This must be the URL to the <strong className="font-semibold">raw</strong> file content, not the repository view.
-                    </p>
-                </div>
+        <div className="flex-1 overflow-y-auto p-6">
+            <form onSubmit={handleSave} className="space-y-6 max-w-4xl mx-auto">
                 
-                {config.githubSync.lastSyncTimestamp && (
-                    <div className={`p-3 rounded-md text-sm ${config.githubSync.lastSyncStatus === 'success' ? 'bg-green-100 dark:bg-green-900/50 text-green-800 dark:text-green-200' : 'bg-red-100 dark:bg-red-900/50 text-red-800 dark:text-red-200'}`}>
-                        <p><strong>Last Sync:</strong> {new Date(config.githubSync.lastSyncTimestamp).toLocaleString()}</p>
-                        <p><strong>Status:</strong> <span className="capitalize">{config.githubSync.lastSyncStatus}</span></p>
-                        <p className="mt-1 text-xs">{config.githubSync.lastSyncMessage}</p>
+                {/* GENERAL SETTINGS */}
+                {activeTab === 'general' && (
+                    <div className="space-y-6 animate-fade-in">
+                        <div className="grid grid-cols-1 gap-y-6 gap-x-4 sm:grid-cols-6">
+                            <div className="sm:col-span-4">
+                                <label htmlFor="event.name" className="block text-sm font-medium text-gray-700 dark:text-gray-300">Event Name</label>
+                                <input type="text" name="name" id="event.name" value={config.event.name} onChange={(e) => handleInputChange(e, 'event')} className="mt-1 block w-full rounded-md border-gray-300 dark:border-gray-600 shadow-sm focus:border-primary focus:ring-primary dark:bg-gray-700 dark:text-white sm:text-sm" />
+                            </div>
+                            <div className="sm:col-span-2">
+                                <label htmlFor="event.eventType" className="block text-sm font-medium text-gray-700 dark:text-gray-300">Type</label>
+                                <select name="eventType" id="event.eventType" value={config.event.eventType} onChange={(e) => handleInputChange(e, 'event')} className="mt-1 block w-full rounded-md border-gray-300 dark:border-gray-600 shadow-sm focus:border-primary focus:ring-primary dark:bg-gray-700 dark:text-white sm:text-sm">
+                                    {EVENT_TYPES.map(type => <option key={type} value={type}>{type}</option>)}
+                                </select>
+                            </div>
+
+                            <div className="sm:col-span-3">
+                                <label htmlFor="event.date" className="block text-sm font-medium text-gray-700 dark:text-gray-300">Date</label>
+                                <input type="text" name="date" id="event.date" value={config.event.date} onChange={(e) => handleInputChange(e, 'event')} className="mt-1 block w-full rounded-md border-gray-300 dark:border-gray-600 shadow-sm focus:border-primary focus:ring-primary dark:bg-gray-700 dark:text-white sm:text-sm" />
+                            </div>
+                             <div className="sm:col-span-3">
+                                <label htmlFor="event.location" className="block text-sm font-medium text-gray-700 dark:text-gray-300">Location</label>
+                                <input type="text" name="location" id="event.location" value={config.event.location} onChange={(e) => handleInputChange(e, 'event')} className="mt-1 block w-full rounded-md border-gray-300 dark:border-gray-600 shadow-sm focus:border-primary focus:ring-primary dark:bg-gray-700 dark:text-white sm:text-sm" />
+                            </div>
+
+                            <div className="sm:col-span-6">
+                                <label htmlFor="event.description" className="block text-sm font-medium text-gray-700 dark:text-gray-300">Description</label>
+                                <textarea name="description" id="event.description" rows={4} value={config.event.description} onChange={(e) => handleInputChange(e, 'event')} className="mt-1 block w-full rounded-md border-gray-300 dark:border-gray-600 shadow-sm focus:border-primary focus:ring-primary dark:bg-gray-700 dark:text-white sm:text-sm" />
+                            </div>
+
+                            <div className="sm:col-span-3">
+                                <label htmlFor="event.maxAttendees" className="block text-sm font-medium text-gray-700 dark:text-gray-300">Max Attendees (0 for unlimited)</label>
+                                <input type="number" name="maxAttendees" id="event.maxAttendees" value={config.event.maxAttendees} onChange={(e) => handleInputChange(e, 'event')} className="mt-1 block w-full rounded-md border-gray-300 dark:border-gray-600 shadow-sm focus:border-primary focus:ring-primary dark:bg-gray-700 dark:text-white sm:text-sm" />
+                            </div>
+                            <div className="sm:col-span-3">
+                                <label htmlFor="event.publicUrl" className="block text-sm font-medium text-gray-700 dark:text-gray-300">Public URL</label>
+                                <input type="url" name="publicUrl" id="event.publicUrl" value={config.event.publicUrl} onChange={(e) => handleInputChange(e, 'event')} className="mt-1 block w-full rounded-md border-gray-300 dark:border-gray-600 shadow-sm focus:border-primary focus:ring-primary dark:bg-gray-700 dark:text-white sm:text-sm" />
+                            </div>
+                        </div>
+                        
+                        <div className="border-t border-gray-200 dark:border-gray-700 pt-6">
+                            <h3 className="text-lg font-medium text-gray-900 dark:text-white mb-4">Host Information</h3>
+                            <div className="grid grid-cols-1 gap-y-6 gap-x-4 sm:grid-cols-6">
+                                <div className="sm:col-span-3">
+                                    <label htmlFor="host.name" className="block text-sm font-medium text-gray-700 dark:text-gray-300">Host Name</label>
+                                    <input type="text" name="name" id="host.name" value={config.host.name} onChange={(e) => handleInputChange(e, 'host')} className="mt-1 block w-full rounded-md border-gray-300 dark:border-gray-600 shadow-sm focus:border-primary focus:ring-primary dark:bg-gray-700 dark:text-white sm:text-sm" />
+                                </div>
+                                <div className="sm:col-span-3">
+                                    <label htmlFor="host.email" className="block text-sm font-medium text-gray-700 dark:text-gray-300">Host Email</label>
+                                    <input type="email" name="email" id="host.email" value={config.host.email} onChange={(e) => handleInputChange(e, 'host')} className="mt-1 block w-full rounded-md border-gray-300 dark:border-gray-600 shadow-sm focus:border-primary focus:ring-primary dark:bg-gray-700 dark:text-white sm:text-sm" />
+                                </div>
+                            </div>
+                        </div>
                     </div>
                 )}
-                
-                <div>
-                    <button
-                        type="button"
-                        onClick={handleSync}
-                        disabled={isSyncing || !config.githubSync.configUrl}
-                        className="py-2 px-4 border border-transparent rounded-md shadow-sm text-sm font-medium text-white bg-secondary hover:bg-secondary/90 flex items-center justify-center disabled:opacity-50 disabled:cursor-not-allowed"
-                    >
-                        {isSyncing ? <><Spinner /> Syncing...</> : 'Sync Now from GitHub'}
-                    </button>
-                </div>
-            </fieldset>
-        </div>
 
-        {/* Email Provider Settings */}
-        <div className="border-t border-gray-200 dark:border-gray-700 p-6 space-y-4">
-          <h3 className="text-lg font-medium">Email Provider Settings</h3>
-          <fieldset>
-            <legend className="sr-only">Email Provider</legend>
-            <div className="flex items-center gap-x-6">
-                <div className="flex items-center gap-x-2">
-                    <input id="emailProvider-smtp" name="emailProvider" type="radio" value="smtp" checked={config.emailProvider === 'smtp'} onChange={handleProviderChange} className="h-4 w-4 border-gray-300 text-primary focus:ring-primary" />
-                    <label htmlFor="emailProvider-smtp" className="block text-sm font-medium leading-6">SMTP</label>
-                </div>
-                 <div className="flex items-center gap-x-2">
-                    <input id="emailProvider-google" name="emailProvider" type="radio" value="google" checked={config.emailProvider === 'google'} onChange={handleProviderChange} className="h-4 w-4 border-gray-300 text-primary focus:ring-primary" />
-                    <label htmlFor="emailProvider-google" className="block text-sm font-medium leading-6">Google</label>
-                </div>
-            </div>
-          </fieldset>
-          
-          {config.emailProvider === 'smtp' && (
-             <div className="pt-4 border-t border-gray-200 dark:border-gray-700 mt-4 space-y-4 animate-fade-in">
-                <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                    <div className="md:col-span-2">
-                        <label className="block text-sm font-medium">Host</label>
-                        <input type="text" name="host" value={config.smtp.host} onChange={(e) => handleInputChange(e, 'smtp')} className="mt-1 block w-full rounded-md border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 shadow-sm" />
+                {/* REGISTRATION FORM */}
+                {activeTab === 'registration' && (
+                    <div className="space-y-4 animate-fade-in">
+                        <div className="bg-gray-50 dark:bg-gray-700/30 p-4 rounded-lg border border-gray-200 dark:border-gray-600 mb-4">
+                            <h3 className="text-sm font-bold text-gray-700 dark:text-gray-300 uppercase mb-2">Standard Fields</h3>
+                            <div className="flex gap-4 text-sm text-gray-600 dark:text-gray-400">
+                                <span className="px-2 py-1 bg-gray-200 dark:bg-gray-600 rounded">First Name (Req)</span>
+                                <span className="px-2 py-1 bg-gray-200 dark:bg-gray-600 rounded">Last Name (Req)</span>
+                                <span className="px-2 py-1 bg-gray-200 dark:bg-gray-600 rounded">Email (Req)</span>
+                                <span className="px-2 py-1 bg-gray-200 dark:bg-gray-600 rounded">Password (Req)</span>
+                            </div>
+                        </div>
+
+                        <div className="space-y-3">
+                            {config.formFields && config.formFields.length > 0 ? (
+                                config.formFields.map((field, index) => (
+                                    <div key={field.id} className="flex items-center justify-between p-4 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg shadow-sm group hover:border-primary/50 transition-colors">
+                                        <div>
+                                            <p className="font-bold text-gray-800 dark:text-white">{field.label}</p>
+                                            <div className="flex gap-2 mt-1">
+                                                <span className="text-xs px-2 py-0.5 rounded-full bg-gray-100 dark:bg-gray-700 text-gray-600 dark:text-gray-300 capitalize">{field.type}</span>
+                                                {field.required && <span className="text-xs px-2 py-0.5 rounded-full bg-red-100 dark:bg-red-900/30 text-red-600 dark:text-red-300">Required</span>}
+                                                {!field.enabled && <span className="text-xs px-2 py-0.5 rounded-full bg-gray-100 dark:bg-gray-700 text-gray-400">Disabled</span>}
+                                            </div>
+                                        </div>
+                                        <div className="flex items-center gap-2 opacity-100 sm:opacity-0 sm:group-hover:opacity-100 transition-opacity">
+                                             <button type="button" onClick={() => handleMoveField(index, 'up')} disabled={index === 0} className="p-1.5 text-gray-400 hover:text-gray-700 dark:hover:text-gray-200 disabled:opacity-30">
+                                                <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 15l7-7 7 7" /></svg>
+                                            </button>
+                                            <button type="button" onClick={() => handleMoveField(index, 'down')} disabled={index === config.formFields.length - 1} className="p-1.5 text-gray-400 hover:text-gray-700 dark:hover:text-gray-200 disabled:opacity-30">
+                                                <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" /></svg>
+                                            </button>
+                                            <div className="h-6 w-px bg-gray-300 dark:bg-gray-600 mx-1"></div>
+                                            <button type="button" onClick={() => openFieldModal(field, index)} className="text-sm font-medium text-primary hover:underline px-2">Edit</button>
+                                            <button type="button" onClick={() => handleDeleteField(index)} className="text-sm font-medium text-red-600 hover:underline px-2">Delete</button>
+                                        </div>
+                                    </div>
+                                ))
+                            ) : (
+                                <div className="text-center py-8 text-gray-500 border-2 border-dashed border-gray-300 dark:border-gray-700 rounded-lg">
+                                    No custom fields added.
+                                </div>
+                            )}
+                        </div>
+                        <button type="button" onClick={() => openFieldModal(null, null)} className="w-full py-3 border-2 border-dashed border-gray-300 dark:border-gray-700 rounded-lg text-gray-600 dark:text-gray-300 font-medium hover:bg-gray-50 dark:hover:bg-gray-800 transition-colors">
+                            + Add Custom Field
+                        </button>
                     </div>
-                    <div>
-                        <label className="block text-sm font-medium">Port</label>
-                        <input type="number" name="port" value={config.smtp.port} onChange={(e) => handleInputChange(e, 'smtp')} className="mt-1 block w-full rounded-md border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 shadow-sm" />
+                )}
+
+                {/* THEME SETTINGS */}
+                {activeTab === 'theme' && (
+                    <div className="space-y-8 animate-fade-in">
+                         <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                            <ColorPickerInput label="Primary Color" name="colorPrimary" value={config.theme.colorPrimary} onChange={(e) => handleInputChange(e, 'theme')} />
+                            <ColorPickerInput label="Secondary Color" name="colorSecondary" value={config.theme.colorSecondary} onChange={(e) => handleInputChange(e, 'theme')} />
+                            <ColorPickerInput label="Background Color (Light)" name="backgroundColor" value={config.theme.backgroundColor} onChange={(e) => handleInputChange(e, 'theme')} />
+                            <div>
+                                <label htmlFor="theme.fontFamily" className="block text-sm font-medium text-gray-700 dark:text-gray-300">Font Family</label>
+                                <select name="fontFamily" id="theme.fontFamily" value={config.theme.fontFamily} onChange={(e) => handleInputChange(e, 'theme')} className="mt-1 block w-full rounded-md border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 shadow-sm focus:border-primary focus:ring-primary dark:text-white sm:text-sm">
+                                    {FONT_OPTIONS.map(font => <option key={font} value={font}>{font}</option>)}
+                                </select>
+                            </div>
+                         </div>
+                         
+                         <div className="border-t border-gray-200 dark:border-gray-700 pt-6 grid grid-cols-1 md:grid-cols-3 gap-8">
+                            <ImageUpload label="Event Logo" value={config.theme.logoUrl} onChange={(dataUrl) => handleImageChange('logoUrl', dataUrl)} />
+                            <ImageUpload label="Landing Page Banner" value={config.theme.pageImageUrl} onChange={(dataUrl) => handleImageChange('pageImageUrl', dataUrl)} />
+                         </div>
                     </div>
-                </div>
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                     <div>
-                        <label className="block text-sm font-medium">Username</label>
-                        <input type="text" name="username" value={config.smtp.username} onChange={(e) => handleInputChange(e, 'smtp')} className="mt-1 block w-full rounded-md border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 shadow-sm" />
+                )}
+
+                {/* COMMUNICATIONS */}
+                {activeTab === 'communications' && (
+                    <div className="space-y-8 animate-fade-in">
+                        
+                        {/* Provider Settings */}
+                        <section className="bg-gray-50 dark:bg-gray-700/20 p-6 rounded-xl border border-gray-200 dark:border-gray-700">
+                            <h3 className="text-lg font-bold text-gray-900 dark:text-white mb-4">Email Provider</h3>
+                            <div className="flex items-center gap-6 mb-6">
+                                <label className="flex items-center gap-2 cursor-pointer">
+                                    <input type="radio" name="emailProvider" value="smtp" checked={config.emailProvider === 'smtp'} onChange={handleProviderChange} className="text-primary focus:ring-primary" />
+                                    <span className="text-sm font-medium">SMTP</span>
+                                </label>
+                                <label className="flex items-center gap-2 cursor-pointer">
+                                    <input type="radio" name="emailProvider" value="google" checked={config.emailProvider === 'google'} onChange={handleProviderChange} className="text-primary focus:ring-primary" />
+                                    <span className="text-sm font-medium">Google Service Account</span>
+                                </label>
+                            </div>
+
+                            {config.emailProvider === 'smtp' && (
+                                <div className="grid grid-cols-1 md:grid-cols-2 gap-4 animate-fade-in">
+                                    <div className="md:col-span-2">
+                                        <label className="block text-xs font-medium text-gray-500 mb-1">Host</label>
+                                        <input type="text" name="host" value={config.smtp.host} onChange={(e) => handleInputChange(e, 'smtp')} className="block w-full rounded-md border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 shadow-sm sm:text-sm" />
+                                    </div>
+                                    <div>
+                                        <label className="block text-xs font-medium text-gray-500 mb-1">Port</label>
+                                        <input type="number" name="port" value={config.smtp.port} onChange={(e) => handleInputChange(e, 'smtp')} className="block w-full rounded-md border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 shadow-sm sm:text-sm" />
+                                    </div>
+                                    <div>
+                                        <label className="block text-xs font-medium text-gray-500 mb-1">Encryption</label>
+                                        <select name="encryption" value={config.smtp.encryption} onChange={(e) => handleInputChange(e, 'smtp')} className="block w-full rounded-md border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 shadow-sm sm:text-sm">
+                                            <option value="none">None</option>
+                                            <option value="ssl">SSL</option>
+                                            <option value="tls">TLS</option>
+                                        </select>
+                                    </div>
+                                    <div>
+                                        <label className="block text-xs font-medium text-gray-500 mb-1">Username</label>
+                                        <input type="text" name="username" value={config.smtp.username} onChange={(e) => handleInputChange(e, 'smtp')} className="block w-full rounded-md border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 shadow-sm sm:text-sm" />
+                                    </div>
+                                    <div>
+                                        <label className="block text-xs font-medium text-gray-500 mb-1">Password</label>
+                                        <input type="password" name="password" value={config.smtp.password} onChange={(e) => handleInputChange(e, 'smtp')} className="block w-full rounded-md border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 shadow-sm sm:text-sm" />
+                                    </div>
+                                </div>
+                            )}
+
+                            {config.emailProvider === 'google' && (
+                                <div className="animate-fade-in">
+                                     <label className="block text-xs font-medium text-gray-500 mb-1">Service Account Key (JSON)</label>
+                                     <textarea name="serviceAccountKeyJson" rows={4} value={config.googleConfig.serviceAccountKeyJson} onChange={handleGoogleConfigChange} className="block w-full rounded-md border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 shadow-sm font-mono text-xs" placeholder='Paste your JSON key here...'></textarea>
+                                </div>
+                            )}
+
+                            {/* Test Email Section */}
+                            <div className="mt-6 pt-6 border-t border-gray-200 dark:border-gray-600">
+                                <h4 className="text-sm font-bold text-gray-700 dark:text-gray-300 mb-2">Test Configuration</h4>
+                                <div className="flex gap-3 items-start">
+                                    <div className="flex-grow">
+                                        <input 
+                                            type="email" 
+                                            placeholder="Enter recipient email" 
+                                            value={testEmailTo}
+                                            onChange={e => setTestEmailTo(e.target.value)}
+                                            className="block w-full rounded-md border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 shadow-sm sm:text-sm"
+                                        />
+                                    </div>
+                                    <button 
+                                        type="button" 
+                                        onClick={handleTestEmail}
+                                        disabled={isSendingTest}
+                                        className="px-4 py-2 bg-secondary hover:bg-secondary/90 text-white text-sm font-medium rounded-md shadow-sm flex items-center disabled:opacity-50"
+                                    >
+                                        {isSendingTest ? <Spinner /> : 'Send Test Email'}
+                                    </button>
+                                </div>
+                                {testEmailResult && (
+                                    <div className="mt-2">
+                                        <Alert type={testEmailResult.type} message={testEmailResult.message} />
+                                    </div>
+                                )}
+                            </div>
+                        </section>
+
+                        {/* Templates */}
+                        <section>
+                             <h3 className="text-lg font-bold text-gray-900 dark:text-white mb-4">Email Templates</h3>
+                             <div className="space-y-3">
+                                <TemplateEditor templateKey="userConfirmation" label="Registration Confirmation" config={config} onChange={handleTemplateChange} placeholders={['{{name}}', '{{eventName}}', '{{eventDate}}', '{{verificationLink}}', '{{qrCodeUrl}}']} />
+                                <TemplateEditor templateKey="hostNotification" label="Host Notification" config={config} onChange={handleTemplateChange} placeholders={['{{name}}', '{{email}}', '{{eventName}}']} />
+                                <TemplateEditor templateKey="passwordReset" label="Password Reset" config={config} onChange={handleTemplateChange} placeholders={['{{eventName}}', '{{resetLink}}']} />
+                                <TemplateEditor templateKey="delegateInvitation" label="Invitation" config={config} onChange={handleTemplateChange} placeholders={['{{eventName}}', '{{inviteLink}}']} />
+                             </div>
+                        </section>
+
+                        {/* Other Channels */}
+                        <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                            <div className="bg-gray-50 dark:bg-gray-700/30 p-4 rounded-lg border border-gray-200 dark:border-gray-600">
+                                <div className="flex justify-between items-center mb-4">
+                                    <h4 className="font-bold">WhatsApp</h4>
+                                    <ToggleSwitch label="" name="wa" enabled={config.whatsapp.enabled} onChange={handleWhatsappToggle} />
+                                </div>
+                                <fieldset disabled={!config.whatsapp.enabled} className="space-y-3 disabled:opacity-50">
+                                    <input type="password" name="accessToken" placeholder="Access Token" value={config.whatsapp.accessToken} onChange={handleWhatsappChange} className="w-full rounded border-gray-300 dark:border-gray-600 p-2 text-sm" />
+                                    <input type="text" name="phoneNumberId" placeholder="Phone Number ID" value={config.whatsapp.phoneNumberId} onChange={handleWhatsappChange} className="w-full rounded border-gray-300 dark:border-gray-600 p-2 text-sm" />
+                                </fieldset>
+                            </div>
+                            <div className="bg-gray-50 dark:bg-gray-700/30 p-4 rounded-lg border border-gray-200 dark:border-gray-600">
+                                <div className="flex justify-between items-center mb-4">
+                                    <h4 className="font-bold">SMS (Twilio)</h4>
+                                    <ToggleSwitch label="" name="sms" enabled={config.sms.enabled} onChange={handleSmsToggle} />
+                                </div>
+                                <fieldset disabled={!config.sms.enabled} className="space-y-3 disabled:opacity-50">
+                                    <input type="text" name="accountSid" placeholder="Account SID" value={config.sms.accountSid} onChange={handleSmsChange} className="w-full rounded border-gray-300 dark:border-gray-600 p-2 text-sm" />
+                                    <input type="password" name="authToken" placeholder="Auth Token" value={config.sms.authToken} onChange={handleSmsChange} className="w-full rounded border-gray-300 dark:border-gray-600 p-2 text-sm" />
+                                    <input type="text" name="fromNumber" placeholder="From Number" value={config.sms.fromNumber} onChange={handleSmsChange} className="w-full rounded border-gray-300 dark:border-gray-600 p-2 text-sm" />
+                                </fieldset>
+                            </div>
+                        </div>
                     </div>
-                     <div>
-                        <label className="block text-sm font-medium">Password</label>
-                        <input type="password" name="password" value={config.smtp.password} onChange={(e) => handleInputChange(e, 'smtp')} className="mt-1 block w-full rounded-md border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 shadow-sm" />
+                )}
+
+                {/* ECONOMY */}
+                {activeTab === 'economy' && (
+                    <div className="animate-fade-in space-y-6">
+                         <div className="bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 p-6 rounded-xl">
+                             <div className="flex items-center justify-between mb-6">
+                                <div>
+                                    <h3 className="text-lg font-bold">Virtual Economy</h3>
+                                    <p className="text-sm text-gray-500">Manage the internal currency system.</p>
+                                </div>
+                                <ToggleSwitch label="Enabled" name="eventCoin.enabled" enabled={config.eventCoin.enabled} onChange={handleEventCoinToggle} />
+                            </div>
+                            <fieldset disabled={!config.eventCoin.enabled} className="grid grid-cols-1 md:grid-cols-2 gap-6 disabled:opacity-50">
+                                <div>
+                                    <label className="block text-sm font-medium mb-1">Currency Name</label>
+                                    <input type="text" name="name" id="eventCoin.name" value={config.eventCoin.name} onChange={handleEventCoinChange} className="w-full rounded border-gray-300 dark:border-gray-600 p-2" />
+                                </div>
+                                <div>
+                                    <label className="block text-sm font-medium mb-1">Starting Balance</label>
+                                    <input type="number" name="startingBalance" id="eventCoin.startingBalance" value={config.eventCoin.startingBalance} onChange={handleEventCoinChange} className="w-full rounded border-gray-300 dark:border-gray-600 p-2" />
+                                </div>
+                                <div>
+                                    <label className="block text-sm font-medium mb-1">Pegged To</label>
+                                    <input type="text" name="peggedCurrency" id="eventCoin.peggedCurrency" value={config.eventCoin.peggedCurrency} onChange={handleEventCoinChange} className="w-full rounded border-gray-300 dark:border-gray-600 p-2" placeholder="USD" />
+                                </div>
+                                <div>
+                                    <label className="block text-sm font-medium mb-1">Exchange Rate</label>
+                                    <input type="number" step="0.01" name="exchangeRate" id="eventCoin.exchangeRate" value={config.eventCoin.exchangeRate} onChange={handleEventCoinChange} className="w-full rounded border-gray-300 dark:border-gray-600 p-2" />
+                                </div>
+                            </fieldset>
+                         </div>
                     </div>
-                </div>
-                <div>
-                     <label className="block text-sm font-medium">Encryption</label>
-                     <select name="encryption" value={config.smtp.encryption} onChange={(e) => handleInputChange(e, 'smtp')} className="mt-1 block w-full rounded-md border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 shadow-sm">
-                        <option value="none">None</option>
-                        <option value="ssl">SSL</option>
-                        <option value="tls">TLS</option>
-                    </select>
-                </div>
-             </div>
-          )}
-          
-          {config.emailProvider === 'google' && (
-            <div className="pt-4 border-t border-gray-200 dark:border-gray-700 mt-4 animate-fade-in">
-                 <label className="block text-sm font-medium">Service Account Key (JSON)</label>
-                 <textarea name="serviceAccountKeyJson" rows={6} value={config.googleConfig.serviceAccountKeyJson} onChange={handleGoogleConfigChange} className="mt-1 block w-full rounded-md border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 shadow-sm font-mono text-xs" placeholder='Paste your JSON key here...'></textarea>
-                 <p className="mt-2 text-xs text-gray-500 dark:text-gray-400">Your key will be stored securely on the server.</p>
-            </div>
-          )}
+                )}
+
+                {/* INTEGRATIONS */}
+                {activeTab === 'integrations' && (
+                    <div className="animate-fade-in space-y-6">
+                        <div className="bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 p-6 rounded-xl">
+                             <div className="flex items-center justify-between mb-6">
+                                <div>
+                                    <h3 className="text-lg font-bold">GitHub Sync</h3>
+                                    <p className="text-sm text-gray-500">Keep config in sync with a remote JSON file.</p>
+                                </div>
+                                <ToggleSwitch label="Enabled" name="githubSync.enabled" enabled={config.githubSync.enabled} onChange={handleGithubSyncToggle} />
+                            </div>
+                            <fieldset disabled={!config.githubSync.enabled} className="space-y-4 disabled:opacity-50">
+                                <div>
+                                    <label className="block text-sm font-medium mb-1">Raw JSON URL</label>
+                                    <input 
+                                        type="url" 
+                                        name="configUrl" 
+                                        value={config.githubSync.configUrl} 
+                                        onChange={(e) => handleInputChange(e, 'githubSync')} 
+                                        className="w-full rounded border-gray-300 dark:border-gray-600 p-2" 
+                                        placeholder="https://raw.githubusercontent.com/..."
+                                    />
+                                </div>
+                                {config.githubSync.lastSyncTimestamp && (
+                                    <div className={`text-sm p-3 rounded ${config.githubSync.lastSyncStatus === 'success' ? 'bg-green-50 text-green-800' : 'bg-red-50 text-red-800'}`}>
+                                        Last sync: {new Date(config.githubSync.lastSyncTimestamp).toLocaleString()} ({config.githubSync.lastSyncStatus})
+                                    </div>
+                                )}
+                                <button 
+                                    type="button" 
+                                    onClick={handleSync} 
+                                    disabled={isSyncing || !config.githubSync.configUrl}
+                                    className="px-4 py-2 bg-gray-800 text-white rounded hover:bg-gray-700 disabled:opacity-50"
+                                >
+                                    {isSyncing ? <Spinner /> : 'Sync Now'}
+                                </button>
+                            </fieldset>
+                        </div>
+                    </div>
+                )}
+
+            </form>
         </div>
-        
-        <div className="p-4 bg-gray-50 dark:bg-gray-900/50 flex items-center justify-end gap-4">
-            {successMessage && <Alert type="success" message={successMessage} />}
-            {error && <Alert type="error" message={error} />}
-            <button
-              type="submit"
-              disabled={isSaving}
-              className="py-2 px-4 border border-transparent rounded-md shadow-sm text-sm font-medium text-white bg-primary hover:bg-primary/90 flex items-center justify-center disabled:opacity-50"
-            >
-              {isSaving ? <><Spinner /> Saving...</> : 'Save Settings'}
-            </button>
-        </div>
-      </div>
-    </form>
+    </div>
+    
     <FormFieldEditorModal
       isOpen={isFieldModalOpen}
       onClose={() => setIsFieldModalOpen(false)}
@@ -777,10 +738,10 @@ export const SettingsForm: React.FC<SettingsFormProps> = ({ adminToken }) => {
 
 const ColorPickerInput: React.FC<{label: string, name: string, value: string, onChange: (e: React.ChangeEvent<HTMLInputElement>) => void}> = ({ label, name, value, onChange }) => (
     <div>
-        <label htmlFor={`theme.${name}`} className="block text-sm font-medium">{label}</label>
+        <label htmlFor={`theme.${name}`} className="block text-sm font-medium text-gray-700 dark:text-gray-300">{label}</label>
         <div className="flex items-center gap-2 mt-1">
-            <input type="color" name={name} id={`theme.${name}`} value={value} onChange={onChange} className="h-10 w-10 p-1 rounded-md border-gray-300 dark:border-gray-600 shadow-sm" />
-            <input type="text" name={name} value={value} onChange={onChange} className="block w-full rounded-md border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 shadow-sm" />
+            <input type="color" name={name} id={`theme.${name}`} value={value} onChange={onChange} className="h-10 w-10 p-1 rounded-md border-gray-300 dark:border-gray-600 shadow-sm cursor-pointer" />
+            <input type="text" name={name} value={value} onChange={onChange} className="block w-full rounded-md border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 shadow-sm sm:text-sm" />
         </div>
     </div>
 );

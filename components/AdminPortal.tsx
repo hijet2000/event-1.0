@@ -120,7 +120,7 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({ onLogout, adminToken, 
   const renderView = () => {
     switch (view) {
       case 'dashboard':
-        return <AdminDashboard user={user} adminToken={adminToken} />;
+        return <AdminDashboard user={user} adminToken={adminToken} onNavigate={(v) => setView(v as AdminView)} />;
       case 'registrations':
         return <RegistrationsDashboard adminToken={adminToken} permissions={user.permissions} />;
       case 'settings':

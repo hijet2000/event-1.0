@@ -1,7 +1,7 @@
 
 import React, { useState, useEffect, useMemo } from 'react';
 import { type RegistrationData, type EventConfig, Permission } from '../types';
-import { getRegistrations, getEventConfig, updateRegistrationStatus } from '../server/api';
+import { getRegistrations, getEventConfig, updateRegistrationStatus, deleteAdminRegistration } from '../server/api';
 import { ContentLoader } from './ContentLoader';
 import { DelegateDetailView } from './DelegateDetailView';
 import { BulkImportModal } from './BulkImportModal';
@@ -15,6 +15,8 @@ interface RegistrationsDashboardProps {
   adminToken: string;
   permissions: Permission[];
 }
+
+type SortField = 'name' | 'email' | 'createdAt' | 'status';
 
 // Helper for image processing
 const getBase64ImageFromUrl = async (imageUrl: string): Promise<string> => {
@@ -45,14 +47,17 @@ export const RegistrationsDashboard: React.FC<RegistrationsDashboardProps> = ({ 
   
   // Action states
   const [isExporting, setIsExporting] = useState(false);
+  const [isDeleting, setIsDeleting] = useState<string | null>(null);
   
   // Feedback states
   const [scanStatus, setScanStatus] = useState<{ type: 'success' | 'error'; message: string } | null>(null);
   const [inviteSuccessMessage, setInviteSuccessMessage] = useState<string | null>(null);
   
-  // State for filters
+  // Filter & Sort
   const [filterText, setFilterText] = useState('');
   const [filterDate, setFilterDate] = useState('');
+  const [sortField, setSortField] = useState<SortField>('createdAt');
+  const [sortDesc, setSortDesc] = useState(true);
 
   const canManage = permissions.includes('manage_registrations');
   const canInvite = permissions.includes('send_invitations');
@@ -88,6 +93,20 @@ export const RegistrationsDashboard: React.FC<RegistrationsDashboardProps> = ({ 
     setInviteSuccessMessage(`Invitation successfully sent to ${email}.`);
     setTimeout(() => setInviteSuccessMessage(null), 4000);
   };
+  
+  const handleDelete = async (id: string) => {
+      if (!window.confirm("Are you sure you want to delete this registration? This action cannot be undone.")) return;
+      
+      setIsDeleting(id);
+      try {
+          await deleteAdminRegistration(adminToken, id);
+          setRegistrations(prev => prev.filter(r => r.id !== id));
+      } catch (e) {
+          alert("Failed to delete registration.");
+      } finally {
+          setIsDeleting(null);
+      }
+  };
 
   const handleScan = async (data: string) => {
     setIsScannerOpen(false);
@@ -120,6 +139,40 @@ export const RegistrationsDashboard: React.FC<RegistrationsDashboardProps> = ({ 
       setScanStatus({ type: 'error', message: 'Failed to save check-in status to the server.' });
       setRegistrations(originalRegistrations);
     }
+  };
+
+  const handleExportCSV = () => {
+      if (registrations.length === 0) return;
+      
+      const headers = ['ID', 'Name', 'Email', 'Created At', 'Checked In', 'Role', 'Company'];
+      const customHeaders = config?.formFields.filter(f => f.enabled).map(f => f.label) || [];
+      const allHeaders = [...headers, ...customHeaders];
+      
+      const csvContent = [
+          allHeaders.join(','),
+          ...registrations.map(reg => {
+              const baseData = [
+                  reg.id,
+                  `"${reg.name}"`,
+                  reg.email,
+                  new Date(reg.createdAt).toISOString(),
+                  reg.checkedIn ? 'Yes' : 'No',
+                  `"${reg.role || ''}"`,
+                  `"${reg.company || ''}"`
+              ];
+              const customData = config?.formFields.filter(f => f.enabled).map(f => `"${(reg[f.id] || '').toString().replace(/"/g, '""')}"`) || [];
+              return [...baseData, ...customData].join(',');
+          })
+      ].join('\n');
+
+      const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.setAttribute('href', url);
+      link.setAttribute('download', `registrations_export_${new Date().toISOString().split('T')[0]}.csv`);
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
   };
 
   const handleExportBadges = async () => {
@@ -253,10 +306,21 @@ export const RegistrationsDashboard: React.FC<RegistrationsDashboardProps> = ({ 
       }
   };
 
-  // Memoize the filtered list to avoid re-calculating on every render
-  const filteredRegistrations = useMemo(() => {
-    const lowerCaseFilter = filterText.toLowerCase();
+  const handleSort = (field: SortField) => {
+      if (sortField === field) {
+          setSortDesc(!sortDesc);
+      } else {
+          setSortField(field);
+          setSortDesc(false); // Default ascending for new field
+      }
+  };
 
+  // Memoize the filtered list to avoid re-calculating on every render
+  const processedRegistrations = useMemo(() => {
+    let result = [...registrations];
+    
+    // 1. Filter
+    const lowerCaseFilter = filterText.toLowerCase();
     let filterStartTimestamp: number | null = null;
     if (filterDate) {
       const parts = filterDate.split('-').map(s => parseInt(s, 10));
@@ -265,12 +329,8 @@ export const RegistrationsDashboard: React.FC<RegistrationsDashboardProps> = ({ 
         filterStartTimestamp = filterStartDate.getTime();
       }
     }
-    
-    if (!filterText && !filterDate) {
-        return registrations;
-    }
 
-    return registrations.filter(reg => {
+    result = result.filter(reg => {
       const textMatch = !filterText || 
         reg.name.toLowerCase().includes(lowerCaseFilter) || 
         reg.email.toLowerCase().includes(lowerCaseFilter);
@@ -279,7 +339,32 @@ export const RegistrationsDashboard: React.FC<RegistrationsDashboardProps> = ({ 
 
       return textMatch && dateMatch;
     });
-  }, [registrations, filterText, filterDate]);
+    
+    // 2. Sort
+    result.sort((a, b) => {
+        let valA, valB;
+        if (sortField === 'status') {
+            valA = a.checkedIn ? 1 : 0;
+            valB = b.checkedIn ? 1 : 0;
+        } else {
+            valA = a[sortField];
+            valB = b[sortField];
+        }
+        
+        if (typeof valA === 'string') {
+            return sortDesc ? valB.localeCompare(valA) : valA.localeCompare(valB);
+        } else {
+            return sortDesc ? (valB as number) - (valA as number) : (valA as number) - (valB as number);
+        }
+    });
+
+    return result;
+  }, [registrations, filterText, filterDate, sortField, sortDesc]);
+
+  const renderSortIcon = (field: SortField) => {
+      if (sortField !== field) return <span className="ml-1 text-gray-400 text-[10px]">▲▼</span>;
+      return <span className="ml-1 text-primary text-[10px]">{sortDesc ? '▼' : '▲'}</span>;
+  };
 
   const renderContent = () => {
     if (isLoading) {
@@ -377,16 +462,24 @@ export const RegistrationsDashboard: React.FC<RegistrationsDashboardProps> = ({ 
             <table className="min-w-full divide-y divide-gray-200 dark:divide-gray-700">
                 <thead className="bg-gray-50 dark:bg-gray-700/50">
                     <tr>
-                        <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider">Name</th>
-                        <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider">Email</th>
-                        <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider">Registered On</th>
-                        <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider">Status</th>
+                        <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider cursor-pointer hover:bg-gray-100 dark:hover:bg-gray-600" onClick={() => handleSort('name')}>
+                            Name {renderSortIcon('name')}
+                        </th>
+                        <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider cursor-pointer hover:bg-gray-100 dark:hover:bg-gray-600" onClick={() => handleSort('email')}>
+                            Email {renderSortIcon('email')}
+                        </th>
+                        <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider cursor-pointer hover:bg-gray-100 dark:hover:bg-gray-600" onClick={() => handleSort('createdAt')}>
+                            Registered On {renderSortIcon('createdAt')}
+                        </th>
+                        <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider cursor-pointer hover:bg-gray-100 dark:hover:bg-gray-600" onClick={() => handleSort('status')}>
+                            Status {renderSortIcon('status')}
+                        </th>
                         <th className="px-6 py-3 text-right text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider">Actions</th>
                     </tr>
                 </thead>
                 <tbody className="divide-y divide-gray-200 dark:divide-gray-700">
-                    {filteredRegistrations.length > 0 ? filteredRegistrations.map(reg => (
-                        <tr key={reg.id} className="hover:bg-gray-50 dark:hover:bg-gray-700/40 transition-colors">
+                    {processedRegistrations.length > 0 ? processedRegistrations.map(reg => (
+                        <tr key={reg.id} className="hover:bg-gray-50 dark:hover:bg-gray-700/40 transition-colors group">
                             <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900 dark:text-white">{reg.name}</td>
                             <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500 dark:text-gray-400">{reg.email}</td>
                             <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500 dark:text-gray-400">{new Date(reg.createdAt).toLocaleDateString()}</td>
@@ -402,7 +495,12 @@ export const RegistrationsDashboard: React.FC<RegistrationsDashboardProps> = ({ 
                                 )}
                             </td>
                             <td className="px-6 py-4 whitespace-nowrap text-right text-sm font-medium">
-                                <button onClick={() => setSelectedDelegate(reg)} className="text-primary hover:underline">View</button>
+                                <div className="flex items-center justify-end space-x-3">
+                                    <button onClick={() => setSelectedDelegate(reg)} className="text-primary hover:underline">Edit</button>
+                                    <button onClick={() => handleDelete(reg.id!)} disabled={isDeleting === reg.id} className="text-red-500 hover:underline disabled:opacity-50">
+                                        {isDeleting === reg.id ? '...' : 'Delete'}
+                                    </button>
+                                </div>
                             </td>
                         </tr>
                     )) : (
@@ -420,14 +518,24 @@ export const RegistrationsDashboard: React.FC<RegistrationsDashboardProps> = ({ 
   };
 
   if (selectedDelegate && config) {
-    return <DelegateDetailView delegate={selectedDelegate} config={config} onBack={() => setSelectedDelegate(null)} adminToken={adminToken} />;
+    return (
+        <DelegateDetailView 
+            delegate={selectedDelegate} 
+            config={config} 
+            onBack={() => {
+                setSelectedDelegate(null);
+                loadData(); // Refresh to show any edits
+            }} 
+            adminToken={adminToken} 
+        />
+    );
   }
   
   return (
     <div>
       <div className="flex flex-wrap gap-4 justify-between items-center mb-4">
         <h2 className="text-2xl font-bold text-gray-900 dark:text-white">Registrations</h2>
-        <div className="flex gap-2">
+        <div className="flex gap-2 flex-wrap">
             {canInvite && (
                 <button onClick={() => setInviteModalOpen(true)} className="py-2 px-4 border border-transparent rounded-md shadow-sm text-sm font-medium text-white bg-secondary hover:bg-secondary/90 flex items-center gap-2">
                     <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 8l7.89 5.26a2 2 0 002.22 0L21 8M5 19h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z" /></svg>
@@ -439,6 +547,10 @@ export const RegistrationsDashboard: React.FC<RegistrationsDashboardProps> = ({ 
                 <button onClick={() => setIsScannerOpen(true)} className="py-2 px-4 border border-transparent rounded-md shadow-sm text-sm font-medium text-white bg-primary hover:bg-primary/90 flex items-center gap-2">
                     <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v1m6 11h2m-6.5 6.5v-1m-6.5-5.5h-1M4 12V4a2 2 0 012-2h8a2 2 0 012 2v8a2 2 0 01-2 2H6a2 2 0 01-2-2z" /></svg>
                     Scan to Check-in
+                </button>
+                <button onClick={handleExportCSV} className="py-2 px-4 border border-gray-300 dark:border-gray-600 rounded-md shadow-sm text-sm font-medium text-gray-700 dark:text-gray-200 bg-white dark:bg-gray-700 hover:bg-gray-50 dark:hover:bg-gray-600 flex items-center gap-2">
+                     <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" /></svg>
+                     CSV
                 </button>
                 <button 
                     onClick={handleExportBadges} 

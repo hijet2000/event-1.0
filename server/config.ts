@@ -1,6 +1,7 @@
 
 
 
+
 import { type EventConfig } from '../types';
 
 export const defaultConfig: EventConfig = {

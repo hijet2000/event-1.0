@@ -2,9 +2,10 @@
 
 
 
+
 import React, { useState, useMemo } from 'react';
 import { type Session, type Speaker } from '../types';
-import { addToAgenda, removeFromAgenda, submitSessionFeedback } from '../server/api';
+import { addToAgenda, removeFromAgenda, submitSessionFeedback, downloadSessionIcs } from '../server/api';
 import { StarRating } from './StarRating';
 import { Spinner } from './Spinner';
 import { Alert } from './Alert';
@@ -86,6 +87,11 @@ const SessionCard: React.FC<{
   );
   
   const isPast = new Date(session.endTime).getTime() < Date.now();
+  
+  const handleDownloadIcs = (e: React.MouseEvent) => {
+      e.stopPropagation();
+      downloadSessionIcs(session.id).catch(err => console.error("Calendar export failed", err));
+  };
 
   return (
     <div className="flex items-start space-x-4 py-4 group">
@@ -94,7 +100,18 @@ const SessionCard: React.FC<{
         <p className="text-sm text-gray-500 dark:text-gray-400">to {formatTime(session.endTime)}</p>
       </div>
       <div className="flex-grow border-l-2 border-gray-200 dark:border-gray-700 pl-4 relative">
-        <h4 className="font-bold text-gray-900 dark:text-white pr-8">{session.title}</h4>
+        <div className="flex justify-between items-start pr-8">
+            <h4 className="font-bold text-gray-900 dark:text-white">{session.title}</h4>
+             <button 
+                onClick={handleDownloadIcs}
+                className="text-gray-400 hover:text-primary transition-colors opacity-0 group-hover:opacity-100"
+                title="Add to Calendar"
+            >
+                <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z" />
+                </svg>
+            </button>
+        </div>
         <div className="mt-1 text-sm text-gray-500 dark:text-gray-400 space-y-1">
             <p>
                 <span className="font-medium text-gray-600 dark:text-gray-300">Location:</span> {session.location}

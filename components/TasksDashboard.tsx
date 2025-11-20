@@ -1,5 +1,6 @@
+
 import React, { useState, useEffect, useMemo } from 'react';
-import { type Task, type TaskStatus, type AdminUser } from '../types';
+import { type Task, type TaskStatus, type AdminUser, type TaskPriority } from '../types';
 import { getTasks, saveTask, getAdminUsers, deleteTask } from '../server/api';
 import { ContentLoader } from './ContentLoader';
 import { Alert } from './Alert';
@@ -15,6 +16,19 @@ const COLUMNS: { id: TaskStatus; title: string }[] = [
   { id: 'completed', title: 'Completed' },
 ];
 
+const PriorityBadge: React.FC<{ priority: TaskPriority }> = ({ priority }) => {
+    const colors = {
+        high: 'bg-red-100 text-red-800 dark:bg-red-900 dark:text-red-200',
+        medium: 'bg-yellow-100 text-yellow-800 dark:bg-yellow-900 dark:text-yellow-200',
+        low: 'bg-blue-100 text-blue-800 dark:bg-blue-900 dark:text-blue-200',
+    };
+    return (
+        <span className={`px-2 py-0.5 text-[10px] font-bold uppercase tracking-wider rounded-full ${colors[priority] || colors.low}`}>
+            {priority}
+        </span>
+    );
+};
+
 const DueDateDisplay: React.FC<{ dueDate: string }> = ({ dueDate }) => {
   const today = new Date();
   today.setHours(0, 0, 0, 0);
@@ -25,13 +39,13 @@ const DueDateDisplay: React.FC<{ dueDate: string }> = ({ dueDate }) => {
   const dueTimestamp = due.getTime();
 
   let color = 'text-gray-500 dark:text-gray-400';
-  let text = new Date(year, month - 1, day + 1).toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
+  let text = new Date(year, month - 1, day).toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
 
   if (dueTimestamp < todayTimestamp) {
-    color = 'text-red-600 dark:text-red-500 font-semibold';
+    color = 'text-red-600 dark:text-red-400 font-semibold';
     text += ' (Overdue)';
   } else if (dueTimestamp === todayTimestamp) {
-    color = 'text-orange-600 dark:text-orange-500 font-semibold';
+    color = 'text-orange-600 dark:text-orange-400 font-semibold';
     text = 'Today';
   }
 
@@ -43,6 +57,15 @@ const DueDateDisplay: React.FC<{ dueDate: string }> = ({ dueDate }) => {
   );
 };
 
+const AssigneeAvatar: React.FC<{ email: string }> = ({ email }) => (
+    <div 
+        className="h-6 w-6 rounded-full bg-indigo-100 dark:bg-indigo-900 flex items-center justify-center text-[10px] font-bold text-indigo-700 dark:text-indigo-300 border border-indigo-200 dark:border-indigo-700"
+        title={email}
+    >
+        {email.charAt(0).toUpperCase()}
+    </div>
+);
+
 const TaskCard: React.FC<{ task: Task; onClick: () => void; adminUsers: AdminUser[] }> = ({ task, onClick, adminUsers }) => {
   const assignee = adminUsers.find(u => u.email === task.assigneeEmail);
   return (
@@ -52,13 +75,15 @@ const TaskCard: React.FC<{ task: Task; onClick: () => void; adminUsers: AdminUse
         e.dataTransfer.setData('taskId', task.id);
       }}
       onClick={onClick}
-      className="p-3 bg-white dark:bg-gray-800 rounded-lg shadow-md hover:shadow-lg cursor-pointer border border-gray-200 dark:border-gray-700"
+      className="p-4 bg-white dark:bg-gray-800 rounded-lg shadow-sm hover:shadow-md cursor-pointer border border-gray-200 dark:border-gray-700 transition-all hover:-translate-y-0.5 group"
     >
-      <h4 className="font-semibold text-gray-800 dark:text-gray-200">{task.title}</h4>
-      <p className="text-sm text-gray-600 dark:text-gray-400 mt-1 line-clamp-2">{task.description}</p>
+      <div className="flex justify-between items-start mb-2">
+          <PriorityBadge priority={task.priority || 'medium'} />
+          {assignee && <AssigneeAvatar email={assignee.email} />}
+      </div>
+      <h4 className="font-semibold text-gray-900 dark:text-gray-100 text-sm">{task.title}</h4>
       <div className="flex justify-between items-center mt-3 pt-3 border-t border-gray-100 dark:border-gray-700/50">
-        {task.dueDate ? <DueDateDisplay dueDate={task.dueDate} /> : <div />}
-        {assignee && <div className="text-xs font-semibold px-2 py-1 rounded-full bg-primary/10 text-primary">{assignee.email.charAt(0).toUpperCase()}</div>}
+        {task.dueDate ? <DueDateDisplay dueDate={task.dueDate} /> : <span className="text-xs text-gray-400">No due date</span>}
       </div>
     </div>
   );
@@ -71,10 +96,16 @@ export const TasksDashboard: React.FC<TasksDashboardProps> = ({ adminToken }) =>
   const [error, setError] = useState<string | null>(null);
   const [editingTask, setEditingTask] = useState<Task | null>(null);
   const [isModalOpen, setIsModalOpen] = useState(false);
+  
+  // Filters
+  const [searchQuery, setSearchQuery] = useState('');
+  const [filterAssignee, setFilterAssignee] = useState('');
 
   const fetchData = async () => {
     try {
-      setIsLoading(true);
+      // Keep loading state minimal for refreshes
+      if (tasks.length === 0) setIsLoading(true);
+      
       const [tasksData, usersData] = await Promise.all([
         getTasks(adminToken, 'main-event'),
         getAdminUsers(adminToken),
@@ -92,25 +123,34 @@ export const TasksDashboard: React.FC<TasksDashboardProps> = ({ adminToken }) =>
     fetchData();
   }, [adminToken]);
 
+  const filteredTasks = useMemo(() => {
+      return tasks.filter(t => {
+          const matchesSearch = t.title.toLowerCase().includes(searchQuery.toLowerCase()) || t.description.toLowerCase().includes(searchQuery.toLowerCase());
+          const matchesAssignee = !filterAssignee || t.assigneeEmail === filterAssignee;
+          return matchesSearch && matchesAssignee;
+      });
+  }, [tasks, searchQuery, filterAssignee]);
+
   const tasksByStatus = useMemo(() => {
-    return tasks.reduce((acc, task) => {
+    return filteredTasks.reduce((acc, task) => {
       acc[task.status] = acc[task.status] || [];
       acc[task.status].push(task);
       return acc;
     }, {} as Record<TaskStatus, Task[]>);
-  }, [tasks]);
+  }, [filteredTasks]);
 
   const handleDrop = async (e: React.DragEvent<HTMLDivElement>, status: TaskStatus) => {
     e.preventDefault();
     const taskId = e.dataTransfer.getData('taskId');
     const task = tasks.find(t => t.id === taskId);
     if (task && task.status !== status) {
+      // Optimistic Update
       setTasks(prev => prev.map(t => t.id === taskId ? { ...t, status } : t));
       try {
         await saveTask(adminToken, { ...task, status });
       } catch (err) {
         setError('Failed to update task status.');
-        fetchData(); // Revert optimistic update on failure
+        fetchData(); // Revert
       }
     }
   };
@@ -146,32 +186,56 @@ export const TasksDashboard: React.FC<TasksDashboardProps> = ({ adminToken }) =>
 
   return (
     <>
-      <div className="flex justify-between items-center mb-6">
+      <div className="flex flex-col md:flex-row justify-between items-start md:items-center mb-6 gap-4">
         <div>
           <h2 className="text-2xl font-bold text-gray-900 dark:text-white">Task Board</h2>
-          <p className="mt-1 text-sm text-gray-500 dark:text-gray-400">Organize and track your event planning tasks.</p>
+          <p className="mt-1 text-sm text-gray-500 dark:text-gray-400">Manage event tasks and track progress.</p>
         </div>
-        <button
-          onClick={() => { setEditingTask(null); setIsModalOpen(true); }}
-          className="py-2 px-4 text-sm font-medium text-white bg-primary rounded-md shadow-sm hover:bg-primary/90"
-        >
-          Add Task
-        </button>
+        <div className="flex flex-wrap gap-3 w-full md:w-auto">
+             {/* Filters */}
+             <div className="relative flex-grow md:flex-grow-0">
+                <input 
+                    type="text" 
+                    placeholder="Search tasks..." 
+                    value={searchQuery}
+                    onChange={e => setSearchQuery(e.target.value)}
+                    className="w-full md:w-48 px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-md text-sm bg-white dark:bg-gray-700 dark:text-white focus:ring-primary focus:border-primary"
+                />
+             </div>
+             <select 
+                value={filterAssignee}
+                onChange={e => setFilterAssignee(e.target.value)}
+                className="px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-md text-sm bg-white dark:bg-gray-700 dark:text-white focus:ring-primary focus:border-primary"
+             >
+                 <option value="">All Assignees</option>
+                 {adminUsers.map(u => <option key={u.id} value={u.email}>{u.email}</option>)}
+             </select>
+             <button
+                onClick={() => { setEditingTask(null); setIsModalOpen(true); }}
+                className="flex items-center justify-center px-4 py-2 bg-primary text-white rounded-md shadow-sm hover:bg-primary/90 text-sm font-medium whitespace-nowrap"
+             >
+                 <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4 mr-2" viewBox="0 0 20 20" fill="currentColor"><path fillRule="evenodd" d="M10 3a1 1 0 011 1v5h5a1 1 0 110 2h-5v5a1 1 0 11-2 0v-5H4a1 1 0 110-2h5V4a1 1 0 011-1z" clipRule="evenodd" /></svg>
+                 New Task
+             </button>
+        </div>
       </div>
 
       {error && <Alert type="error" message={error} />}
 
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-6 h-[calc(100vh-220px)] overflow-y-auto md:overflow-hidden pb-4">
         {COLUMNS.map(col => (
-          <div key={col.id} className="bg-gray-100 dark:bg-gray-800/50 rounded-xl p-4">
-            <h3 className="font-semibold text-lg text-gray-800 dark:text-gray-200 px-2 pb-3 border-b-2 border-gray-200 dark:border-gray-700">
-              {col.title}
-              <span className="ml-2 text-sm text-gray-500">{tasksByStatus[col.id]?.length || 0}</span>
-            </h3>
+          <div key={col.id} className="flex flex-col bg-gray-100 dark:bg-gray-900/50 rounded-xl border border-gray-200 dark:border-gray-800 h-full max-h-full">
+            <div className="p-4 border-b border-gray-200 dark:border-gray-800 flex justify-between items-center bg-gray-50 dark:bg-gray-800 rounded-t-xl">
+                <h3 className="font-bold text-gray-700 dark:text-gray-200">{col.title}</h3>
+                <span className="bg-gray-200 dark:bg-gray-700 text-gray-600 dark:text-gray-300 px-2 py-0.5 rounded-full text-xs font-bold">
+                    {tasksByStatus[col.id]?.length || 0}
+                </span>
+            </div>
+            
             <div
               onDrop={(e) => handleDrop(e, col.id)}
               onDragOver={(e) => e.preventDefault()}
-              className="mt-4 space-y-4 min-h-[200px]"
+              className="flex-1 p-3 space-y-3 overflow-y-auto min-h-[150px]"
             >
               {tasksByStatus[col.id]?.map(task => (
                 <TaskCard 
@@ -181,6 +245,11 @@ export const TasksDashboard: React.FC<TasksDashboardProps> = ({ adminToken }) =>
                     onClick={() => { setEditingTask(task); setIsModalOpen(true); }}
                 />
               ))}
+              {(!tasksByStatus[col.id] || tasksByStatus[col.id].length === 0) && (
+                  <div className="h-full flex items-center justify-center text-gray-400 text-sm italic border-2 border-dashed border-gray-200 dark:border-gray-700 rounded-lg m-2">
+                      Drop items here
+                  </div>
+              )}
             </div>
           </div>
         ))}

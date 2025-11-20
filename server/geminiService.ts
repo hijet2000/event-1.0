@@ -1,8 +1,4 @@
 
-
-
-
-
 import { GoogleGenAI, Type, GenerateContentResponse } from "@google/genai";
 import { type RegistrationData, type EventConfig, type EmailContent, type NetworkingProfile, type NetworkingMatch } from '../types';
 import { getEnv } from './env';
@@ -349,66 +345,6 @@ export const generateImage = async (prompt: string): Promise<string> => {
   } catch (error) {
     console.error("Error generating image with Gemini API:", error);
     throw new Error("Failed to generate image.");
-  }
-};
-
-export const generateMarketingVideo = async (prompt: string, imageBase64?: string): Promise<string> => {
-  const ai = getAiClient();
-  
-  try {
-    let operation;
-    
-    if (imageBase64) {
-        const base64Data = imageBase64.split(',')[1];
-        const mimeType = imageBase64.substring(imageBase64.indexOf(':') + 1, imageBase64.indexOf(';'));
-
-        operation = await ai.models.generateVideos({
-            model: 'veo-3.1-fast-generate-preview',
-            prompt: prompt,
-            image: {
-                imageBytes: base64Data,
-                mimeType: mimeType,
-            },
-            config: {
-                numberOfVideos: 1,
-                resolution: '720p',
-                aspectRatio: '16:9'
-            }
-        });
-    } else {
-        operation = await ai.models.generateVideos({
-            model: 'veo-3.1-fast-generate-preview',
-            prompt: prompt,
-            config: {
-                numberOfVideos: 1,
-                resolution: '1080p',
-                aspectRatio: '16:9'
-            }
-        });
-    }
-
-    while (!operation.done) {
-        await new Promise(resolve => setTimeout(resolve, 5000));
-        operation = await ai.operations.getVideosOperation({ operation: operation });
-    }
-
-    const downloadLink = operation.response?.generatedVideos?.[0]?.video?.uri;
-    if (!downloadLink) {
-        throw new Error("Video generation completed but no URI returned.");
-    }
-
-    const apiKey = getEnv('API_KEY');
-    const response = await fetch(`${downloadLink}&key=${apiKey}`);
-    if (!response.ok) {
-        throw new Error("Failed to download generated video.");
-    }
-    
-    const videoBlob = await response.blob();
-    return URL.createObjectURL(videoBlob);
-
-  } catch (error) {
-    console.error("Error generating video with Gemini API:", error);
-    throw new Error("Failed to generate video.");
   }
 };
 

@@ -6,7 +6,7 @@ import {
     EventCoinStats, Transaction, DelegateProfile, MealPlanAssignment,
     HotelRoomStatus, AccommodationBookingStatus, PublicEvent, EventData,
     MealType, EnrichedAccommodationBooking, EmailPayload, NetworkingProfile, NetworkingMatch, SessionFeedback,
-    ScavengerHuntItem
+    ScavengerHuntItem, LeaderboardEntry
 } from '../types';
 import { 
     findAll, find, insert, update, remove, count, updateWhere, removeWhere 
@@ -19,7 +19,6 @@ import {
     generateDelegateInvitationEmail, generateDelegateUpdateEmail,
     generateAiContent as geminiGenerateAiContent,
     generateImage as geminiGenerateImage,
-    generateMarketingVideo as geminiGenerateMarketingVideo,
     generateNetworkingMatches as geminiGenerateNetworkingMatches,
     summarizeSessionFeedback as geminiSummarizeSessionFeedback
 } from './geminiService';
@@ -27,14 +26,22 @@ import { sendEmail } from './email';
 import { uploadFileToStorage as mockUpload, saveGeneratedImageToStorage, MediaItem } from './storage';
 
 // --- CONFIGURATION ---
-export const USE_REAL_API = false; 
-const API_BASE_URL = 'http://localhost:3001/api';
+// Automatically use real API if running in production or if configured
+export const USE_REAL_API = (import.meta as any).env?.PROD || false; 
+const API_BASE_URL = '/api'; // Relative path allows proxying in dev and direct access in prod
 
 // --- API Client Helper ---
 async function apiFetch<T>(endpoint: string, method: string = 'GET', body?: any, token?: string): Promise<T> {
     const headers: Record<string, string> = { 'Content-Type': 'application/json' };
-    if (!USE_REAL_API && token) {
-        headers['Authorization'] = `Bearer ${token}`;
+    
+    // If token is provided, use it. Otherwise, check localStorage for admin or delegate tokens
+    let authToken = token;
+    if (!authToken && typeof localStorage !== 'undefined') {
+        authToken = localStorage.getItem('adminToken') || localStorage.getItem('delegateToken') || undefined;
+    }
+
+    if (authToken) {
+        headers['Authorization'] = `Bearer ${authToken}`;
     }
     
     try {
@@ -63,10 +70,55 @@ async function apiFetch<T>(endpoint: string, method: string = 'GET', body?: any,
     }
 }
 
-// Re-export for components
-export const generateAiContent = geminiGenerateAiContent;
-export const generateImage = geminiGenerateImage;
-export const generateMarketingVideo = geminiGenerateMarketingVideo;
+// ... (Rest of the file remains the same, just ensuring the imports above are preserved)
+
+// AI Proxy Functions (Secure)
+export const generateAiContent = async (type: string, context: any): Promise<string> => {
+    if (USE_REAL_API) {
+        let prompt = '';
+         switch(type) {
+            case 'hotel':
+                prompt = `Generate a compelling, professional-sounding description for a hotel named "${context.name}". The hotel is located at "${context.address}". The description should be about 2-3 sentences long and highlight its suitability for event attendees.`;
+                break;
+            case 'room':
+                 prompt = `Generate a brief, appealing description for a "${context.name}" room type at a hotel. Mention some of its key features based on its name. Keep it to one sentence.`;
+                break;
+            case 'meal_plan':
+                prompt = `Generate a brief, one-sentence description for a meal plan called "${context.name}" at an event.`;
+                break;
+            case 'menu':
+                prompt = `Generate a sample dinner menu for a restaurant named "${context.name}" that serves ${context.cuisine} cuisine. Include 3 appetizers, 4 main courses, and 2 desserts. Format the output as plain text with clear headings.`;
+                break;
+            case 'session':
+                prompt = `Generate a compelling, professional-sounding description for an event session. The session title is "${context.title}". The speakers are "${context.speakers}". The description should be about 2-4 sentences long and make it sound interesting for attendees.`;
+                break;
+            case 'speaker_bio':
+                prompt = `Generate a professional and engaging third-person biography for a speaker at a tech conference. The biography should be approximately 3-4 sentences long. Speaker's Name: ${context.name}. Title: ${context.title}. Company: ${context.company}.`;
+                break;
+            case 'sponsor_description':
+                prompt = `Generate a compelling and professional one-paragraph description for a company that is sponsoring an event. Company Name: ${context.name}. Company Website: ${context.websiteUrl}.`;
+                break;
+            default:
+                return '';
+        }
+
+        const result = await apiFetch<{text: string}>('/ai/generate', 'POST', {
+            contents: prompt
+        });
+        return result.text;
+    }
+    return geminiGenerateAiContent(type as any, context);
+};
+
+export const generateImage = async (prompt: string): Promise<string> => {
+     if (USE_REAL_API) {
+         const result = await apiFetch<any>('/ai/generate-images', 'POST', { prompt });
+         const base64ImageBytes = result.generatedImages[0].image.imageBytes;
+         return `data:image/jpeg;base64,${base64ImageBytes}`;
+     }
+     return geminiGenerateImage(prompt);
+}
+
 export const saveGeneratedImage = saveGeneratedImageToStorage;
 export type { MediaItem };
 
@@ -338,7 +390,18 @@ export const getRegistrations = async (adminToken: string): Promise<Registration
 };
 
 export const updateRegistrationStatus = async (adminToken: string, eventId: string, registrationId: string, updates: Partial<RegistrationData>): Promise<void> => {
-    if (!USE_REAL_API) await update('registrations', registrationId, updates);
+    if (USE_REAL_API) { await apiFetch(`/admin/registrations/${registrationId}`, 'PUT', updates, adminToken); return; }
+    await update('registrations', registrationId, updates);
+};
+
+export const saveAdminRegistration = async (adminToken: string, id: string, data: Partial<RegistrationData>): Promise<void> => {
+    if (USE_REAL_API) { await apiFetch(`/admin/registrations/${id}`, 'PUT', data, adminToken); return; }
+    await update('registrations', id, data);
+};
+
+export const deleteAdminRegistration = async (adminToken: string, id: string): Promise<void> => {
+    if (USE_REAL_API) { await apiFetch(`/admin/registrations/${id}`, 'DELETE', undefined, adminToken); return; }
+    await remove('registrations', id);
 };
 
 export const bulkImportRegistrations = async (adminToken: string, csvData: string): Promise<{ successCount: number; errorCount: number; errors: string[] }> => {
@@ -400,9 +463,33 @@ export const sendDelegateInvitation = async (adminToken: string, eventId: string
 
 // --- Communications ---
 export const getEmailLogs = async (adminToken: string): Promise<any[]> => {
-    if (USE_REAL_API) return []; 
+    if (USE_REAL_API) return await apiFetch('/admin/logs/email', 'GET', undefined, adminToken); // Fixed Endpoint
     const logs = await findAll('emailLogs');
     return logs.sort((a: any, b: any) => b.timestamp - a.timestamp);
+};
+
+export const sendTestEmail = async (adminToken: string, to: string, config: EventConfig): Promise<void> => {
+    if (USE_REAL_API) {
+        await apiFetch('/admin/test-email', 'POST', { to, config }, adminToken);
+        return;
+    }
+    // Mock implementation
+    const payload = {
+        to,
+        subject: 'Test Email from Event Platform',
+        body: 'This is a test email to verify your configuration settings.'
+    };
+    await sendEmail(payload, config);
+    await logEmailCommunication(payload, 'sent');
+};
+
+export const sendBroadcast = async (adminToken: string, subject: string, body: string, target: 'all' | 'checked-in' | 'pending', channel: 'email' | 'sms' | 'whatsapp' | 'app' = 'email'): Promise<{ success: boolean, message: string }> => {
+    if (USE_REAL_API) {
+        return await apiFetch('/admin/broadcast', 'POST', { subject, body, target, channel }, adminToken);
+    }
+    // Mock
+    await new Promise(r => setTimeout(r, 500));
+    return { success: true, message: `Broadcast simulated via ${channel} successfully (5 recipients).` };
 };
 
 // --- Delegate Portal ---
@@ -441,6 +528,15 @@ export const removeFromAgenda = async (delegateToken: string, sessionId: string)
         const payload = JSON.parse(atob(delegateToken));
         await removeWhere('agendaSelections', (s: any) => s.delegateId === payload.id && s.sessionId === sessionId);
     }
+};
+
+// Updated to use secure token fetch
+export const getAiToken = async (delegateToken: string): Promise<string> => {
+    if (USE_REAL_API) {
+        const res = await apiFetch<{apiKey: string}>('/auth/ai-token', 'GET', undefined, delegateToken);
+        return res.apiKey;
+    }
+    return ''; // In mock mode, components might fail or fallback to mocked gemini
 };
 
 export const getEventContextForAI = async (delegateToken: string): Promise<string> => {
@@ -529,9 +625,9 @@ export const analyzeFeedback = async (adminToken: string, sessionId: string): Pr
         if (!stats.comments.length) return "No data.";
         return await geminiSummarizeSessionFeedback(session.title, stats.comments);
     }
-    // In real mode, frontend still handles AI call to avoid loading backend with AI tasks
-    const session = await apiFetch<Session>(`/sessions/${sessionId}`, 'GET', undefined, adminToken); // Assuming route exists or fetch from list
+    const session = await apiFetch<Session>(`/sessions/${sessionId}`, 'GET', undefined, adminToken); // Use existing endpoint if not public list
     const stats = await getSessionFeedbackStats(adminToken, sessionId);
+    if (!stats.comments.length) return "No data.";
     return await geminiSummarizeSessionFeedback(session.title, stats.comments);
 };
 
@@ -577,6 +673,39 @@ export const claimScavengerHuntItem = async (delegateToken: string, secretCode: 
     return { success: true, message: `Earned ${item.rewardAmount}`, rewardAmount: item.rewardAmount };
 };
 
+export const getScavengerHuntLeaderboard = async (token: string): Promise<LeaderboardEntry[]> => {
+    if (USE_REAL_API) return await apiFetch('/scavenger-hunt/leaderboard', 'GET', undefined, token);
+    
+    // Mock Implementation
+    const logs = await findAll('scavengerHuntLogs');
+    const items = await findAll('scavengerHuntItems');
+    const users = await findAll('registrations');
+    
+    const scores: Record<string, { score: number, itemsFound: number }> = {};
+    
+    logs.forEach((log: any) => {
+        const item = items.find((i: any) => i.id === log.itemId);
+        if (item) {
+            if (!scores[log.userId]) scores[log.userId] = { score: 0, itemsFound: 0 };
+            scores[log.userId].score += (item.rewardAmount || 0);
+            scores[log.userId].itemsFound += 1;
+        }
+    });
+    
+    const leaderboard = Object.entries(scores).map(([userId, stats]) => {
+        const user = users.find((u: any) => u.id === userId);
+        return {
+            userId,
+            name: user ? user.name : 'Unknown',
+            score: stats.score,
+            itemsFound: stats.itemsFound
+        };
+    });
+    
+    return leaderboard.sort((a, b) => b.score - a.score).slice(0, 20);
+};
+
+
 // --- Admin Dashboard ---
 export const getDashboardStats = async (adminToken: string): Promise<DashboardStats> => {
     if (USE_REAL_API) return await apiFetch<DashboardStats>('/admin/dashboard-stats', 'GET', undefined, adminToken);
@@ -589,7 +718,38 @@ export const getDashboardStats = async (adminToken: string): Promise<DashboardSt
     const eventCoinCirculation = allTx
         .filter((t: any) => t.type === 'initial' || t.type === 'purchase' || t.type === 'reward')
         .reduce((acc: number, t: any) => acc + t.amount, 0);
-    return { totalRegistrations, maxAttendees: config.event.maxAttendees, eventDate: config.event.date, eventCoinName: config.eventCoin.name, eventCoinCirculation, recentRegistrations };
+    
+    // Calculate Trend (Last 7 days)
+    const trendMap = new Map<string, number>();
+    const now = new Date();
+    for (let i = 6; i >= 0; i--) {
+        const d = new Date(now);
+        d.setDate(d.getDate() - i);
+        trendMap.set(d.toISOString().split('T')[0], 0);
+    }
+    const allRegistrations = await findAll('registrations', (r: any) => r.eventId === MAIN_EVENT_ID);
+    allRegistrations.forEach((r: any) => {
+        const date = new Date(r.createdAt).toISOString().split('T')[0];
+        if (trendMap.has(date)) {
+            trendMap.set(date, (trendMap.get(date) || 0) + 1);
+        }
+    });
+    const registrationTrend = Array.from(trendMap.entries()).map(([date, count]) => ({ date, count }));
+
+    // Task stats
+    const allTasks = await findAll('tasks', (t: any) => t.eventId === MAIN_EVENT_ID);
+    const completedTasks = allTasks.filter((t: any) => t.status === 'completed').length;
+
+    return { 
+        totalRegistrations, 
+        maxAttendees: config.event.maxAttendees, 
+        eventDate: config.event.date, 
+        eventCoinName: config.eventCoin.name, 
+        eventCoinCirculation, 
+        recentRegistrations,
+        registrationTrend,
+        taskStats: { total: allTasks.length, completed: completedTasks, pending: allTasks.length - completedTasks }
+    };
 };
 
 // --- Users & Roles ---
@@ -733,6 +893,17 @@ export const makeDiningReservation = async (delegateToken: string, restaurantId:
     await insert('diningReservations', { id: `res_${Date.now()}`, restaurantId, delegateId: payload.id, delegateName: user?.name || 'Unknown', reservationTime, partySize });
 };
 
+export const createAdminDiningReservation = async (adminToken: string, data: { restaurantId: string, delegateId: string, reservationTime: string, partySize: number }): Promise<void> => {
+    if (USE_REAL_API) { await apiFetch('/admin/dining/reservations', 'POST', data, adminToken); return; }
+    const user = await find('registrations', (r: any) => r.id === data.delegateId);
+    await insert('diningReservations', { id: `res_${Date.now()}`, restaurantId: data.restaurantId, delegateId: data.delegateId, delegateName: user?.name || 'Unknown', reservationTime: data.reservationTime, partySize: data.partySize });
+};
+
+export const deleteDiningReservation = async (adminToken: string, id: string): Promise<void> => {
+    if (USE_REAL_API) { await apiFetch(`/dining/reservations/${id}`, 'DELETE', undefined, adminToken); return; }
+    await remove('diningReservations', id);
+};
+
 export const getReservationsForRestaurant = async (adminToken: string, restaurantId: string): Promise<DiningReservation[]> => {
     if (USE_REAL_API) return await apiFetch(`/admin/dining/reservations/${restaurantId}`, 'GET', undefined, adminToken);
     return findAll('diningReservations', (r: any) => r.restaurantId === restaurantId);
@@ -756,6 +927,51 @@ export const getRoomsForHotel = async (adminToken: string, hotelId: string): Pro
     if (USE_REAL_API) return []; 
     return (await findAll('hotelRooms', (r: any) => r.hotelId === hotelId)) as HotelRoom[];
 };
+// New: Batch generate rooms
+export const generateHotelRooms = async (adminToken: string, hotelId: string, roomTypeId: string, count: number, startNumber: number): Promise<void> => {
+    if (!USE_REAL_API) {
+        for (let i = 0; i < count; i++) {
+            const roomNum = startNumber + i;
+            // Check duplicate
+            const exists = await find('hotelRooms', (r: any) => r.hotelId === hotelId && r.roomNumber === String(roomNum));
+            if (!exists) {
+                await insert('hotelRooms', {
+                    id: `hr_${Date.now()}_${i}`,
+                    hotelId,
+                    roomTypeId,
+                    roomNumber: String(roomNum),
+                    status: 'Available'
+                });
+            }
+        }
+    }
+};
+
+// New: Get available rooms for assignment
+export const getAvailableRooms = async (adminToken: string, hotelId: string, roomTypeId: string): Promise<HotelRoom[]> => {
+    if (!USE_REAL_API) {
+        return findAll('hotelRooms', (r: any) => r.hotelId === hotelId && r.roomTypeId === roomTypeId && r.status === 'Available');
+    }
+    return [];
+};
+
+// New: Assign specific room
+export const assignRoomToBooking = async (adminToken: string, bookingId: string, hotelRoomId: string): Promise<void> => {
+    if (!USE_REAL_API) {
+        const booking = await find('accommodationBookings', (b: any) => b.id === bookingId);
+        if (!booking) throw new Error("Booking not found");
+        
+        // 1. Free up old room if exists
+        if (booking.hotelRoomId && booking.hotelRoomId !== 'assigned_later') {
+             await update('hotelRooms', booking.hotelRoomId, { status: 'Available' });
+        }
+
+        // 2. Assign new room
+        await update('accommodationBookings', bookingId, { hotelRoomId, status: 'CheckedIn' });
+        await update('hotelRooms', hotelRoomId, { status: 'Occupied' });
+    }
+};
+
 export const updateRoomStatus = async (adminToken: string, roomId: string, status: HotelRoomStatus): Promise<void> => { 
     if (!USE_REAL_API) await update('hotelRooms', roomId, { status }); 
 };
@@ -784,7 +1000,14 @@ export const getAccommodationBookings = async (adminToken: string): Promise<Enri
         const user = await find('registrations', (r: any) => r.id === b.delegateId);
         const hotel = await find('hotels', (h: any) => h.id === b.hotelId);
         const roomType = hotel?.roomTypes?.find((rt: any) => rt.id === b.roomTypeId);
-        const roomNumber = b.hotelRoomId !== 'assigned_later' ? '101' : 'Pending';
+        
+        // Lookup real room number
+        let roomNumber = 'Pending';
+        if (b.hotelRoomId && b.hotelRoomId !== 'assigned_later') {
+            const room = await find('hotelRooms', (r: any) => r.id === b.hotelRoomId);
+            if (room) roomNumber = room.roomNumber;
+        }
+        
         enriched.push({ ...b, delegateName: user?.name || 'Unknown', delegateEmail: user?.email || 'Unknown', hotelName: hotel?.name || 'Unknown', roomTypeName: roomType?.name || 'Unknown', roomNumber });
     }
     return enriched;
@@ -804,6 +1027,45 @@ export const getEventCoinStats = async (adminToken: string): Promise<EventCoinSt
 export const getAllTransactions = async (adminToken: string): Promise<Transaction[]> => {
     if (USE_REAL_API) return []; 
     return findAll('transactions');
+};
+
+export const issueEventCoins = async (adminToken: string, recipientEmail: string, amount: number, message: string): Promise<void> => {
+    if (USE_REAL_API) { await apiFetch('/admin/wallet/transaction', 'POST', { recipientEmail, amount, message }, adminToken); return; }
+    
+    // Mock implementation
+    const recipient = await find('registrations', (r: any) => r.email === recipientEmail);
+    if (!recipient) throw new Error("User not found");
+
+    if (amount > 0) {
+         await insert('transactions', {
+            id: `tx_adm_${Date.now()}`,
+            fromId: 'system', fromName: 'System (Admin)', fromEmail: 'system',
+            toId: recipient.id, toName: recipient.name, toEmail: recipientEmail,
+            amount: amount,
+            message,
+            type: 'admin_adjustment',
+            timestamp: Date.now()
+         });
+    } else {
+        // Check balance for deduction
+        const txs = await findAll('transactions', (t: any) => t.fromId === recipient.id || t.toId === recipient.id);
+        let balance = 0;
+        for (const tx of txs) {
+            if (tx.toId === recipient.id) balance += parseFloat(tx.amount);
+            if (tx.fromId === recipient.id) balance -= parseFloat(tx.amount);
+        }
+        if (balance < Math.abs(amount)) throw new Error("Insufficient funds for deduction");
+
+        await insert('transactions', {
+            id: `tx_adm_${Date.now()}`,
+            fromId: recipient.id, fromName: recipient.name, fromEmail: recipientEmail,
+            toId: 'system', toName: 'System (Admin)', toEmail: 'system',
+            amount: Math.abs(amount),
+            message,
+            type: 'admin_adjustment',
+            timestamp: Date.now()
+         });
+    }
 };
 
 // --- Delegate Wallet ---
@@ -849,12 +1111,56 @@ export const sendCoins = async (delegateToken: string, recipientEmail: string, a
     await insert('transactions', { id: `tx_${Date.now()}`, fromId: payload.id, fromName: sender.name, fromEmail: sender.email, toId: recipient.id, toName: recipient.name, toEmail: recipient.email, amount, message, type: 'p2p', timestamp: Date.now() });
 };
 
-// --- Purchase (Simulated) ---
+// --- Purchase (Real API Call) ---
 export const purchaseEventCoins = async (delegateToken: string, amount: number, cost: number): Promise<void> => {
-    if (USE_REAL_API) return; // TODO: Stripe Backend Endpoint
+    if (USE_REAL_API) {
+        await apiFetch('/payments/purchase', 'POST', { amount, cost, paymentMethodId: 'pm_card_visa' }, delegateToken);
+        return;
+    }
+    
+    // Mock fallback
     const payload = verifyToken(delegateToken);
     if (!payload) throw new Error("Invalid");
     const user = await find('registrations', (r: any) => r.id === payload.id);
     await new Promise(resolve => setTimeout(resolve, 1500));
     await insert('transactions', { id: `tx_purchase_${Date.now()}`, fromId: 'payment_gateway', fromName: 'Credit Card Top-up', fromEmail: 'stripe-sim@example.com', toId: payload.id, toName: user.name, toEmail: user.email, amount: amount, message: `Purchase of ${amount} Coins`, type: 'purchase', timestamp: Date.now() });
+};
+
+// --- Calendar Export ---
+export const downloadSessionIcs = async (sessionId: string): Promise<void> => {
+    if (USE_REAL_API) {
+        // Redirect to backend endpoint which handles download
+        window.location.href = `${API_BASE_URL}/sessions/${sessionId}/ics`;
+        return;
+    }
+
+    // Client-side generation fallback
+    const session = await find('sessions', (s: any) => s.id === sessionId);
+    if (!session) throw new Error("Session not found");
+
+    const formatDate = (dateStr: string) => new Date(dateStr).toISOString().replace(/[-:]/g, '').split('.')[0] + 'Z';
+
+    const icsContent = [
+        'BEGIN:VCALENDAR',
+        'VERSION:2.0',
+        'PRODID:-//EventPlatform//NONSGML v1.0//EN',
+        'BEGIN:VEVENT',
+        `UID:${session.id}`,
+        `DTSTAMP:${formatDate(new Date().toISOString())}`,
+        `DTSTART:${formatDate(session.startTime)}`,
+        `DTEND:${formatDate(session.endTime)}`,
+        `SUMMARY:${session.title}`,
+        `DESCRIPTION:${session.description || ''}`,
+        `LOCATION:${session.location || ''}`,
+        'END:VEVENT',
+        'END:VCALENDAR'
+    ].join('\r\n');
+
+    const blob = new Blob([icsContent], { type: 'text/calendar;charset=utf-8' });
+    const link = document.createElement('a');
+    link.href = URL.createObjectURL(blob);
+    link.download = `${session.title.replace(/[^a-z0-9]/gi, '_')}.ics`;
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
 };

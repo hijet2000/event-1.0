@@ -1,4 +1,5 @@
-import React, { useState, useEffect } from 'react';
+
+import React, { useState, useEffect, useMemo } from 'react';
 import { type MealPlan, type Restaurant, type MealType } from '../types';
 import { getMealPlans, getRestaurants, saveMealPlan, deleteMealPlan, saveRestaurant, deleteRestaurant, recordMealConsumption } from '../server/api';
 import { ContentLoader } from './ContentLoader';
@@ -22,9 +23,11 @@ const ScanButton: React.FC<{ mealType: MealType, onClick: (mealType: MealType) =
     return (
         <button 
             onClick={() => onClick(mealType)} 
-            className="w-full flex items-center justify-center py-3 px-4 border border-transparent rounded-md shadow-sm text-sm font-medium text-white bg-primary hover:bg-primary/90 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-primary transition-all duration-300 ease-in-out"
+            className="w-full flex items-center justify-center py-8 px-4 border-2 border-dashed border-primary/30 hover:border-primary rounded-xl shadow-sm text-sm font-bold text-primary bg-primary/5 hover:bg-primary/10 focus:outline-none transition-all duration-300 ease-in-out flex-col gap-2"
         >
-            {icons[mealType]}
+            <div className="p-3 bg-white dark:bg-gray-800 rounded-full shadow-md text-primary">
+                {icons[mealType]}
+            </div>
             Scan for {mealType.charAt(0).toUpperCase() + mealType.slice(1)}
         </button>
     )
@@ -35,6 +38,7 @@ export const DiningDashboard: React.FC<DiningDashboardProps> = ({ adminToken }) 
     const [restaurants, setRestaurants] = useState<Restaurant[]>([]);
     const [isLoading, setIsLoading] = useState(true);
     const [error, setError] = useState<string | null>(null);
+    const [activeTab, setActiveTab] = useState<'overview' | 'plans' | 'restaurants'>('overview');
 
     // Modal states
     const [isPlanModalOpen, setPlanModalOpen] = useState(false);
@@ -47,6 +51,10 @@ export const DiningDashboard: React.FC<DiningDashboardProps> = ({ adminToken }) 
     const [isScannerOpen, setIsScannerOpen] = useState(false);
     const [scanningForMeal, setScanningForMeal] = useState<MealType | null>(null);
     const [scanStatus, setScanStatus] = useState<{ type: 'success' | 'error'; message: string } | null>(null);
+
+    // Search & Filter
+    const [restaurantSearch, setRestaurantSearch] = useState('');
+    const [planSearch, setPlanSearch] = useState('');
 
     const fetchData = async () => {
         try {
@@ -67,6 +75,21 @@ export const DiningDashboard: React.FC<DiningDashboardProps> = ({ adminToken }) 
     useEffect(() => {
         fetchData();
     }, [adminToken]);
+
+    // Filter Logic
+    const filteredRestaurants = useMemo(() => {
+        return restaurants.filter(r => 
+            r.name.toLowerCase().includes(restaurantSearch.toLowerCase()) ||
+            r.cuisine.toLowerCase().includes(restaurantSearch.toLowerCase())
+        );
+    }, [restaurants, restaurantSearch]);
+
+    const filteredPlans = useMemo(() => {
+        return mealPlans.filter(p => 
+            p.name.toLowerCase().includes(planSearch.toLowerCase())
+        );
+    }, [mealPlans, planSearch]);
+
 
     // New handlers for scanning
     const handleScanButtonClick = (mealType: MealType) => {
@@ -121,70 +144,124 @@ export const DiningDashboard: React.FC<DiningDashboardProps> = ({ adminToken }) 
     if (error) return <Alert type="error" message={error} />;
 
     return (
-        <>
-            <h2 className="text-2xl font-bold text-gray-900 dark:text-white mb-6">Dining Management</h2>
+        <div>
+            <div className="flex flex-col md:flex-row justify-between items-start md:items-center mb-6 gap-4">
+                <div>
+                    <h2 className="text-2xl font-bold text-gray-900 dark:text-white">Dining Management</h2>
+                    <p className="mt-1 text-sm text-gray-500">Manage meal plans, restaurant partners, and check-ins.</p>
+                </div>
+                 <div className="flex bg-gray-100 dark:bg-gray-700 p-1 rounded-lg">
+                    <button onClick={() => setActiveTab('overview')} className={`px-4 py-2 text-sm font-medium rounded-md transition-all ${activeTab === 'overview' ? 'bg-white dark:bg-gray-600 shadow text-primary' : 'text-gray-500 hover:text-gray-700'}`}>Operations</button>
+                    <button onClick={() => setActiveTab('plans')} className={`px-4 py-2 text-sm font-medium rounded-md transition-all ${activeTab === 'plans' ? 'bg-white dark:bg-gray-600 shadow text-primary' : 'text-gray-500 hover:text-gray-700'}`}>Meal Plans</button>
+                    <button onClick={() => setActiveTab('restaurants')} className={`px-4 py-2 text-sm font-medium rounded-md transition-all ${activeTab === 'restaurants' ? 'bg-white dark:bg-gray-600 shadow text-primary' : 'text-gray-500 hover:text-gray-700'}`}>Restaurants</button>
+                </div>
+            </div>
             
             {scanStatus && <div className="mb-4"><Alert type={scanStatus.type} message={scanStatus.message} /></div>}
 
-             {/* On-site Meal Redemption */}
-            <section className="mb-10">
-                <h3 className="text-xl font-semibold mb-4">On-site Meal Redemption</h3>
-                <div className="bg-white dark:bg-gray-800 shadow-md rounded-lg p-6">
-                    <p className="text-sm text-gray-600 dark:text-gray-400 mb-4">Use a camera to scan delegate QR codes and record meal consumption. This prevents duplicate entries for the same meal on the same day.</p>
-                    <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-                        <ScanButton mealType="breakfast" onClick={handleScanButtonClick} />
-                        <ScanButton mealType="lunch" onClick={handleScanButtonClick} />
-                        <ScanButton mealType="dinner" onClick={handleScanButtonClick} />
+            {activeTab === 'overview' && (
+                <div className="space-y-8 animate-fade-in">
+                    {/* On-site Meal Redemption */}
+                    <section>
+                        <div className="bg-white dark:bg-gray-800 shadow-md rounded-xl p-6 border border-gray-200 dark:border-gray-700">
+                            <h3 className="text-lg font-bold text-gray-900 dark:text-white mb-4">Scan Delegate QR</h3>
+                            <p className="text-sm text-gray-600 dark:text-gray-400 mb-6">Use a camera to scan delegate QR codes and record meal consumption. This prevents duplicate entries for the same meal on the same day.</p>
+                            <div className="grid grid-cols-1 sm:grid-cols-3 gap-6">
+                                <ScanButton mealType="breakfast" onClick={handleScanButtonClick} />
+                                <ScanButton mealType="lunch" onClick={handleScanButtonClick} />
+                                <ScanButton mealType="dinner" onClick={handleScanButtonClick} />
+                            </div>
+                        </div>
+                    </section>
+                    
+                    {/* Quick Stats (Placeholder) */}
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-6">
+                        <div className="bg-blue-50 dark:bg-blue-900/20 p-6 rounded-xl border border-blue-100 dark:border-blue-800">
+                            <h4 className="text-blue-800 dark:text-blue-300 font-bold text-lg">Total Meal Plans</h4>
+                            <p className="text-3xl font-extrabold text-blue-900 dark:text-white mt-2">{mealPlans.length}</p>
+                        </div>
+                         <div className="bg-green-50 dark:bg-green-900/20 p-6 rounded-xl border border-green-100 dark:border-green-800">
+                            <h4 className="text-green-800 dark:text-green-300 font-bold text-lg">Partner Restaurants</h4>
+                            <p className="text-3xl font-extrabold text-green-900 dark:text-white mt-2">{restaurants.length}</p>
+                        </div>
                     </div>
                 </div>
-            </section>
+            )}
             
-            {/* Meal Plans */}
-            <section>
-                <div className="flex justify-between items-center mb-4">
-                    <h3 className="text-xl font-semibold">Meal Plans</h3>
-                    <button onClick={() => { setEditingPlan(null); setPlanModalOpen(true); }} className="py-2 px-4 text-sm font-medium text-white bg-primary rounded-md shadow-sm hover:bg-primary/90">Add Meal Plan</button>
-                </div>
-                <div className="bg-white dark:bg-gray-800 shadow-md rounded-lg p-4 space-y-3">
-                    {mealPlans.map(plan => (
-                        <div key={plan.id} className="p-3 flex justify-between items-center bg-gray-50 dark:bg-gray-700/50 rounded-md">
-                            <div>
-                                <p className="font-bold">{plan.name}</p>
-                                <p className="text-sm text-gray-500">{plan.description}</p>
+            {activeTab === 'plans' && (
+                <div className="animate-fade-in">
+                    <div className="flex justify-between items-center mb-4">
+                         <input 
+                            type="text" 
+                            placeholder="Search plans..." 
+                            value={planSearch}
+                            onChange={e => setPlanSearch(e.target.value)}
+                            className="w-64 px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-md shadow-sm text-sm bg-white dark:bg-gray-700"
+                        />
+                        <button onClick={() => { setEditingPlan(null); setPlanModalOpen(true); }} className="py-2 px-4 text-sm font-medium text-white bg-primary rounded-md shadow-sm hover:bg-primary/90">+ Add Meal Plan</button>
+                    </div>
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                        {filteredPlans.map(plan => (
+                            <div key={plan.id} className="p-4 bg-white dark:bg-gray-800 rounded-lg shadow-sm border border-gray-200 dark:border-gray-700 flex justify-between items-center">
+                                <div>
+                                    <h4 className="font-bold text-lg text-gray-900 dark:text-white">{plan.name}</h4>
+                                    <p className="text-sm text-gray-500 dark:text-gray-400">{plan.description}</p>
+                                    <p className="text-xs font-semibold text-primary mt-2">Cost: {plan.dailyCost} Coins/Day</p>
+                                </div>
+                                <div className="flex flex-col gap-2">
+                                    <button onClick={() => { setEditingPlan(plan); setPlanModalOpen(true); }} className="px-3 py-1 text-xs font-medium text-primary bg-primary/10 rounded hover:bg-primary/20">Edit</button>
+                                    <button onClick={() => handleDeletePlan(plan.id)} className="px-3 py-1 text-xs font-medium text-red-600 bg-red-100 dark:bg-red-900/30 rounded hover:bg-red-200">Delete</button>
+                                </div>
                             </div>
-                            <div className="space-x-3">
-                                <button onClick={() => { setEditingPlan(plan); setPlanModalOpen(true); }} className="text-sm font-medium text-primary hover:underline">Edit</button>
-                                <button onClick={() => handleDeletePlan(plan.id)} className="text-sm font-medium text-red-500 hover:underline">Delete</button>
-                            </div>
-                        </div>
-                    ))}
-                    {mealPlans.length === 0 && <p className="text-sm italic text-gray-500">No meal plans configured.</p>}
+                        ))}
+                        {filteredPlans.length === 0 && <div className="col-span-full text-center py-10 text-gray-500 italic">No meal plans found.</div>}
+                    </div>
                 </div>
-            </section>
+            )}
 
-            {/* Restaurants */}
-            <section className="mt-10">
-                <div className="flex justify-between items-center mb-4">
-                    <h3 className="text-xl font-semibold">Restaurants</h3>
-                    <button onClick={() => { setEditingRestaurant(null); setRestaurantModalOpen(true); }} className="py-2 px-4 text-sm font-medium text-white bg-primary rounded-md shadow-sm hover:bg-primary/90">Add Restaurant</button>
-                </div>
-                <div className="bg-white dark:bg-gray-800 shadow-md rounded-lg p-4 space-y-3">
-                    {restaurants.map(rest => (
-                        <div key={rest.id} className="p-3 flex justify-between items-center bg-gray-50 dark:bg-gray-700/50 rounded-md">
-                            <div>
-                                <p className="font-bold">{rest.name} <span className="text-xs font-normal text-gray-400">({rest.cuisine})</span></p>
-                                <p className="text-sm text-gray-500">{rest.operatingHours}</p>
+            {activeTab === 'restaurants' && (
+                <div className="animate-fade-in">
+                    <div className="flex justify-between items-center mb-4 gap-4">
+                         <input 
+                            type="text" 
+                            placeholder="Search restaurants or cuisine..." 
+                            value={restaurantSearch}
+                            onChange={e => setRestaurantSearch(e.target.value)}
+                            className="flex-grow max-w-md px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-md shadow-sm text-sm bg-white dark:bg-gray-700"
+                        />
+                        <button onClick={() => { setEditingRestaurant(null); setRestaurantModalOpen(true); }} className="py-2 px-4 text-sm font-medium text-white bg-primary rounded-md shadow-sm hover:bg-primary/90 whitespace-nowrap">+ Add Restaurant</button>
+                    </div>
+                    <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+                        {filteredRestaurants.map(rest => (
+                            <div key={rest.id} className="bg-white dark:bg-gray-800 shadow-sm rounded-lg overflow-hidden border border-gray-200 dark:border-gray-700 flex flex-col">
+                                <div className="p-4 flex-1">
+                                    <div className="flex justify-between items-start">
+                                        <h4 className="font-bold text-lg text-gray-900 dark:text-white">{rest.name}</h4>
+                                        <span className="px-2 py-1 bg-gray-100 dark:bg-gray-700 text-gray-600 dark:text-gray-300 text-xs rounded-full">{rest.cuisine}</span>
+                                    </div>
+                                    <p className="text-sm text-gray-500 dark:text-gray-400 mt-1 flex items-center gap-1">
+                                        <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>
+                                        {rest.operatingHours}
+                                    </p>
+                                    {rest.menu && (
+                                        <div className="mt-3 text-xs text-gray-500 bg-gray-50 dark:bg-gray-900/50 p-2 rounded line-clamp-3 font-mono">
+                                            {rest.menu}
+                                        </div>
+                                    )}
+                                </div>
+                                <div className="bg-gray-50 dark:bg-gray-700/30 px-4 py-3 flex justify-between items-center border-t border-gray-100 dark:border-gray-700">
+                                    <button onClick={() => setViewingReservationsFor(rest)} className="text-xs font-bold text-primary hover:underline">View Reservations</button>
+                                    <div className="space-x-2">
+                                        <button onClick={() => { setEditingRestaurant(rest); setRestaurantModalOpen(true); }} className="text-xs font-medium text-gray-600 dark:text-gray-300 hover:text-primary">Edit</button>
+                                        <button onClick={() => handleDeleteRestaurant(rest.id)} className="text-xs font-medium text-red-500 hover:text-red-700">Delete</button>
+                                    </div>
+                                </div>
                             </div>
-                             <div className="space-x-3">
-                                <button onClick={() => setViewingReservationsFor(rest)} className="text-sm font-medium text-primary hover:underline">Reservations</button>
-                                <button onClick={() => { setEditingRestaurant(rest); setRestaurantModalOpen(true); }} className="text-sm font-medium text-primary hover:underline">Edit</button>
-                                <button onClick={() => handleDeleteRestaurant(rest.id)} className="text-sm font-medium text-red-500 hover:underline">Delete</button>
-                            </div>
-                        </div>
-                    ))}
-                    {restaurants.length === 0 && <p className="text-sm italic text-gray-500">No restaurants configured.</p>}
+                        ))}
+                         {filteredRestaurants.length === 0 && <div className="col-span-full text-center py-10 text-gray-500 italic">No restaurants found.</div>}
+                    </div>
                 </div>
-            </section>
+            )}
 
             <MealPlanEditorModal isOpen={isPlanModalOpen} onClose={() => setPlanModalOpen(false)} onSave={handleSavePlan} plan={editingPlan} adminToken={adminToken} />
             <RestaurantEditorModal isOpen={isRestaurantModalOpen} onClose={() => setRestaurantModalOpen(false)} onSave={handleSaveRestaurant} restaurant={editingRestaurant} adminToken={adminToken} />
@@ -194,6 +271,6 @@ export const DiningDashboard: React.FC<DiningDashboardProps> = ({ adminToken }) 
                 onClose={() => setIsScannerOpen(false)} 
                 onScan={handleScan} 
             />
-        </>
+        </div>
     );
 };

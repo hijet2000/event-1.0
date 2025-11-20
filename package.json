@@ -19,7 +19,13 @@
     "jsonwebtoken": "^9.0.2",
     "pg": "^8.16.3",
     "jspdf": "^2.5.1",
-    "cookie-parser": "^1.4.7"
+    "cookie-parser": "^1.4.7",
+    "path": "^0.12.7",
+    "util": "^0.12.5",
+    "fs": "^0.0.1-security",
+    "nodemailer": "^7.0.10",
+    "@vitejs/plugin-react": "^5.1.1",
+    "vite": "^7.2.4"
   },
   "devDependencies": {
     "@types/node": "^22.14.0",
