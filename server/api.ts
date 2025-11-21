@@ -1,1166 +1,863 @@
 
 import { 
-    RegistrationData, Permission, DashboardStats, AdminUser, Role, Task, 
-    EventConfig, MealPlan, Restaurant, Session, Speaker, Sponsor,
-    Hotel, HotelRoom, RoomType, AccommodationBooking, DiningReservation,
-    EventCoinStats, Transaction, DelegateProfile, MealPlanAssignment,
-    HotelRoomStatus, AccommodationBookingStatus, PublicEvent, EventData,
-    MealType, EnrichedAccommodationBooking, EmailPayload, NetworkingProfile, NetworkingMatch, SessionFeedback,
-    ScavengerHuntItem, LeaderboardEntry
+    RegistrationData, EventConfig, Permission, 
+    AdminUser, Role, DashboardStats, PublicEvent, 
+    EventData, Task, TaskStatus, MealPlan, Restaurant, 
+    MealPlanAssignment, MealConsumptionLog, AccommodationBooking, 
+    Hotel, RoomType, HotelRoom, EnrichedAccommodationBooking, 
+    EventCoinStats, Transaction, Session, Speaker, Sponsor,
+    NetworkingProfile, NetworkingMatch, ScavengerHuntItem, LeaderboardEntry,
+    DiningReservation, AccommodationBookingStatus, MealType,
+    SessionFeedback, EmailContent
 } from '../types';
 import { 
-    findAll, find, insert, update, remove, count, updateWhere, removeWhere 
+    find, findAll, insert, update, remove, count, updateWhere, removeWhere 
 } from './db';
-import { db } from './store'; 
-import { generateToken, comparePassword, hashPassword, verifyToken } from './auth';
-import { defaultConfig } from './config';
+import { 
+    verifyToken, generateToken, hashPassword, comparePassword 
+} from './auth';
 import { 
     generateRegistrationEmails, generatePasswordResetEmail, 
-    generateDelegateInvitationEmail, generateDelegateUpdateEmail,
-    generateAiContent as geminiGenerateAiContent,
-    generateImage as geminiGenerateImage,
-    generateNetworkingMatches as geminiGenerateNetworkingMatches,
-    summarizeSessionFeedback as geminiSummarizeSessionFeedback
+    generateDelegateInvitationEmail, generateDelegateUpdateEmail, 
+    generateAiContent, generateImage as generateImageAI,
+    generateNetworkingMatches, summarizeSessionFeedback 
 } from './geminiService';
+import { 
+    uploadFileToStorage, saveGeneratedImageToStorage, MediaItem 
+} from './storage';
 import { sendEmail } from './email';
-import { uploadFileToStorage as mockUpload, saveGeneratedImageToStorage, MediaItem } from './storage';
+import { defaultConfig } from './config';
 
-// --- CONFIGURATION ---
-// Automatically use real API if running in production or if configured
-export const USE_REAL_API = (import.meta as any).env?.PROD || false; 
-const API_BASE_URL = '/api'; // Relative path allows proxying in dev and direct access in prod
-
-// --- API Client Helper ---
-async function apiFetch<T>(endpoint: string, method: string = 'GET', body?: any, token?: string): Promise<T> {
-    const headers: Record<string, string> = { 'Content-Type': 'application/json' };
-    
-    // If token is provided, use it. Otherwise, check localStorage for admin or delegate tokens
-    let authToken = token;
-    if (!authToken && typeof localStorage !== 'undefined') {
-        authToken = localStorage.getItem('adminToken') || localStorage.getItem('delegateToken') || undefined;
-    }
-
-    if (authToken) {
-        headers['Authorization'] = `Bearer ${authToken}`;
-    }
-    
-    try {
-        const res = await fetch(`${API_BASE_URL}${endpoint}`, {
-            method,
-            headers,
-            body: body ? JSON.stringify(body) : undefined,
-            credentials: USE_REAL_API ? 'include' : undefined // Important: Sends cookies to backend
-        });
-
-        if (res.status === 401 && USE_REAL_API) {
-            if (typeof window !== 'undefined') {
-                localStorage.removeItem('adminToken');
-                localStorage.removeItem('delegateToken');
-                window.location.href = '/';
-            }
-            throw new Error("Session expired");
-        }
-
-        const data = await res.json();
-        if (!res.ok) throw new Error(data.message || 'API Request Failed');
-        return data as T;
-    } catch (error) {
-        console.error(`API Error [${method} ${endpoint}]:`, error);
-        throw error;
-    }
-}
-
-// ... (Rest of the file remains the same, just ensuring the imports above are preserved)
-
-// AI Proxy Functions (Secure)
-export const generateAiContent = async (type: string, context: any): Promise<string> => {
-    if (USE_REAL_API) {
-        let prompt = '';
-         switch(type) {
-            case 'hotel':
-                prompt = `Generate a compelling, professional-sounding description for a hotel named "${context.name}". The hotel is located at "${context.address}". The description should be about 2-3 sentences long and highlight its suitability for event attendees.`;
-                break;
-            case 'room':
-                 prompt = `Generate a brief, appealing description for a "${context.name}" room type at a hotel. Mention some of its key features based on its name. Keep it to one sentence.`;
-                break;
-            case 'meal_plan':
-                prompt = `Generate a brief, one-sentence description for a meal plan called "${context.name}" at an event.`;
-                break;
-            case 'menu':
-                prompt = `Generate a sample dinner menu for a restaurant named "${context.name}" that serves ${context.cuisine} cuisine. Include 3 appetizers, 4 main courses, and 2 desserts. Format the output as plain text with clear headings.`;
-                break;
-            case 'session':
-                prompt = `Generate a compelling, professional-sounding description for an event session. The session title is "${context.title}". The speakers are "${context.speakers}". The description should be about 2-4 sentences long and make it sound interesting for attendees.`;
-                break;
-            case 'speaker_bio':
-                prompt = `Generate a professional and engaging third-person biography for a speaker at a tech conference. The biography should be approximately 3-4 sentences long. Speaker's Name: ${context.name}. Title: ${context.title}. Company: ${context.company}.`;
-                break;
-            case 'sponsor_description':
-                prompt = `Generate a compelling and professional one-paragraph description for a company that is sponsoring an event. Company Name: ${context.name}. Company Website: ${context.websiteUrl}.`;
-                break;
-            default:
-                return '';
-        }
-
-        const result = await apiFetch<{text: string}>('/ai/generate', 'POST', {
-            contents: prompt
-        });
-        return result.text;
-    }
-    return geminiGenerateAiContent(type as any, context);
-};
-
-export const generateImage = async (prompt: string): Promise<string> => {
-     if (USE_REAL_API) {
-         const result = await apiFetch<any>('/ai/generate-images', 'POST', { prompt });
-         const base64ImageBytes = result.generatedImages[0].image.imageBytes;
-         return `data:image/jpeg;base64,${base64ImageBytes}`;
-     }
-     return geminiGenerateImage(prompt);
-}
-
-export const saveGeneratedImage = saveGeneratedImageToStorage;
 export type { MediaItem };
 
-// --- Media ---
-export const uploadFile = async (file: File): Promise<MediaItem> => {
+const USE_REAL_API = false; // Toggle this to true to use the backend server
+
+// Helper for Real API calls
+const apiFetch = async <T>(endpoint: string, method: string = 'GET', body?: any, token?: string): Promise<T> => {
+    const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+    // In a real app, we might pass token in header, but our backend currently uses cookies
+    // If using Authorization header:
+    // if (token) headers['Authorization'] = `Bearer ${token}`;
+    
+    const options: RequestInit = {
+        method,
+        headers,
+        credentials: 'include', // Important for cookies
+    };
+    
+    if (body) options.body = JSON.stringify(body);
+
+    const res = await fetch(`/api${endpoint}`, options);
+    if (!res.ok) {
+        const err = await res.json().catch(() => ({ message: 'API Error' }));
+        throw new Error(err.message || `Error ${res.status}`);
+    }
+    return res.json();
+};
+
+// --- Auth & User ---
+
+export const loginAdmin = async (email: string, password: string) => {
     if (USE_REAL_API) {
-         return new Promise((resolve, reject) => {
-            const reader = new FileReader();
-            reader.onload = async () => {
-                const base64String = reader.result as string;
-                try {
-                    // In production, send to /api/media/upload
-                    const newItem = await apiFetch<MediaItem>('/media/upload', 'POST', {
-                        name: file.name,
-                        type: file.type,
-                        size: file.size,
-                        url: base64String
-                    });
-                    resolve(newItem);
-                } catch (e) { reject(e); }
-            };
-            reader.onerror = () => reject(new Error("Failed to read file"));
-            reader.readAsDataURL(file);
-        });
+        return apiFetch<{ token: string, user: any }>('/login/admin', 'POST', { email, password });
     }
-    return mockUpload(file);
-};
-
-export const getMediaLibrary = async (adminToken: string): Promise<MediaItem[]> => {
-    if (USE_REAL_API) return await apiFetch('/media', 'GET', undefined, adminToken);
-    const media = await findAll('media');
-    return media.sort((a: any, b: any) => b.uploadedAt - a.uploadedAt);
-};
-export const deleteMedia = async (adminToken: string, id: string): Promise<void> => {
-    if (USE_REAL_API) await apiFetch(`/media/${id}`, 'DELETE', undefined, adminToken);
-    else await remove('media', id);
-};
-
-const MAIN_EVENT_ID = 'main-event';
-
-// --- Internal Helpers ---
-const logEmailCommunication = async (payload: EmailPayload, status: 'sent' | 'failed', error?: string) => {
-    if (!USE_REAL_API) {
-        await insert('emailLogs', {
-            id: `email_${Date.now()}_${Math.random().toString(36).substr(2, 5)}`,
-            to: payload.to,
-            subject: payload.subject,
-            body: payload.body,
-            timestamp: Date.now(),
-            status,
-            error
-        });
-    }
-};
-
-// --- System & Database ---
-export const getDatabaseSchema = async (adminToken: string): Promise<string> => {
-    return `-- PostgreSQL Schema for Event Platform\n\nCREATE EXTENSION IF NOT EXISTS "uuid-ossp";\n\n-- (Complete schema definition hidden for brevity)`;
-};
-
-export const generateSqlExport = async (adminToken: string): Promise<string> => {
-    let sql = `-- Data Export Generated at ${new Date().toISOString()}\n\n`;
-    const esc = (val: any) => val === null || val === undefined ? 'NULL' : (typeof val === 'number' || typeof val === 'boolean' ? val : `'${String(val).replace(/'/g, "''")}'`);
-    if (db.registrations) {
-        sql += `-- Registrations\n`;
-        db.registrations.forEach((r: any) => sql += `INSERT INTO registrations (id, name, email) VALUES (${esc(r.id)}, ${esc(r.name)}, ${esc(r.email)});\n`);
-    }
-    return sql;
-};
-
-// --- Auth ---
-export const loginAdmin = async (email: string, password: string): Promise<{ token: string; user: { id: string; email: string; permissions: Permission[] } } | null> => {
-    if (USE_REAL_API) {
-        try { 
-            const res = await apiFetch<{ user: any, message: string }>('/login/admin', 'POST', { email, password }); 
-            const uiToken = generateToken({ id: res.user.id, email: res.user.email, permissions: res.user.permissions, type: 'admin' });
-            return { token: uiToken, user: res.user };
-        } catch (e) { return null; }
-    }
+    // Mock
     const user = await find('adminUsers', (u: any) => u.email === email);
-    if (!user) return null;
-    if (await comparePassword(password, user.passwordHash)) {
+    if (user && await comparePassword(password, user.passwordHash)) {
         const role = await find('roles', (r: any) => r.id === user.roleId);
-        const permissions = role ? role.permissions : [];
-        const token = generateToken({ id: user.id, email: user.email, permissions, type: 'admin' });
-        return { token, user: { id: user.id, email: user.email, permissions } };
+        const token = generateToken({ id: user.id, email: user.email, permissions: role?.permissions, type: 'admin' });
+        return { token, user: { id: user.id, email: user.email, permissions: role?.permissions || [] } };
     }
     return null;
 };
 
-export const loginDelegate = async (eventId: string, email: string, password: string): Promise<{ token: string } | null> => {
+export const loginDelegate = async (eventId: string, email: string, password: string) => {
     if (USE_REAL_API) {
-        try { 
-            const res = await apiFetch<{ user: any, success: boolean }>('/login/delegate', 'POST', { eventId, email, password }); 
-            const uiToken = generateToken({ id: res.user.id, email: res.user.email, eventId: eventId, type: 'delegate' });
-            return { token: uiToken };
-        } catch (e) { return null; }
+        const res = await apiFetch<{ success: boolean, user: any }>('/login/delegate', 'POST', { email, password, eventId });
+        // To match mock behavior, we might need to generate a client-side token or return what server sends.
+        // For now, assuming server sets cookie and we return a dummy token or server token if sent in body.
+        // Our mock expects a token return.
+        return { token: 'server-handled-cookie', user: res.user };
     }
+    // Mock
     const user = await find('registrations', (u: any) => u.email === email && u.eventId === eventId);
     if (user && user.passwordHash && await comparePassword(password, user.passwordHash)) {
-         const token = generateToken({ id: user.id, email: user.email, type: 'delegate', eventId });
-         return { token };
+        const token = generateToken({ id: user.id, email: user.email, type: 'delegate', eventId });
+        return { token, user };
     }
     return null;
 };
 
-export const requestAdminPasswordReset = async (email: string): Promise<void> => {
-    if (USE_REAL_API) { await apiFetch('/auth/forgot-password', 'POST', { email, type: 'admin' }); return; }
-    const user = await find('adminUsers', (u: any) => u.email === email);
-    if (user) await logEmailCommunication({ to: email, subject: 'Admin Password Reset', body: 'Link...' }, 'sent');
+export const requestAdminPasswordReset = async (email: string) => {
+    if (USE_REAL_API) return apiFetch('/auth/forgot-password', 'POST', { email, type: 'admin' });
+    // Mock: No-op
+    console.log(`[Mock] Password reset requested for ${email}`);
 };
 
-export const requestDelegatePasswordReset = async (eventId: string, email: string): Promise<void> => {
-     if (USE_REAL_API) { await apiFetch('/auth/forgot-password', 'POST', { email, eventId, type: 'delegate' }); return; }
-     const user = await find('registrations', (u: any) => u.email === email && u.eventId === eventId);
-     if (user) {
-         const config = await getEventConfig();
-         const resetToken = `reset_${Date.now()}_${user.id}`;
-         await insert('passwordResetTokens', { token: resetToken, userId: user.id, expiry: Date.now() + 3600000 });
-         const resetLink = `${config.event.publicUrl}/${eventId}?resetToken=${resetToken}`;
-         try {
-            const emailContent = await generatePasswordResetEmail(config, resetLink);
-            await sendEmail({ to: email, ...emailContent }, config);
-            await logEmailCommunication({ to: email, ...emailContent }, 'sent');
-         } catch (e) { /* ignore */ }
-     }
+export const requestDelegatePasswordReset = async (eventId: string, email: string) => {
+    if (USE_REAL_API) return apiFetch('/auth/forgot-password', 'POST', { email, eventId, type: 'delegate' });
+    // Mock
+    const user = await find('registrations', (u: any) => u.email === email && u.eventId === eventId);
+    if (user) {
+        const token = `reset_${Date.now()}_${user.id}`;
+        const config = (await find('events', (e: any) => e.id === eventId))?.config || defaultConfig;
+        const resetLink = `${config.event.publicUrl}/${eventId}?resetToken=${token}`;
+        const emailContent = await generatePasswordResetEmail(config, resetLink);
+        await sendEmail({ to: email, ...emailContent }, config);
+    }
 };
 
-export const resetPassword = async (token: string, newPassword: string): Promise<void> => {
-    if (USE_REAL_API) { await apiFetch('/auth/reset-password', 'POST', { token, newPassword }); return; }
-    const resetRecord = await find('passwordResetTokens', (t: any) => t.token === token && t.expiry > Date.now());
-    if (!resetRecord) throw new Error("Invalid or expired reset token.");
-    const passwordHash = await hashPassword(newPassword);
-    let user = await update('adminUsers', resetRecord.userId, { passwordHash });
-    if (!user) user = await update('registrations', resetRecord.userId, { passwordHash });
-    if (!user) throw new Error("User not found.");
-    await remove('passwordResetTokens', resetRecord.id);
+export const resetPassword = async (token: string, newPassword: string) => {
+    if (USE_REAL_API) return apiFetch('/auth/reset-password', 'POST', { token, newPassword });
+    // Mock: token format reset_TIMESTAMP_USERID
+    const parts = token.split('_');
+    if (parts.length !== 3) throw new Error("Invalid token");
+    const userId = parts[2];
+    const hash = await hashPassword(newPassword);
+    
+    // Try updating admin first, then delegate
+    let updated = await update('adminUsers', userId, { passwordHash: hash });
+    if (!updated) {
+        updated = await update('registrations', userId, { passwordHash: hash });
+    }
+    if (!updated) throw new Error("User not found for token");
 };
 
-// --- Events ---
+// --- Event & Config ---
+
 export const listPublicEvents = async (): Promise<PublicEvent[]> => {
-    if (USE_REAL_API) return await apiFetch<PublicEvent[]>('/events');
+    if (USE_REAL_API) return apiFetch<PublicEvent[]>('/events');
     const events = await findAll('events');
     return events.map((e: any) => ({
         id: e.id,
-        name: e.config?.event?.name || 'Untitled Event',
-        date: e.config?.event?.date || '',
-        location: e.config?.event?.location || '',
-        logoUrl: e.config?.theme?.logoUrl || '',
-        colorPrimary: e.config?.theme?.colorPrimary || '#4f46e5'
+        name: e.config.event.name,
+        date: e.config.event.date,
+        location: e.config.event.location,
+        logoUrl: e.config.theme.logoUrl,
+        colorPrimary: e.config.theme.colorPrimary
     }));
 };
 
-export const getPublicEventData = async (eventId: string): Promise<{ config: EventConfig; registrationCount: number; sessions: Session[]; speakers: Speaker[]; sponsors: Sponsor[] }> => {
-    if (USE_REAL_API) return await apiFetch(`/events/${eventId}`);
-    if (!eventId) throw new Error("Event ID is required");
+export const getPublicEventData = async (eventId: string) => {
+    if (USE_REAL_API) return apiFetch<{ config: EventConfig, registrationCount: number, sessions: Session[], speakers: Speaker[], sponsors: Sponsor[] }>(`/events/${eventId}`);
     
-    let event;
-    try {
-        event = await find('events', (e: any) => e.id === eventId);
-    } catch (e) {
-        // Ignore find error
-    }
+    const event = await find('events', (e: any) => e.id === eventId);
+    if (!event) throw new Error("Event not found");
     
-    // Auto-seed main-event if missing to ensure app works out of the box
-    if (!event && eventId === MAIN_EVENT_ID) {
-        const newEvent = { id: MAIN_EVENT_ID, config: defaultConfig };
-        try {
-             await insert('events', newEvent);
-             event = newEvent;
-        } catch (e) {
-             // Return default if insertion fails
-             return { config: defaultConfig, registrationCount: 0, sessions: [], speakers: [], sponsors: [] };
-        }
-    }
+    const countVal = await count('registrations', (r: any) => r.eventId === eventId);
+    const sessions = await findAll('sessions', (s: any) => s.eventId === eventId);
+    const speakers = await findAll('speakers', (s: any) => s.eventId === eventId);
+    const sponsors = await findAll('sponsors', (s: any) => s.eventId === eventId);
 
-    if (!event) {
-         // Graceful fallback for main-event to prevent crashes
-         if (eventId === MAIN_EVENT_ID) {
-             return { config: defaultConfig, registrationCount: 0, sessions: [], speakers: [], sponsors: [] };
-         }
-         throw new Error("Event not found");
-    }
-
-    // Safely get config or fallback to default if data is corrupted
-    const config = (event.config && event.config.event) ? event.config : defaultConfig;
-
-    const registrationCount = await count('registrations', (r: any) => r.eventId === eventId);
-    const sessions = await findAll('sessions');
-    const speakers = await findAll('speakers');
-    const sponsors = await findAll('sponsors');
-    return { config, registrationCount, sessions, speakers, sponsors };
-};
-
-export const getEventConfig = async (): Promise<EventConfig> => {
-    if (USE_REAL_API) { const data = await getPublicEventData(MAIN_EVENT_ID); return data.config; }
-    const event = await find('events', (e: any) => e.id === MAIN_EVENT_ID);
-    return (event && event.config) ? event.config : defaultConfig;
-};
-
-export const saveConfig = async (adminToken: string, config: EventConfig): Promise<EventConfig> => {
-    if (USE_REAL_API) return await apiFetch(`/events/${MAIN_EVENT_ID}/config`, 'PUT', { config }, adminToken);
-    const event = await find('events', (e: any) => e.id === MAIN_EVENT_ID);
-    if (event) await update('events', MAIN_EVENT_ID, { config });
-    else await insert('events', { id: MAIN_EVENT_ID, config });
-    return config;
-};
-
-export const syncConfigFromGitHub = async (adminToken: string): Promise<EventConfig> => {
-    const currentConfig = await getEventConfig();
-    if (!currentConfig.githubSync.enabled || !currentConfig.githubSync.configUrl) throw new Error("GitHub sync disabled.");
-    try {
-        const response = await fetch(currentConfig.githubSync.configUrl);
-        if (!response.ok) throw new Error("GitHub fetch failed");
-        const newConfig = await response.json();
-        const merged = { ...currentConfig, ...newConfig, githubSync: { ...currentConfig.githubSync, lastSyncTimestamp: Date.now(), lastSyncStatus: 'success', lastSyncMessage: 'Synced.' } };
-        await saveConfig(adminToken, merged);
-        return merged;
-    } catch (e) { throw e; }
+    return { 
+        config: event.config as EventConfig, 
+        registrationCount: countVal,
+        sessions,
+        speakers,
+        sponsors
+    };
 };
 
 export const createEvent = async (adminToken: string, name: string, type: string): Promise<EventData> => {
-    if (USE_REAL_API) return await apiFetch('/events', 'POST', { name, eventType: type, config: defaultConfig }, adminToken);
-    const newId = name.toLowerCase().replace(/[^a-z0-9]+/g, '-');
-    const config = JSON.parse(JSON.stringify(defaultConfig));
-    config.event.name = name;
-    config.event.eventType = type;
-    const newEvent = { id: newId, name, config };
+    if (USE_REAL_API) return apiFetch<EventData>('/events', 'POST', { name, type }, adminToken);
+    
+    const newEvent = {
+        id: name.toLowerCase().replace(/[^a-z0-9]/g, '-') + '-' + Date.now().toString(36),
+        name,
+        config: { ...defaultConfig, event: { ...defaultConfig.event, name, eventType: type } }
+    };
     await insert('events', newEvent);
     return newEvent;
 };
 
-// --- Registrations ---
-export const registerUser = async (eventId: string, data: RegistrationData, inviteToken?: string): Promise<{ success: boolean; message: string }> => {
-    if (USE_REAL_API) {
-        try {
-            const res = await apiFetch<{success: boolean, message: string}>('/registrations', 'POST', { eventId, data, inviteToken });
-            return res;
-        } catch (e) { return { success: false, message: e instanceof Error ? e.message : 'Registration failed' }; }
+export const getEventConfig = async () => {
+    // Simplified: assumes single event context or fetches first
+    const events = await listPublicEvents();
+    if (events.length > 0) {
+        const data = await getPublicEventData(events[0].id);
+        return data.config;
     }
+    return defaultConfig;
+};
+
+export const saveConfig = async (adminToken: string, config: EventConfig) => {
+    if (USE_REAL_API) return apiFetch<EventConfig>('/admin/config', 'PUT', { config }, adminToken);
+    // Mock: update first event
+    const events = await findAll('events');
+    if (events.length > 0) {
+        await update('events', events[0].id, { config });
+        return config;
+    }
+    throw new Error("No event to save config to.");
+};
+
+export const syncConfigFromGitHub = async (adminToken: string): Promise<EventConfig> => {
+    // Mock implementation
+    return defaultConfig;
+};
+
+export const sendTestEmail = async (adminToken: string, to: string, config: EventConfig) => {
+    if (USE_REAL_API) return apiFetch('/admin/test-email', 'POST', { to, config }, adminToken);
+    await sendEmail({ to, subject: "Test Email", body: "This is a test." }, config);
+};
+
+// --- Registration ---
+
+export const registerUser = async (eventId: string, data: RegistrationData, inviteToken?: string) => {
+    if (USE_REAL_API) return apiFetch<{ success: boolean, message: string }>('/registrations', 'POST', { eventId, data, inviteToken });
+    
     const existing = await find('registrations', (r: any) => r.email === data.email && r.eventId === eventId);
     if (existing) return { success: false, message: "Email already registered." };
-    const passwordHash = data.password ? await hashPassword(data.password) : undefined;
-    const newRegistration = { ...data, id: `reg_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`, eventId, createdAt: Date.now(), passwordHash, verified: false, checkedIn: false };
-    delete newRegistration.password;
-    await insert('registrations', newRegistration);
-    const config = await getEventConfig();
-    if (config.eventCoin.enabled && config.eventCoin.startingBalance > 0) {
-        await insert('transactions', { id: `tx_init_${newRegistration.id}`, fromId: 'system', fromName: 'System', fromEmail: 'system', toId: newRegistration.id, toName: newRegistration.name, toEmail: newRegistration.email, amount: config.eventCoin.startingBalance, message: 'Welcome Bonus', type: 'initial', timestamp: Date.now() });
+
+    const passwordHash = await hashPassword(data.password || 'password123');
+    const newUser = {
+        ...data,
+        id: `reg_${Date.now()}_${Math.random().toString(36).substr(2, 5)}`,
+        eventId,
+        passwordHash,
+        createdAt: Date.now(),
+        checkedIn: false,
+        customFields: { ...data } // Store extra fields
+    };
+    delete (newUser as any).password; // Don't store plain text
+    
+    await insert('registrations', newUser);
+    
+    // Invalidate invite token if used
+    if (inviteToken) {
+        await removeWhere('inviteTokens', (t: any) => t.token === inviteToken);
     }
-    return { success: true, message: "Registration successful." };
+
+    return { success: true, message: "Registered successfully." };
 };
 
-export const triggerRegistrationEmails = async (eventId: string, data: RegistrationData): Promise<void> => {
-    if (USE_REAL_API) return; 
-    const config = await getEventConfig();
-    const verificationLink = `${config.event.publicUrl}/verify?email=${encodeURIComponent(data.email)}`;
-    const qrCodeUrl = `https://api.qrserver.com/v1/create-qr-code/?size=150x150&data=${data.id || 'unknown'}`;
-    try {
-        const emails = await generateRegistrationEmails(data, config, verificationLink, qrCodeUrl);
-        await sendEmail({ to: data.email, ...emails.userEmail }, config);
-        await logEmailCommunication({ to: data.email, ...emails.userEmail }, 'sent');
-    } catch (e) { await logEmailCommunication({ to: data.email, subject: 'Reg Error', body: '' }, 'failed', e instanceof Error ? e.message : 'Error'); }
+export const triggerRegistrationEmails = async (eventId: string, data: RegistrationData) => {
+    // Mock implementation relying on config
+    const config = (await getPublicEventData(eventId)).config;
+    // Use Gemini to generate content
+    const { userEmail, hostEmail } = await generateRegistrationEmails(data, config, "http://verify", "http://qr");
+    await sendEmail({ to: data.email, ...userEmail }, config);
+    await sendEmail({ to: config.host.email, ...hostEmail }, config);
 };
 
-export const getRegistrations = async (adminToken: string): Promise<RegistrationData[]> => {
-    if (USE_REAL_API) return await apiFetch('/admin/registrations', 'GET', undefined, adminToken);
-    return await findAll('registrations', (r: any) => r.eventId === MAIN_EVENT_ID);
+export const getInvitationDetails = async (token: string) => {
+    if (USE_REAL_API) return apiFetch<{ eventId: string, inviteeEmail: string }>(`/invitations/${token}`);
+    const invite = await find('inviteTokens', (t: any) => t.token === token);
+    return invite ? { eventId: invite.eventId, inviteeEmail: invite.email } : null;
 };
 
-export const updateRegistrationStatus = async (adminToken: string, eventId: string, registrationId: string, updates: Partial<RegistrationData>): Promise<void> => {
-    if (USE_REAL_API) { await apiFetch(`/admin/registrations/${registrationId}`, 'PUT', updates, adminToken); return; }
-    await update('registrations', registrationId, updates);
+export const getRegistrations = async (adminToken: string) => {
+    if (USE_REAL_API) return apiFetch<RegistrationData[]>('/admin/registrations', 'GET', undefined, adminToken);
+    return findAll('registrations');
 };
 
-export const saveAdminRegistration = async (adminToken: string, id: string, data: Partial<RegistrationData>): Promise<void> => {
-    if (USE_REAL_API) { await apiFetch(`/admin/registrations/${id}`, 'PUT', data, adminToken); return; }
-    await update('registrations', id, data);
+export const updateRegistrationStatus = async (adminToken: string, id: string, checkedIn: boolean) => {
+    if (USE_REAL_API) return apiFetch(`/admin/registrations/${id}/status`, 'PUT', { checkedIn }, adminToken);
+    await update('registrations', id, { checkedIn });
 };
 
-export const deleteAdminRegistration = async (adminToken: string, id: string): Promise<void> => {
-    if (USE_REAL_API) { await apiFetch(`/admin/registrations/${id}`, 'DELETE', undefined, adminToken); return; }
+export const deleteAdminRegistration = async (adminToken: string, id: string) => {
+    if (USE_REAL_API) return apiFetch(`/admin/registrations/${id}`, 'DELETE', undefined, adminToken);
     await remove('registrations', id);
 };
 
-export const bulkImportRegistrations = async (adminToken: string, csvData: string): Promise<{ successCount: number; errorCount: number; errors: string[] }> => {
-    if (USE_REAL_API) {
-        const lines = csvData.trim().split('\n').slice(1);
-        const users = lines.map(line => {
-            const [name, email] = line.split(',');
-            return { name: name?.trim(), email: email?.trim() };
-        }).filter(u => u.name && u.email);
-        return await apiFetch('/admin/registrations/import', 'POST', { users, eventId: MAIN_EVENT_ID }, adminToken);
-    }
-    const lines = csvData.trim().split('\n');
-    let successCount = 0, errorCount = 0;
+export const saveAdminRegistration = async (adminToken: string, id: string, data: Partial<RegistrationData>) => {
+    await update('registrations', id, data);
+};
+
+export const bulkImportRegistrations = async (adminToken: string, csvData: string) => {
+    if (USE_REAL_API) return apiFetch<{ successCount: number, errorCount: number, errors: string[] }>('/admin/registrations/import', 'POST', { csvData }, adminToken);
+    
+    const lines = csvData.split('\n').map(l => l.trim()).filter(l => l);
+    let successCount = 0;
+    let errorCount = 0;
     const errors: string[] = [];
-    const start = lines.length > 0 && lines[0].toLowerCase().includes('email') ? 1 : 0;
-    for (let i = start; i < lines.length; i++) {
-        const line = lines[i].trim();
-        if (!line) continue;
-        const parts = line.split(',');
-        if (parts.length < 2) { errorCount++; errors.push(`Line ${i + 1}: Invalid`); continue; }
-        const name = parts[0].trim();
-        const email = parts[1].trim();
-        try {
-            const res = await registerUser(MAIN_EVENT_ID, { name, email, createdAt: 0 } as any);
-            if (res.success) successCount++; else { errorCount++; errors.push(`Line ${i+1}: ${res.message}`); }
-        } catch { errorCount++; errors.push(`Line ${i+1}: Error`); }
+    
+    // Skip header
+    for (let i = 1; i < lines.length; i++) {
+        const [name, email] = lines[i].split(',').map(s => s.trim());
+        if (name && email) {
+            const res = await registerUser('main-event', { name, email, createdAt: Date.now() } as any);
+            if (res.success) successCount++;
+            else {
+                errorCount++;
+                errors.push(`${email}: ${res.message}`);
+            }
+        }
     }
     return { successCount, errorCount, errors };
 };
 
-export const sendUpdateEmailToDelegate = async (adminToken: string, eventId: string, registrationId: string): Promise<void> => {
-    if (USE_REAL_API) return; 
-    const delegate = await find('registrations', (r: any) => r.id === registrationId);
-    if (!delegate) throw new Error("Delegate not found");
-    const config = await getEventConfig();
-    const emailContent = await generateDelegateUpdateEmail(config, delegate);
-    await sendEmail({ to: delegate.email, ...emailContent }, config);
-    await logEmailCommunication({ to: delegate.email, ...emailContent }, 'sent');
-};
-
-export const getInvitationDetails = async (token: string): Promise<{ eventId: string, inviteeEmail: string } | null> => {
-    if (!USE_REAL_API) {
-        const invite = await find('inviteTokens', (t: any) => t.token === token);
-        return invite ? { eventId: invite.eventId, inviteeEmail: invite.email } : null;
+// --- Ticket Security ---
+export const getSignedTicketToken = async (delegateToken: string): Promise<string> => {
+    if (USE_REAL_API) {
+        const res = await apiFetch<{token: string}>('/tickets/token', 'GET', undefined, delegateToken);
+        return res.token;
     }
-    return null; 
+    // Mock: just return the delegate ID as a "token"
+    const payload = verifyToken(delegateToken);
+    return payload ? payload.id : '';
 };
 
-export const sendDelegateInvitation = async (adminToken: string, eventId: string, email: string): Promise<void> => {
-    if (USE_REAL_API) { await apiFetch('/admin/invite', 'POST', { email, eventId }, adminToken); return; }
-    const token = `invite_${Date.now()}`;
-    await insert('inviteTokens', { token, eventId, email });
-    const config = await getEventConfig();
-    const inviteLink = `${config.event.publicUrl}/${eventId}?inviteToken=${token}`;
-    const emailContent = await generateDelegateInvitationEmail(config, "Event Admin", inviteLink);
-    await sendEmail({ to: email, ...emailContent }, config);
-    await logEmailCommunication({ to: email, ...emailContent }, 'sent');
+export const verifyTicketToken = async (adminToken: string, ticketToken: string): Promise<{ success: boolean, user?: any, message: string }> => {
+    if (USE_REAL_API) {
+        return await apiFetch<{ success: boolean, user?: any, message: string }>('/tickets/verify', 'POST', { token: ticketToken }, adminToken);
+    }
+    
+    // Mock verification
+    const user = await find('registrations', (r: any) => r.id === ticketToken);
+    if (!user) return { success: false, message: "Invalid ticket" };
+    
+    if (user.checkedIn) {
+        return { success: false, message: `${user.name} already checked in.`, user };
+    }
+    
+    await update('registrations', user.id, { checkedIn: true });
+    return { success: true, message: `Checked in ${user.name}`, user };
 };
 
 // --- Communications ---
-export const getEmailLogs = async (adminToken: string): Promise<any[]> => {
-    if (USE_REAL_API) return await apiFetch('/admin/logs/email', 'GET', undefined, adminToken); // Fixed Endpoint
-    const logs = await findAll('emailLogs');
-    return logs.sort((a: any, b: any) => b.timestamp - a.timestamp);
+
+export const sendDelegateInvitation = async (adminToken: string, eventId: string, email: string) => {
+    if (USE_REAL_API) return apiFetch('/admin/invitations', 'POST', { eventId, email }, adminToken);
+    
+    const token = `invite_${Date.now()}_${Math.random().toString(36).substr(2, 5)}`;
+    await insert('inviteTokens', { token, eventId, email, createdAt: Date.now() });
+    
+    const config = (await getPublicEventData(eventId)).config;
+    const inviteLink = `${config.event.publicUrl}/${eventId}?inviteToken=${token}`;
+    const content = await generateDelegateInvitationEmail(config, "Event Admin", inviteLink);
+    await sendEmail({ to: email, ...content }, config);
 };
 
-export const sendTestEmail = async (adminToken: string, to: string, config: EventConfig): Promise<void> => {
-    if (USE_REAL_API) {
-        await apiFetch('/admin/test-email', 'POST', { to, config }, adminToken);
-        return;
-    }
-    // Mock implementation
-    const payload = {
-        to,
-        subject: 'Test Email from Event Platform',
-        body: 'This is a test email to verify your configuration settings.'
-    };
-    await sendEmail(payload, config);
-    await logEmailCommunication(payload, 'sent');
-};
-
-export const sendBroadcast = async (adminToken: string, subject: string, body: string, target: 'all' | 'checked-in' | 'pending', channel: 'email' | 'sms' | 'whatsapp' | 'app' = 'email'): Promise<{ success: boolean, message: string }> => {
-    if (USE_REAL_API) {
-        return await apiFetch('/admin/broadcast', 'POST', { subject, body, target, channel }, adminToken);
-    }
-    // Mock
-    await new Promise(r => setTimeout(r, 500));
-    return { success: true, message: `Broadcast simulated via ${channel} successfully (5 recipients).` };
-};
-
-// --- Delegate Portal ---
-export const getDelegateProfile = async (token: string): Promise<DelegateProfile> => {
-    if (USE_REAL_API) return await apiFetch<DelegateProfile>('/delegate/profile', 'GET', undefined, token);
-    const payload = JSON.parse(atob(token)); 
-    const userId = payload.id;
+export const sendUpdateEmailToDelegate = async (adminToken: string, eventId: string, userId: string) => {
     const user = await find('registrations', (r: any) => r.id === userId);
-    if (!user) throw new Error("User not found");
-    const mealPlanAssignment = await find('mealPlanAssignments', (mp: any) => mp.delegateId === userId);
-    const accommodationBooking = await find('accommodationBookings', (ab: any) => ab.delegateId === userId);
-    const agendaSelections = await findAll('agendaSelections', (s: any) => s.delegateId === userId);
-    const restaurants = await findAll('restaurants');
-    const hotels = await findAll('hotels');
-    const sessions = await findAll('sessions'); 
-    const speakers = await findAll('speakers');
-    const sponsors = await findAll('sponsors');
-    return { user, mealPlanAssignment, restaurants, accommodationBooking, hotels, sessions, mySessionIds: agendaSelections.map((s: any) => s.sessionId), speakers, sponsors };
+    const config = (await getPublicEventData(eventId)).config;
+    const content = await generateDelegateUpdateEmail(config, user);
+    await sendEmail({ to: user.email, ...content }, config);
 };
 
-export const updateDelegateProfile = async (token: string, updates: Partial<RegistrationData>): Promise<RegistrationData> => {
-    const payload = JSON.parse(atob(token));
-    return await update('registrations', payload.id, updates);
+export const sendBroadcast = async (adminToken: string, subject: string, body: string, target: string, channel: string) => {
+    if (USE_REAL_API) return apiFetch<{ success: boolean, message: string }>('/admin/broadcast', 'POST', { subject, body, target, channel }, adminToken);
+    // Mock
+    await insert('emailLogs', { id: `log_${Date.now()}`, to: 'Broadcast', subject, body, timestamp: Date.now(), status: 'sent' });
+    return { success: true, message: "Broadcast queued." };
 };
 
-export const addToAgenda = async (delegateToken: string, sessionId: string): Promise<void> => {
-    if (!USE_REAL_API) {
-        const payload = JSON.parse(atob(delegateToken));
-        const existing = await find('agendaSelections', (s: any) => s.delegateId === payload.id && s.sessionId === sessionId);
-        if (!existing) await insert('agendaSelections', { id: `sel_${Date.now()}`, delegateId: payload.id, sessionId });
-    }
+export const getEmailLogs = async (adminToken: string) => {
+    if (USE_REAL_API) return apiFetch<any[]>('/admin/email-logs', 'GET', undefined, adminToken);
+    return findAll('emailLogs');
 };
 
-export const removeFromAgenda = async (delegateToken: string, sessionId: string): Promise<void> => {
-    if (!USE_REAL_API) {
-        const payload = JSON.parse(atob(delegateToken));
-        await removeWhere('agendaSelections', (s: any) => s.delegateId === payload.id && s.sessionId === sessionId);
-    }
-};
+// --- Dashboard ---
 
-// Updated to use secure token fetch
-export const getAiToken = async (delegateToken: string): Promise<string> => {
-    if (USE_REAL_API) {
-        const res = await apiFetch<{apiKey: string}>('/auth/ai-token', 'GET', undefined, delegateToken);
-        return res.apiKey;
-    }
-    return ''; // In mock mode, components might fail or fallback to mocked gemini
-};
-
-export const getEventContextForAI = async (delegateToken: string): Promise<string> => {
-    const profile = await getDelegateProfile(delegateToken);
-    const config = await getEventConfig();
-    const { user, sessions } = profile;
-    const agendaText = sessions.map(s => `- ${s.title}: ${s.location}`).join('\n');
-    return `You are Virtual Concierge for ${config.event.name}. User: ${user.name}. Agenda: ${agendaText}`;
-};
-
-// --- Networking API ---
-export const getMyNetworkingProfile = async (delegateToken: string): Promise<NetworkingProfile | null> => {
-    if (USE_REAL_API) return await apiFetch<NetworkingProfile>('/networking/profile', 'GET', undefined, delegateToken);
-    const payload = verifyToken(delegateToken);
-    if (!payload) throw new Error("Invalid token");
-    return await find('networkingProfiles', (p: any) => p.userId === payload.id);
-};
-
-export const updateNetworkingProfile = async (delegateToken: string, profileData: Partial<NetworkingProfile>): Promise<NetworkingProfile> => {
-    if (USE_REAL_API) return await apiFetch<NetworkingProfile>('/networking/profile', 'POST', profileData, delegateToken);
-    const payload = verifyToken(delegateToken);
-    if (!payload) throw new Error("Invalid token");
-    const existing = await find('networkingProfiles', (p: any) => p.userId === payload.id);
-    if (existing) return await update('networkingProfiles', payload.id, profileData) as NetworkingProfile;
-    return await insert('networkingProfiles', { userId: payload.id, bio: '', interests: [], linkedinUrl: '', jobTitle: '', company: '', lookingFor: '', isVisible: true, ...profileData });
-};
-
-export const getNetworkingCandidates = async (delegateToken: string): Promise<{ matches: NetworkingMatch[], allCandidates: NetworkingProfile[] }> => {
-    if (USE_REAL_API) {
-        const candidates = await apiFetch<NetworkingProfile[]>('/networking/candidates', 'GET', undefined, delegateToken);
-        const myProfile = await getMyNetworkingProfile(delegateToken);
-        if (!myProfile) return { matches: [], allCandidates: candidates };
-        let matches: NetworkingMatch[] = [];
-        try {
-             const aiMatches = await geminiGenerateNetworkingMatches(myProfile, candidates);
-             matches = aiMatches.map((m: any) => {
-                 const candidate = candidates.find(c => c.userId === m.userId);
-                 if (!candidate) return null;
-                 return { userId: m.userId, name: (candidate as any).name, jobTitle: candidate.jobTitle, company: candidate.company, score: m.score, reason: m.reason, icebreaker: m.icebreaker, profile: candidate };
-            }).filter(Boolean) as NetworkingMatch[];
-        } catch (e) {}
-        return { matches, allCandidates: candidates };
-    }
-    const payload = verifyToken(delegateToken);
-    if (!payload) throw new Error("Invalid");
-    const myProfile = await find('networkingProfiles', (p: any) => p.userId === payload.id);
-    if (!myProfile?.isVisible) return { matches: [], allCandidates: [] };
-    const candidates = await findAll('networkingProfiles', (p: any) => p.userId !== payload.id && p.isVisible);
-    const enriched: NetworkingProfile[] = [];
-    for (const c of candidates) {
-        const reg = await find('registrations', (r: any) => r.id === c.userId);
-        if (reg) enriched.push({ ...c, name: reg.name }); 
-    }
-    let matches: NetworkingMatch[] = [];
-    try {
-        const aiMatches = await geminiGenerateNetworkingMatches(myProfile, enriched);
-         matches = aiMatches.map((m: any) => {
-             const candidate = enriched.find(c => c.userId === m.userId);
-             if (!candidate) return null;
-             return { userId: m.userId, name: (candidate as any).name, jobTitle: candidate.jobTitle, company: candidate.company, score: m.score, reason: m.reason, icebreaker: m.icebreaker, profile: candidate };
-        }).filter(Boolean) as NetworkingMatch[];
-    } catch (e) {}
-    return { matches, allCandidates: enriched };
-};
-
-// --- Session Feedback ---
-export const submitSessionFeedback = async (delegateToken: string, sessionId: string, rating: number, comment: string): Promise<void> => {
-    if (USE_REAL_API) { await apiFetch('/feedback', 'POST', { sessionId, rating, comment }, delegateToken); return; }
-    const payload = verifyToken(delegateToken);
-    if (!payload) return;
-    await insert('sessionFeedback', { id: `fb_${Date.now()}`, sessionId, userId: payload.id, rating, comment, timestamp: Date.now() });
-};
-
-export const getSessionFeedbackStats = async (adminToken: string, sessionId: string): Promise<{ count: number, avgRating: number, comments: string[] }> => {
-     if (USE_REAL_API) return await apiFetch(`/feedback/${sessionId}`, 'GET', undefined, adminToken);
-     const feedback = await findAll('sessionFeedback', (f: any) => f.sessionId === sessionId);
-     if (feedback.length === 0) return { count: 0, avgRating: 0, comments: [] };
-     const sum = feedback.reduce((acc: number, curr: any) => acc + curr.rating, 0);
-     return { count: feedback.length, avgRating: parseFloat((sum / feedback.length).toFixed(1)), comments: feedback.map((f: any) => f.comment) };
-};
-
-export const analyzeFeedback = async (adminToken: string, sessionId: string): Promise<string> => {
-    if (!USE_REAL_API) {
-        const session = await find('sessions', (s: any) => s.id === sessionId);
-        const stats = await getSessionFeedbackStats(adminToken, sessionId);
-        if (!stats.comments.length) return "No data.";
-        return await geminiSummarizeSessionFeedback(session.title, stats.comments);
-    }
-    const session = await apiFetch<Session>(`/sessions/${sessionId}`, 'GET', undefined, adminToken); // Use existing endpoint if not public list
-    const stats = await getSessionFeedbackStats(adminToken, sessionId);
-    if (!stats.comments.length) return "No data.";
-    return await geminiSummarizeSessionFeedback(session.title, stats.comments);
-};
-
-// --- Gamification ---
-export const getScavengerHuntItems = async (token: string): Promise<ScavengerHuntItem[]> => {
-    if (USE_REAL_API) return await apiFetch('/scavenger-hunt-items', 'GET', undefined, token);
-    const items = await findAll('scavengerHuntItems');
-    const payload = verifyToken(token);
-    if (payload?.type === 'admin') return items;
-    return items.map((item: any) => ({ ...item, secretCode: undefined }));
-};
-
-export const saveScavengerHuntItem = async (adminToken: string, item: Partial<ScavengerHuntItem>): Promise<void> => {
-    if (USE_REAL_API) { await apiFetch('/scavenger-hunt-items', 'POST', item, adminToken); return; }
-    if (item.id) await update('scavengerHuntItems', item.id, item);
-    else await insert('scavengerHuntItems', { ...item, id: `hunt_${Date.now()}` });
-};
-
-export const deleteScavengerHuntItem = async (adminToken: string, itemId: string): Promise<void> => {
-     if (USE_REAL_API) { await apiFetch(`/scavenger-hunt-items/${itemId}`, 'DELETE', undefined, adminToken); return; }
-     await remove('scavengerHuntItems', itemId);
-};
-
-export const getScavengerHuntProgress = async (delegateToken: string): Promise<string[]> => {
-     if (USE_REAL_API) return await apiFetch('/scavenger-hunt/progress', 'GET', undefined, delegateToken);
-     const payload = verifyToken(delegateToken);
-     if (!payload) return [];
-     const logs = await findAll('scavengerHuntLogs', (l: any) => l.userId === payload.id);
-     return logs.map((l: any) => l.itemId);
-};
-
-export const claimScavengerHuntItem = async (delegateToken: string, secretCode: string): Promise<{ success: boolean, message: string, rewardAmount?: number }> => {
-    if (USE_REAL_API) return await apiFetch('/scavenger-hunt/claim', 'POST', { secretCode }, delegateToken);
-    const payload = verifyToken(delegateToken);
-    if (!payload) return { success: false, message: "Invalid" };
-    const item = await find('scavengerHuntItems', (i: any) => i.secretCode === secretCode);
-    if (!item) return { success: false, message: "Invalid Code" };
-    const existing = await find('scavengerHuntLogs', (l: any) => l.userId === payload.id && l.itemId === item.id);
-    if (existing) return { success: false, message: "Already claimed" };
-    await insert('scavengerHuntLogs', { id: `hl_${Date.now()}`, userId: payload.id, itemId: item.id, timestamp: Date.now() });
-    const user = await find('registrations', (r: any) => r.id === payload.id);
-    await insert('transactions', { id: `tx_rew_${Date.now()}`, fromId: 'system', fromName: 'System', fromEmail: 'system', toId: payload.id, toName: user.name, toEmail: user.email, amount: item.rewardAmount, message: `Found ${item.name}`, type: 'reward', timestamp: Date.now() });
-    return { success: true, message: `Earned ${item.rewardAmount}`, rewardAmount: item.rewardAmount };
-};
-
-export const getScavengerHuntLeaderboard = async (token: string): Promise<LeaderboardEntry[]> => {
-    if (USE_REAL_API) return await apiFetch('/scavenger-hunt/leaderboard', 'GET', undefined, token);
-    
-    // Mock Implementation
-    const logs = await findAll('scavengerHuntLogs');
-    const items = await findAll('scavengerHuntItems');
-    const users = await findAll('registrations');
-    
-    const scores: Record<string, { score: number, itemsFound: number }> = {};
-    
-    logs.forEach((log: any) => {
-        const item = items.find((i: any) => i.id === log.itemId);
-        if (item) {
-            if (!scores[log.userId]) scores[log.userId] = { score: 0, itemsFound: 0 };
-            scores[log.userId].score += (item.rewardAmount || 0);
-            scores[log.userId].itemsFound += 1;
-        }
-    });
-    
-    const leaderboard = Object.entries(scores).map(([userId, stats]) => {
-        const user = users.find((u: any) => u.id === userId);
-        return {
-            userId,
-            name: user ? user.name : 'Unknown',
-            score: stats.score,
-            itemsFound: stats.itemsFound
-        };
-    });
-    
-    return leaderboard.sort((a, b) => b.score - a.score).slice(0, 20);
-};
-
-
-// --- Admin Dashboard ---
 export const getDashboardStats = async (adminToken: string): Promise<DashboardStats> => {
-    if (USE_REAL_API) return await apiFetch<DashboardStats>('/admin/dashboard-stats', 'GET', undefined, adminToken);
-    const config = await getEventConfig();
-    const totalRegistrations = await count('registrations', (r: any) => r.eventId === MAIN_EVENT_ID);
-    const recentRegistrations = (await findAll('registrations', (r: any) => r.eventId === MAIN_EVENT_ID))
-        .sort((a: any, b: any) => b.createdAt - a.createdAt)
-        .slice(0, 5);
-    const allTx = await findAll('transactions');
-    const eventCoinCirculation = allTx
-        .filter((t: any) => t.type === 'initial' || t.type === 'purchase' || t.type === 'reward')
-        .reduce((acc: number, t: any) => acc + t.amount, 0);
+    if (USE_REAL_API) return apiFetch<DashboardStats>('/admin/stats', 'GET', undefined, adminToken);
     
-    // Calculate Trend (Last 7 days)
-    const trendMap = new Map<string, number>();
-    const now = new Date();
-    for (let i = 6; i >= 0; i--) {
-        const d = new Date(now);
+    const regs = await findAll('registrations');
+    const tasks = await findAll('tasks');
+    const coinStats = await getEventCoinStats(adminToken);
+    const config = await getEventConfig();
+
+    // Generate mock trend
+    const trend = [];
+    for (let i=6; i>=0; i--) {
+        const d = new Date();
         d.setDate(d.getDate() - i);
-        trendMap.set(d.toISOString().split('T')[0], 0);
+        trend.push({ date: d.toISOString().split('T')[0], count: Math.floor(Math.random() * 10) });
     }
-    const allRegistrations = await findAll('registrations', (r: any) => r.eventId === MAIN_EVENT_ID);
-    allRegistrations.forEach((r: any) => {
-        const date = new Date(r.createdAt).toISOString().split('T')[0];
-        if (trendMap.has(date)) {
-            trendMap.set(date, (trendMap.get(date) || 0) + 1);
+
+    return {
+        totalRegistrations: regs.length,
+        maxAttendees: config.event.maxAttendees,
+        eventDate: config.event.date,
+        eventCoinName: config.eventCoin.name,
+        eventCoinCirculation: coinStats.totalCirculation,
+        recentRegistrations: regs.slice(-5).reverse(),
+        registrationTrend: trend,
+        taskStats: {
+            total: tasks.length,
+            completed: tasks.filter((t: any) => t.status === 'completed').length,
+            pending: tasks.filter((t: any) => t.status !== 'completed').length
         }
-    });
-    const registrationTrend = Array.from(trendMap.entries()).map(([date, count]) => ({ date, count }));
-
-    // Task stats
-    const allTasks = await findAll('tasks', (t: any) => t.eventId === MAIN_EVENT_ID);
-    const completedTasks = allTasks.filter((t: any) => t.status === 'completed').length;
-
-    return { 
-        totalRegistrations, 
-        maxAttendees: config.event.maxAttendees, 
-        eventDate: config.event.date, 
-        eventCoinName: config.eventCoin.name, 
-        eventCoinCirculation, 
-        recentRegistrations,
-        registrationTrend,
-        taskStats: { total: allTasks.length, completed: completedTasks, pending: allTasks.length - completedTasks }
     };
 };
 
 // --- Users & Roles ---
-export const getAdminUsers = async (adminToken: string): Promise<AdminUser[]> => {
-    if (USE_REAL_API) return await apiFetch('/admin/users', 'GET', undefined, adminToken);
-    return findAll('adminUsers');
+
+export const getAdminUsers = async (adminToken: string) => findAll('adminUsers');
+export const getRoles = async (adminToken: string) => findAll('roles');
+export const saveAdminUser = async (adminToken: string, user: Partial<AdminUser> & { password?: string }) => {
+    if (user.password) {
+        user.passwordHash = await hashPassword(user.password);
+        delete user.password;
+    }
+    if (user.id) return update('adminUsers', user.id, user);
+    return insert('adminUsers', { ...user, id: `user_${Date.now()}`, createdAt: Date.now() });
 };
-export const saveAdminUser = async (adminToken: string, user: Partial<AdminUser> & { password?: string }): Promise<void> => {
-    if (USE_REAL_API) { await apiFetch('/admin/users', 'POST', user, adminToken); return; }
-    if (user.password) user.passwordHash = await hashPassword(user.password);
-    delete user.password;
-    if (user.id) await update('adminUsers', user.id, user);
-    else await insert('adminUsers', { ...user, id: `user_${Date.now()}` });
+export const deleteAdminUser = async (adminToken: string, id: string) => remove('adminUsers', id);
+export const saveRole = async (adminToken: string, role: Partial<Role>) => {
+    if (role.id) return update('roles', role.id, role);
+    return insert('roles', { ...role, id: `role_${Date.now()}` });
 };
-export const deleteAdminUser = async (adminToken: string, userId: string): Promise<void> => { 
-    if (USE_REAL_API) await apiFetch(`/admin/users/${userId}`, 'DELETE', undefined, adminToken);
-    else await remove('adminUsers', userId); 
-};
-export const getRoles = async (adminToken: string): Promise<Role[]> => {
-    if (USE_REAL_API) return await apiFetch('/admin/roles', 'GET', undefined, adminToken);
-    return findAll('roles');
-};
-export const saveRole = async (adminToken: string, role: Partial<Role>): Promise<void> => {
-    if (USE_REAL_API) { await apiFetch('/admin/roles', 'POST', role, adminToken); return; }
-    if (role.id) await update('roles', role.id, role);
-    else await insert('roles', { ...role, id: `role_${Date.now()}` });
-};
-export const deleteRole = async (adminToken: string, roleId: string): Promise<void> => { 
-    if (USE_REAL_API) await apiFetch(`/admin/roles/${roleId}`, 'DELETE', undefined, adminToken);
-    else await remove('roles', roleId); 
-};
+export const deleteRole = async (adminToken: string, id: string) => remove('roles', id);
 
 // --- Tasks ---
-export const getTasks = async (adminToken: string, eventId: string): Promise<Task[]> => {
-    if (USE_REAL_API) return await apiFetch('/tasks', 'GET', undefined, adminToken);
-    return findAll('tasks', (t: any) => t.eventId === eventId);
+
+export const getTasks = async (adminToken: string, eventId: string) => findAll('tasks');
+export const saveTask = async (adminToken: string, task: Partial<Task>) => {
+    if (task.id) return update('tasks', task.id, task);
+    return insert('tasks', { ...task, id: `task_${Date.now()}`, eventId: 'main-event' });
 };
-export const saveTask = async (adminToken: string, task: Partial<Task>): Promise<void> => {
-    if (USE_REAL_API) { await apiFetch('/tasks', 'POST', task, adminToken); return; }
-    if (task.id) await update('tasks', task.id, task);
-    else await insert('tasks', { ...task, id: `task_${Date.now()}` });
+export const deleteTask = async (adminToken: string, id: string) => remove('tasks', id);
+
+// --- Agenda & Feedback ---
+
+export const getSessions = async (adminToken: string) => findAll('sessions');
+export const saveSession = async (adminToken: string, session: Partial<Session>) => {
+    if (session.id) return update('sessions', session.id, session);
+    return insert('sessions', { ...session, id: `sess_${Date.now()}` });
 };
-export const deleteTask = async (adminToken: string, taskId: string): Promise<void> => { 
-    if (USE_REAL_API) await apiFetch(`/tasks/${taskId}`, 'DELETE', undefined, adminToken);
-    else await remove('tasks', taskId); 
+export const deleteSession = async (adminToken: string, id: string) => remove('sessions', id);
+export const getSpeakers = async (adminToken: string) => findAll('speakers');
+export const saveSpeaker = async (adminToken: string, speaker: Partial<Speaker>) => {
+    if (speaker.id) return update('speakers', speaker.id, speaker);
+    return insert('speakers', { ...speaker, id: `spk_${Date.now()}` });
+};
+export const deleteSpeaker = async (adminToken: string, id: string) => remove('speakers', id);
+
+export const getSessionFeedbackStats = async (adminToken: string, sessionId: string) => {
+    const feedbacks = await findAll('sessionFeedback', (f: any) => f.sessionId === sessionId);
+    const count = feedbacks.length;
+    const avgRating = count > 0 ? feedbacks.reduce((a: any, b: any) => a + b.rating, 0) / count : 0;
+    return { count, avgRating: parseFloat(avgRating.toFixed(1)) };
 };
 
-// --- Agenda ---
-export const getSessions = async (adminToken: string): Promise<Session[]> => {
-    if (USE_REAL_API) return await apiFetch('/sessions', 'GET', undefined, adminToken);
-    return ((await findAll('sessions')) as Session[]).sort((a: any, b: any) => new Date(a.startTime).getTime() - new Date(b.startTime).getTime());
+export const analyzeFeedback = async (adminToken: string, sessionId: string) => {
+    const feedbacks = await findAll('sessionFeedback', (f: any) => f.sessionId === sessionId);
+    const comments = feedbacks.map((f: any) => f.comment).filter(Boolean);
+    const session = await find('sessions', (s: any) => s.id === sessionId);
+    return summarizeSessionFeedback(session?.title || 'Session', comments);
 };
-export const saveSession = async (adminToken: string, session: Partial<Session>): Promise<void> => {
-    if (USE_REAL_API) { await apiFetch('/sessions', 'POST', session, adminToken); return; }
-    if (session.id) await update('sessions', session.id, session);
-    else await insert('sessions', { ...session, id: `sess_${Date.now()}` });
-};
-export const deleteSession = async (adminToken: string, id: string): Promise<void> => { 
-    if (USE_REAL_API) await apiFetch(`/sessions/${id}`, 'DELETE', undefined, adminToken);
-    else await remove('sessions', id); 
-};
-export const getSpeakers = async (adminToken: string): Promise<Speaker[]> => {
-    if (USE_REAL_API) return await apiFetch('/speakers', 'GET', undefined, adminToken);
-    return findAll('speakers');
-};
-export const saveSpeaker = async (adminToken: string, speaker: Partial<Speaker>): Promise<void> => {
-    if (USE_REAL_API) { await apiFetch('/speakers', 'POST', speaker, adminToken); return; }
-    if (speaker.id) await update('speakers', speaker.id, speaker);
-    else await insert('speakers', { ...speaker, id: `spk_${Date.now()}` });
-};
-export const deleteSpeaker = async (adminToken: string, id: string): Promise<void> => { 
-    if (USE_REAL_API) await apiFetch(`/speakers/${id}`, 'DELETE', undefined, adminToken);
-    else await remove('speakers', id); 
+
+export const downloadSessionIcs = async (sessionId: string) => {
+    // Mock ICS download
+    console.log(`Downloading ICS for session ${sessionId}`);
 };
 
 // --- Sponsors ---
-export const getSponsors = async (adminToken: string): Promise<Sponsor[]> => {
-    if (USE_REAL_API) return await apiFetch('/sponsors', 'GET', undefined, adminToken);
-    return findAll('sponsors');
+export const getSponsors = async (adminToken: string) => findAll('sponsors');
+export const saveSponsor = async (adminToken: string, sponsor: Partial<Sponsor>) => {
+    if (sponsor.id) return update('sponsors', sponsor.id, sponsor);
+    return insert('sponsors', { ...sponsor, id: `sponsor_${Date.now()}` });
 };
-export const saveSponsor = async (adminToken: string, sponsor: Partial<Sponsor>): Promise<void> => {
-    if (USE_REAL_API) { await apiFetch('/sponsors', 'POST', sponsor, adminToken); return; }
-    if (sponsor.id) await update('sponsors', sponsor.id, sponsor);
-    else await insert('sponsors', { ...sponsor, id: `spn_${Date.now()}` });
-};
-export const deleteSponsor = async (adminToken: string, id: string): Promise<void> => { 
-    if (USE_REAL_API) await apiFetch(`/sponsors/${id}`, 'DELETE', undefined, adminToken);
-    else await remove('sponsors', id); 
-};
+export const deleteSponsor = async (adminToken: string, id: string) => remove('sponsors', id);
 
 // --- Dining ---
-export const getMealPlans = async (token: string): Promise<MealPlan[]> => {
-    if (USE_REAL_API) return await apiFetch('/meal-plans', 'GET', undefined, token);
-    return findAll('mealPlans');
-};
-export const saveMealPlan = async (adminToken: string, plan: Partial<MealPlan>): Promise<void> => {
-    if (USE_REAL_API) { await apiFetch('/meal-plans', 'POST', plan, adminToken); return; }
-    if (plan.id) await update('mealPlans', plan.id, plan);
-    else await insert('mealPlans', { ...plan, id: `mp_${Date.now()}` });
-};
-export const deleteMealPlan = async (adminToken: string, id: string): Promise<void> => { 
-    if (USE_REAL_API) await apiFetch(`/meal-plans/${id}`, 'DELETE', undefined, adminToken);
-    else await remove('mealPlans', id); 
-};
-export const getRestaurants = async (token: string): Promise<Restaurant[]> => {
-    if (USE_REAL_API) return await apiFetch('/restaurants', 'GET', undefined, token);
-    return findAll('restaurants');
-};
-export const saveRestaurant = async (adminToken: string, restaurant: Partial<Restaurant>): Promise<void> => {
-    if (USE_REAL_API) { await apiFetch('/restaurants', 'POST', restaurant, adminToken); return; }
-    if (restaurant.id) await update('restaurants', restaurant.id, restaurant);
-    else await insert('restaurants', { ...restaurant, id: `rest_${Date.now()}` });
-};
-export const deleteRestaurant = async (adminToken: string, id: string): Promise<void> => { 
-    if (USE_REAL_API) await apiFetch(`/restaurants/${id}`, 'DELETE', undefined, adminToken);
-    else await remove('restaurants', id); 
-};
 
-export const recordMealConsumption = async (adminToken: string, delegateId: string, mealType: MealType): Promise<{ success: boolean; message: string }> => {
-    if (USE_REAL_API) return await apiFetch('/dining/consume', 'POST', { delegateId, mealType }, adminToken);
-    const today = new Date().toISOString().split('T')[0];
-    const existing = await find('mealConsumptionLogs', (l: any) => l.delegateId === delegateId && l.mealType === mealType && l.date === today);
-    if (existing) return { success: false, message: `Already redeemed ${mealType} for today.` };
-    await insert('mealConsumptionLogs', { id: `log_${Date.now()}`, delegateId, mealType, date: today, timestamp: Date.now() });
-    return { success: true, message: `${mealType} redeemed successfully.` };
+export const getMealPlans = async (token: string) => findAll('mealPlans');
+export const saveMealPlan = async (adminToken: string, plan: Partial<MealPlan>) => {
+    if (plan.id) return update('mealPlans', plan.id, plan);
+    return insert('mealPlans', { ...plan, id: `plan_${Date.now()}` });
 };
+export const deleteMealPlan = async (adminToken: string, id: string) => remove('mealPlans', id);
 
-export const assignMealPlan = async (delegateToken: string, mealPlanId: string, startDate: string, endDate: string): Promise<void> => {
-    if (!USE_REAL_API) {
-        const payload = JSON.parse(atob(delegateToken));
-        const existing = await find('mealPlanAssignments', (mp: any) => mp.delegateId === payload.id);
-        if (existing) await update('mealPlanAssignments', existing.id, { mealPlanId, startDate, endDate });
-        else await insert('mealPlanAssignments', { id: `mpa_${Date.now()}`, delegateId: payload.id, mealPlanId, startDate, endDate, totalCost: 0 });
-    }
+export const getRestaurants = async (token: string) => findAll('restaurants');
+export const saveRestaurant = async (adminToken: string, rest: Partial<Restaurant>) => {
+    if (rest.id) return update('restaurants', rest.id, rest);
+    return insert('restaurants', { ...rest, id: `rest_${Date.now()}` });
 };
+export const deleteRestaurant = async (adminToken: string, id: string) => remove('restaurants', id);
 
-export const makeDiningReservation = async (delegateToken: string, restaurantId: string, reservationTime: string, partySize: number): Promise<void> => {
-    if (USE_REAL_API) { await apiFetch('/dining/reservations', 'POST', { restaurantId, reservationTime, partySize }, delegateToken); return; }
-    const payload = JSON.parse(atob(delegateToken));
-    const user = await find('registrations', (r: any) => r.id === payload.id);
-    await insert('diningReservations', { id: `res_${Date.now()}`, restaurantId, delegateId: payload.id, delegateName: user?.name || 'Unknown', reservationTime, partySize });
-};
-
-export const createAdminDiningReservation = async (adminToken: string, data: { restaurantId: string, delegateId: string, reservationTime: string, partySize: number }): Promise<void> => {
-    if (USE_REAL_API) { await apiFetch('/admin/dining/reservations', 'POST', data, adminToken); return; }
-    const user = await find('registrations', (r: any) => r.id === data.delegateId);
-    await insert('diningReservations', { id: `res_${Date.now()}`, restaurantId: data.restaurantId, delegateId: data.delegateId, delegateName: user?.name || 'Unknown', reservationTime: data.reservationTime, partySize: data.partySize });
-};
-
-export const deleteDiningReservation = async (adminToken: string, id: string): Promise<void> => {
-    if (USE_REAL_API) { await apiFetch(`/dining/reservations/${id}`, 'DELETE', undefined, adminToken); return; }
-    await remove('diningReservations', id);
-};
-
-export const getReservationsForRestaurant = async (adminToken: string, restaurantId: string): Promise<DiningReservation[]> => {
-    if (USE_REAL_API) return await apiFetch(`/admin/dining/reservations/${restaurantId}`, 'GET', undefined, adminToken);
-    return findAll('diningReservations', (r: any) => r.restaurantId === restaurantId);
-};
-
-// --- Accommodation ---
-export const getHotels = async (token: string): Promise<Hotel[]> => {
-    if (USE_REAL_API) return await apiFetch('/hotels', 'GET', undefined, token);
-    return findAll('hotels');
-};
-export const saveHotel = async (adminToken: string, hotel: Partial<Hotel>): Promise<void> => {
-     if (USE_REAL_API) { await apiFetch('/hotels', 'POST', hotel, adminToken); return; }
-     if (hotel.id) await update('hotels', hotel.id, hotel);
-     else await insert('hotels', { ...hotel, id: `hotel_${Date.now()}` });
-};
-export const deleteHotel = async (adminToken: string, id: string): Promise<void> => { 
-    if (USE_REAL_API) await apiFetch(`/hotels/${id}`, 'DELETE', undefined, adminToken);
-    else await remove('hotels', id); 
-};
-export const getRoomsForHotel = async (adminToken: string, hotelId: string): Promise<HotelRoom[]> => {
-    if (USE_REAL_API) return []; 
-    return (await findAll('hotelRooms', (r: any) => r.hotelId === hotelId)) as HotelRoom[];
-};
-// New: Batch generate rooms
-export const generateHotelRooms = async (adminToken: string, hotelId: string, roomTypeId: string, count: number, startNumber: number): Promise<void> => {
-    if (!USE_REAL_API) {
-        for (let i = 0; i < count; i++) {
-            const roomNum = startNumber + i;
-            // Check duplicate
-            const exists = await find('hotelRooms', (r: any) => r.hotelId === hotelId && r.roomNumber === String(roomNum));
-            if (!exists) {
-                await insert('hotelRooms', {
-                    id: `hr_${Date.now()}_${i}`,
-                    hotelId,
-                    roomTypeId,
-                    roomNumber: String(roomNum),
-                    status: 'Available'
-                });
-            }
-        }
-    }
-};
-
-// New: Get available rooms for assignment
-export const getAvailableRooms = async (adminToken: string, hotelId: string, roomTypeId: string): Promise<HotelRoom[]> => {
-    if (!USE_REAL_API) {
-        return findAll('hotelRooms', (r: any) => r.hotelId === hotelId && r.roomTypeId === roomTypeId && r.status === 'Available');
-    }
-    return [];
-};
-
-// New: Assign specific room
-export const assignRoomToBooking = async (adminToken: string, bookingId: string, hotelRoomId: string): Promise<void> => {
-    if (!USE_REAL_API) {
-        const booking = await find('accommodationBookings', (b: any) => b.id === bookingId);
-        if (!booking) throw new Error("Booking not found");
-        
-        // 1. Free up old room if exists
-        if (booking.hotelRoomId && booking.hotelRoomId !== 'assigned_later') {
-             await update('hotelRooms', booking.hotelRoomId, { status: 'Available' });
-        }
-
-        // 2. Assign new room
-        await update('accommodationBookings', bookingId, { hotelRoomId, status: 'CheckedIn' });
-        await update('hotelRooms', hotelRoomId, { status: 'Occupied' });
-    }
-};
-
-export const updateRoomStatus = async (adminToken: string, roomId: string, status: HotelRoomStatus): Promise<void> => { 
-    if (!USE_REAL_API) await update('hotelRooms', roomId, { status }); 
-};
-export const bookAccommodation = async (delegateToken: string, hotelId: string, roomTypeId: string, checkInDate: string, checkOutDate: string): Promise<void> => {
-    if (USE_REAL_API) { await apiFetch('/accommodation/book', 'POST', { hotelId, roomTypeId, checkInDate, checkOutDate }, delegateToken); return; }
-    const payload = JSON.parse(atob(delegateToken));
-    await removeWhere('accommodationBookings', (b: any) => b.delegateId === payload.id);
-    await insert('accommodationBookings', { id: `bk_${Date.now()}`, delegateId: payload.id, hotelId, roomTypeId, hotelRoomId: 'assigned_later', checkInDate, checkOutDate, status: 'Confirmed', totalCost: 0 });
-};
-export const updateBookingStatus = async (adminToken: string, bookingId: string, status: AccommodationBookingStatus): Promise<void> => {
-    if (USE_REAL_API) { await apiFetch(`/admin/accommodation/bookings/${bookingId}/status`, 'PUT', { status }, adminToken); return; }
-    const booking: any = await update('accommodationBookings', bookingId, { status });
-    if (booking && booking.hotelRoomId && booking.hotelRoomId !== 'assigned_later') {
-        let newRoomStatus: HotelRoomStatus | undefined;
-        if (status === 'CheckedIn') newRoomStatus = 'Occupied';
-        else if (status === 'CheckedOut') newRoomStatus = 'Cleaning';
-        else if (status === 'Confirmed') newRoomStatus = 'Available';
-        if (newRoomStatus) await update('hotelRooms', booking.hotelRoomId, { status: newRoomStatus });
-    }
-};
-export const getAccommodationBookings = async (adminToken: string): Promise<EnrichedAccommodationBooking[]> => {
-    if (USE_REAL_API) return await apiFetch('/admin/accommodation/bookings', 'GET', undefined, adminToken);
-    const bookings = await findAll('accommodationBookings') as AccommodationBooking[];
-    const enriched: EnrichedAccommodationBooking[] = [];
-    for (const b of bookings) {
-        const user = await find('registrations', (r: any) => r.id === b.delegateId);
-        const hotel = await find('hotels', (h: any) => h.id === b.hotelId);
-        const roomType = hotel?.roomTypes?.find((rt: any) => rt.id === b.roomTypeId);
-        
-        // Lookup real room number
-        let roomNumber = 'Pending';
-        if (b.hotelRoomId && b.hotelRoomId !== 'assigned_later') {
-            const room = await find('hotelRooms', (r: any) => r.id === b.hotelRoomId);
-            if (room) roomNumber = room.roomNumber;
-        }
-        
-        enriched.push({ ...b, delegateName: user?.name || 'Unknown', delegateEmail: user?.email || 'Unknown', hotelName: hotel?.name || 'Unknown', roomTypeName: roomType?.name || 'Unknown', roomNumber });
+export const getReservationsForRestaurant = async (adminToken: string, restaurantId: string) => {
+    const res = await findAll('diningReservations', (r: any) => r.restaurantId === restaurantId);
+    // Enrich with delegate names
+    const enriched = [];
+    for (const r of res) {
+        const user = await find('registrations', (u: any) => u.id === r.delegateId);
+        enriched.push({ ...r, delegateName: user?.name || 'Unknown', delegateEmail: user?.email });
     }
     return enriched;
 };
 
-// --- EventCoin ---
-export const getEventCoinStats = async (adminToken: string): Promise<EventCoinStats> => {
-    if (USE_REAL_API) {
-        const stats = await apiFetch<any>('/admin/dashboard-stats', 'GET', undefined, adminToken);
-        return { totalTransactions: 0, totalCirculation: stats.eventCoinCirculation, activeWallets: 0 };
-    }
-    const transactions = await findAll('transactions');
-    const totalCirculation = transactions.reduce((acc: number, t: any) => acc + t.amount, 0);
-    const uniqueWallets = new Set([...transactions.map((t:any) => t.fromId), ...transactions.map((t:any) => t.toId)]).size;
-    return { totalTransactions: transactions.length, totalCirculation, activeWallets: uniqueWallets };
+export const createAdminDiningReservation = async (adminToken: string, data: Partial<DiningReservation>) => {
+    return insert('diningReservations', { ...data, id: `res_${Date.now()}` });
 };
-export const getAllTransactions = async (adminToken: string): Promise<Transaction[]> => {
-    if (USE_REAL_API) return []; 
-    return findAll('transactions');
-};
+export const deleteDiningReservation = async (adminToken: string, id: string) => remove('diningReservations', id);
 
-export const issueEventCoins = async (adminToken: string, recipientEmail: string, amount: number, message: string): Promise<void> => {
-    if (USE_REAL_API) { await apiFetch('/admin/wallet/transaction', 'POST', { recipientEmail, amount, message }, adminToken); return; }
+export const recordMealConsumption = async (adminToken: string, delegateId: string, mealType: MealType) => {
+    // Check if already consumed today
+    const today = new Date().toISOString().split('T')[0];
+    const existing = await find('mealConsumptionLogs', (l: any) => l.delegateId === delegateId && l.mealType === mealType && l.date === today);
+    if (existing) return { success: false, message: "Already consumed this meal today." };
     
-    // Mock implementation
-    const recipient = await find('registrations', (r: any) => r.email === recipientEmail);
-    if (!recipient) throw new Error("User not found");
+    await insert('mealConsumptionLogs', {
+        id: `log_${Date.now()}`,
+        delegateId,
+        mealType,
+        date: today,
+        timestamp: Date.now()
+    });
+    return { success: true, message: "Meal recorded successfully." };
+};
 
-    if (amount > 0) {
-         await insert('transactions', {
-            id: `tx_adm_${Date.now()}`,
-            fromId: 'system', fromName: 'System (Admin)', fromEmail: 'system',
-            toId: recipient.id, toName: recipient.name, toEmail: recipientEmail,
-            amount: amount,
-            message,
-            type: 'admin_adjustment',
-            timestamp: Date.now()
-         });
-    } else {
-        // Check balance for deduction
-        const txs = await findAll('transactions', (t: any) => t.fromId === recipient.id || t.toId === recipient.id);
-        let balance = 0;
-        for (const tx of txs) {
-            if (tx.toId === recipient.id) balance += parseFloat(tx.amount);
-            if (tx.fromId === recipient.id) balance -= parseFloat(tx.amount);
-        }
-        if (balance < Math.abs(amount)) throw new Error("Insufficient funds for deduction");
+// --- Accommodation ---
 
-        await insert('transactions', {
-            id: `tx_adm_${Date.now()}`,
-            fromId: recipient.id, fromName: recipient.name, fromEmail: recipientEmail,
-            toId: 'system', toName: 'System (Admin)', toEmail: 'system',
-            amount: Math.abs(amount),
-            message,
-            type: 'admin_adjustment',
-            timestamp: Date.now()
-         });
+export const getHotels = async (token: string) => findAll('hotels');
+export const saveHotel = async (adminToken: string, hotel: Partial<Hotel>) => {
+    if (hotel.id) return update('hotels', hotel.id, hotel);
+    return insert('hotels', { ...hotel, id: `hotel_${Date.now()}` });
+};
+export const deleteHotel = async (adminToken: string, id: string) => remove('hotels', id);
+
+export const generateHotelRooms = async (adminToken: string, hotelId: string, roomTypeId: string, count: number, startNumber: number) => {
+    for (let i = 0; i < count; i++) {
+        await insert('hotelRooms', {
+            id: `room_${Date.now()}_${i}`,
+            hotelId,
+            roomTypeId,
+            roomNumber: (startNumber + i).toString(),
+            status: 'Available'
+        });
     }
 };
 
-// --- Delegate Wallet ---
-export const getDelegateTransactions = async (delegateToken: string): Promise<Transaction[]> => {
-    if (USE_REAL_API) {
-        const res = await apiFetch<{transactions: Transaction[]}>('/delegate/wallet', 'GET', undefined, delegateToken);
-        return res.transactions;
-    }
-    const payload = verifyToken(delegateToken);
-    if (!payload) throw new Error("Invalid");
-    const transactions = (await findAll('transactions', (t: any) => t.fromId === payload.id || t.toId === payload.id)) as Transaction[];
-    return transactions.sort((a, b) => b.timestamp - a.timestamp);
+export const getAvailableRooms = async (adminToken: string, hotelId: string, roomTypeId: string) => {
+    // Find rooms that are 'Available' AND not currently booked in active bookings
+    return findAll('hotelRooms', (r: any) => r.hotelId === hotelId && r.roomTypeId === roomTypeId && r.status === 'Available');
 };
 
-export const getDelegateBalance = async (delegateToken: string): Promise<{ balance: number, currencyName: string }> => {
-    if (USE_REAL_API) {
-        const res = await apiFetch<{balance: number, currencyName: string}>('/delegate/wallet', 'GET', undefined, delegateToken);
-        return res;
+export const getAccommodationBookings = async (adminToken: string) => {
+    const bookings = await findAll('accommodationBookings');
+    const enriched: EnrichedAccommodationBooking[] = [];
+    for (const b of bookings) {
+        const user = await find('registrations', (u: any) => u.id === b.delegateId);
+        const hotel = await find('hotels', (h: any) => h.id === b.hotelId);
+        const roomType = hotel?.roomTypes.find((rt: any) => rt.id === b.roomTypeId);
+        const room = b.hotelRoomId ? await find('hotelRooms', (r: any) => r.id === b.hotelRoomId) : null;
+        
+        enriched.push({
+            ...b,
+            delegateName: user?.name || 'Unknown',
+            delegateEmail: user?.email,
+            hotelName: hotel?.name || 'Unknown',
+            roomTypeName: roomType?.name || 'Unknown',
+            roomNumber: room?.roomNumber || 'Pending'
+        });
     }
-    const payload = verifyToken(delegateToken);
-    if (!payload) throw new Error("Invalid");
-    const transactions = (await findAll('transactions', (t: any) => t.fromId === payload.id || t.toId === payload.id)) as Transaction[];
+    return enriched;
+};
+
+export const updateBookingStatus = async (adminToken: string, id: string, status: AccommodationBookingStatus) => {
+    await update('accommodationBookings', id, { status });
+};
+
+export const assignRoomToBooking = async (adminToken: string, bookingId: string, roomId: string) => {
+    await update('accommodationBookings', bookingId, { hotelRoomId: roomId, status: 'CheckedIn' });
+    await update('hotelRooms', roomId, { status: 'Occupied' });
+};
+
+// --- Economy ---
+
+export const getEventCoinStats = async (adminToken: string): Promise<EventCoinStats> => {
+    const txs = await findAll('transactions');
+    const circulation = txs.reduce((acc: number, tx: any) => {
+        // Simplified circulation logic: sum of 'initial' or 'purchase' or 'reward' minus 'burns' (not implemented)
+        if (['initial', 'purchase', 'reward', 'admin_adjustment'].includes(tx.type)) return acc + tx.amount;
+        return acc;
+    }, 0);
+    const activeWallets = new Set(txs.map((tx: any) => tx.fromId).concat(txs.map((tx: any) => tx.toId))).size;
+    return { totalCirculation: circulation, totalTransactions: txs.length, activeWallets };
+};
+
+export const getAllTransactions = async (adminToken: string) => findAll('transactions');
+
+export const issueEventCoins = async (adminToken: string, email: string, amount: number, message: string) => {
+    const user = await find('registrations', (r: any) => r.email === email);
+    if (!user) throw new Error("User not found");
+    
+    await insert('transactions', {
+        id: `tx_${Date.now()}`,
+        fromId: 'system', fromName: 'System', fromEmail: 'system',
+        toId: user.id, toName: user.name, toEmail: user.email,
+        amount, message, type: 'admin_adjustment', timestamp: Date.now()
+    });
+};
+
+// --- Delegate Portal Functions ---
+
+export const getDelegateProfile = async (token: string) => {
+    const payload = verifyToken(token);
+    if (!payload) throw new Error("Invalid token");
+    
+    const user = await find('registrations', (r: any) => r.id === payload.id);
+    const mealPlanAssign = await find('mealPlanAssignments', (a: any) => a.delegateId === payload.id);
+    const booking = await find('accommodationBookings', (b: any) => b.delegateId === payload.id);
+    const sessions = await findAll('sessions'); // Could optimize
+    const mySelection = await findAll('agendaSelections', (s: any) => s.delegateId === payload.id);
+    const mySessionIds = mySelection.map((s: any) => s.sessionId);
+    const speakers = await findAll('speakers');
+    const sponsors = await findAll('sponsors');
+    const hotels = await findAll('hotels');
+    const restaurants = await findAll('restaurants');
+
+    return {
+        user,
+        mealPlanAssignment: mealPlanAssign,
+        restaurants,
+        accommodationBooking: booking,
+        hotels,
+        sessions,
+        mySessionIds,
+        speakers,
+        sponsors
+    };
+};
+
+export const updateDelegateProfile = async (token: string, data: Partial<RegistrationData>) => {
+    const payload = verifyToken(token);
+    if (!payload) throw new Error("Invalid token");
+    return update('registrations', payload.id, data);
+};
+
+export const getDelegateBalance = async (token: string) => {
+    const payload = verifyToken(token);
+    if (!payload) throw new Error("Invalid token");
+    
+    const txs = await findAll('transactions', (t: any) => t.fromId === payload.id || t.toId === payload.id);
     let balance = 0;
-    for (const tx of transactions) {
+    txs.forEach((tx: any) => {
         if (tx.toId === payload.id) balance += tx.amount;
-        else if (tx.fromId === payload.id) balance -= tx.amount;
-    }
+        if (tx.fromId === payload.id) balance -= tx.amount;
+    });
+    
     const config = await getEventConfig();
     return { balance, currencyName: config.eventCoin.name };
 };
 
-export const sendCoins = async (delegateToken: string, recipientEmail: string, amount: number, message: string): Promise<void> => {
-    if (USE_REAL_API) { await apiFetch('/delegate/wallet/send', 'POST', { recipientEmail, amount, message }, delegateToken); return; }
-    const payload = verifyToken(delegateToken);
-    if (!payload) throw new Error("Invalid");
-    if (amount <= 0) throw new Error("Amount must be positive.");
-    const senderBalance = (await getDelegateBalance(delegateToken)).balance;
-    if (senderBalance < amount) throw new Error("Insufficient funds.");
-    const sender = await find('registrations', (r: any) => r.id === payload.id);
-    const recipient = await find('registrations', (r: any) => r.email === recipientEmail && r.eventId === payload.eventId);
-    if (!recipient) throw new Error("Recipient not found.");
-    if (recipient.id === payload.id) throw new Error("Cannot send coins to yourself.");
-    await insert('transactions', { id: `tx_${Date.now()}`, fromId: payload.id, fromName: sender.name, fromEmail: sender.email, toId: recipient.id, toName: recipient.name, toEmail: recipient.email, amount, message, type: 'p2p', timestamp: Date.now() });
+export const getDelegateTransactions = async (token: string) => {
+    const payload = verifyToken(token);
+    if (!payload) throw new Error("Invalid token");
+    return findAll('transactions', (t: any) => t.fromId === payload.id || t.toId === payload.id);
 };
 
-// --- Purchase (Real API Call) ---
-export const purchaseEventCoins = async (delegateToken: string, amount: number, cost: number): Promise<void> => {
-    if (USE_REAL_API) {
-        await apiFetch('/payments/purchase', 'POST', { amount, cost, paymentMethodId: 'pm_card_visa' }, delegateToken);
-        return;
+export const sendCoins = async (token: string, recipientEmail: string, amount: number, message: string) => {
+    const payload = verifyToken(token);
+    if (!payload) throw new Error("Invalid token");
+    
+    const sender = await find('registrations', (r: any) => r.id === payload.id);
+    const recipient = await find('registrations', (r: any) => r.email === recipientEmail);
+    if (!recipient) throw new Error("Recipient not found");
+    
+    // Check balance
+    const { balance } = await getDelegateBalance(token);
+    if (balance < amount) throw new Error("Insufficient funds");
+    
+    await insert('transactions', {
+        id: `tx_${Date.now()}`,
+        fromId: sender.id, fromName: sender.name, fromEmail: sender.email,
+        toId: recipient.id, toName: recipient.name, toEmail: recipient.email,
+        amount, message, type: 'p2p', timestamp: Date.now()
+    });
+};
+
+export const purchaseEventCoins = async (token: string, amount: number, price: number) => {
+    const payload = verifyToken(token);
+    if (!payload) throw new Error("Invalid token");
+    const user = await find('registrations', (r: any) => r.id === payload.id);
+    
+    await insert('transactions', {
+        id: `tx_${Date.now()}`,
+        fromId: 'payment_gateway', fromName: 'Top Up', fromEmail: 'system',
+        toId: user.id, toName: user.name, toEmail: user.email,
+        amount, message: `Purchased for $${price}`, type: 'purchase', timestamp: Date.now()
+    });
+};
+
+export const addToAgenda = async (token: string, sessionId: string) => {
+    const payload = verifyToken(token);
+    if (!payload) throw new Error("Invalid token");
+    await insert('agendaSelections', { id: `sel_${Date.now()}`, delegateId: payload.id, sessionId });
+};
+
+export const removeFromAgenda = async (token: string, sessionId: string) => {
+    const payload = verifyToken(token);
+    if (!payload) throw new Error("Invalid token");
+    await removeWhere('agendaSelections', (s: any) => s.delegateId === payload.id && s.sessionId === sessionId);
+};
+
+export const submitSessionFeedback = async (token: string, sessionId: string, rating: number, comment: string) => {
+    const payload = verifyToken(token);
+    if (!payload) throw new Error("Invalid token");
+    await insert('sessionFeedback', { id: `fb_${Date.now()}`, sessionId, userId: payload.id, rating, comment, timestamp: Date.now() });
+};
+
+export const assignMealPlan = async (token: string, mealPlanId: string, startDate: string, endDate: string) => {
+    const payload = verifyToken(token);
+    if (!payload) throw new Error("Invalid token");
+    // Remove existing
+    await removeWhere('mealPlanAssignments', (a: any) => a.delegateId === payload.id);
+    await insert('mealPlanAssignments', { id: `mpa_${Date.now()}`, delegateId: payload.id, mealPlanId, startDate, endDate });
+};
+
+export const bookAccommodation = async (token: string, hotelId: string, roomTypeId: string, checkInDate: string, checkOutDate: string) => {
+    const payload = verifyToken(token);
+    if (!payload) throw new Error("Invalid token");
+    // Remove existing
+    await removeWhere('accommodationBookings', (b: any) => b.delegateId === payload.id);
+    await insert('accommodationBookings', { id: `bk_${Date.now()}`, delegateId: payload.id, hotelId, roomTypeId, checkInDate, checkOutDate, status: 'Confirmed' });
+};
+
+export const makeDiningReservation = async (token: string, restaurantId: string, reservationTime: string, partySize: number) => {
+    const payload = verifyToken(token);
+    if (!payload) throw new Error("Invalid token");
+    await insert('diningReservations', { id: `res_${Date.now()}`, delegateId: payload.id, restaurantId, reservationTime, partySize });
+};
+
+// --- Networking & Gamification ---
+
+export const getMyNetworkingProfile = async (token: string) => {
+    const payload = verifyToken(token);
+    if (!payload) throw new Error("Invalid token");
+    return find('networkingProfiles', (p: any) => p.userId === payload.id);
+};
+
+export const updateNetworkingProfile = async (token: string, data: Partial<NetworkingProfile>) => {
+    const payload = verifyToken(token);
+    if (!payload) throw new Error("Invalid token");
+    
+    const existing = await getMyNetworkingProfile(token);
+    if (existing) {
+        await updateWhere('networkingProfiles', (p: any) => p.userId === payload.id, data);
+    } else {
+        await insert('networkingProfiles', { userId: payload.id, ...data });
+    }
+};
+
+export const getNetworkingCandidates = async (token: string) => {
+    const payload = verifyToken(token);
+    if (!payload) throw new Error("Invalid token");
+    
+    const myProfile = await getMyNetworkingProfile(token);
+    const allCandidates = await findAll('networkingProfiles', (p: any) => p.userId !== payload.id && p.isVisible);
+    
+    // Use Gemini to match
+    const matches = await generateNetworkingMatches(myProfile, allCandidates);
+    
+    // Enrich matches with names
+    for (const m of matches) {
+        const user = await find('registrations', (r: any) => r.id === m.userId);
+        m.name = user?.name || 'Anonymous';
+        m.profile = allCandidates.find((c: any) => c.userId === m.userId);
     }
     
-    // Mock fallback
-    const payload = verifyToken(delegateToken);
-    if (!payload) throw new Error("Invalid");
-    const user = await find('registrations', (r: any) => r.id === payload.id);
-    await new Promise(resolve => setTimeout(resolve, 1500));
-    await insert('transactions', { id: `tx_purchase_${Date.now()}`, fromId: 'payment_gateway', fromName: 'Credit Card Top-up', fromEmail: 'stripe-sim@example.com', toId: payload.id, toName: user.name, toEmail: user.email, amount: amount, message: `Purchase of ${amount} Coins`, type: 'purchase', timestamp: Date.now() });
+    return { matches, allCandidates };
 };
 
-// --- Calendar Export ---
-export const downloadSessionIcs = async (sessionId: string): Promise<void> => {
-    if (USE_REAL_API) {
-        // Redirect to backend endpoint which handles download
-        window.location.href = `${API_BASE_URL}/sessions/${sessionId}/ics`;
-        return;
-    }
+export const getScavengerHuntItems = async (token: string) => findAll('scavengerHuntItems');
+export const saveScavengerHuntItem = async (token: string, item: any) => {
+    if (item.id) return update('scavengerHuntItems', item.id, item);
+    return insert('scavengerHuntItems', { ...item, id: `hunt_${Date.now()}` });
+};
+export const deleteScavengerHuntItem = async (token: string, id: string) => remove('scavengerHuntItems', id);
 
-    // Client-side generation fallback
-    const session = await find('sessions', (s: any) => s.id === sessionId);
-    if (!session) throw new Error("Session not found");
+export const getScavengerHuntProgress = async (token: string) => {
+    const payload = verifyToken(token);
+    if (!payload) throw new Error("Invalid token");
+    const logs = await findAll('scavengerHuntLogs', (l: any) => l.userId === payload.id);
+    return logs.map((l: any) => l.itemId);
+};
 
-    const formatDate = (dateStr: string) => new Date(dateStr).toISOString().replace(/[-:]/g, '').split('.')[0] + 'Z';
+export const claimScavengerHuntItem = async (token: string, secretCode: string) => {
+    const payload = verifyToken(token);
+    if (!payload) throw new Error("Invalid token");
+    
+    const item = await find('scavengerHuntItems', (i: any) => i.secretCode === secretCode);
+    if (!item) return { success: false, message: "Invalid Code" };
+    
+    const existing = await find('scavengerHuntLogs', (l: any) => l.userId === payload.id && l.itemId === item.id);
+    if (existing) return { success: false, message: "Already claimed!" };
+    
+    await insert('scavengerHuntLogs', { id: `claim_${Date.now()}`, userId: payload.id, itemId: item.id, timestamp: Date.now() });
+    
+    // Award Coins
+    await insert('transactions', {
+        id: `tx_reward_${Date.now()}`,
+        fromId: 'system', fromName: 'Scavenger Hunt', fromEmail: 'system',
+        toId: payload.id, toName: 'User', toEmail: 'user@email', // Simplified
+        amount: item.rewardAmount, message: `Found ${item.name}`, type: 'reward', timestamp: Date.now()
+    });
+    
+    return { success: true, message: `Found ${item.name}! +${item.rewardAmount} Coins` };
+};
 
-    const icsContent = [
-        'BEGIN:VCALENDAR',
-        'VERSION:2.0',
-        'PRODID:-//EventPlatform//NONSGML v1.0//EN',
-        'BEGIN:VEVENT',
-        `UID:${session.id}`,
-        `DTSTAMP:${formatDate(new Date().toISOString())}`,
-        `DTSTART:${formatDate(session.startTime)}`,
-        `DTEND:${formatDate(session.endTime)}`,
-        `SUMMARY:${session.title}`,
-        `DESCRIPTION:${session.description || ''}`,
-        `LOCATION:${session.location || ''}`,
-        'END:VEVENT',
-        'END:VCALENDAR'
-    ].join('\r\n');
+export const getScavengerHuntLeaderboard = async (token: string) => {
+    const logs = await findAll('scavengerHuntLogs');
+    const items = await findAll('scavengerHuntItems');
+    const users = await findAll('registrations'); // To get names
+    
+    const scores: Record<string, { score: number, items: number }> = {};
+    
+    logs.forEach((log: any) => {
+        const item = items.find((i: any) => i.id === log.itemId);
+        if (!item) return;
+        if (!scores[log.userId]) scores[log.userId] = { score: 0, items: 0 };
+        scores[log.userId].score += item.rewardAmount;
+        scores[log.userId].items += 1;
+    });
+    
+    return Object.entries(scores)
+        .map(([userId, stats]) => ({
+            userId,
+            name: users.find((u: any) => u.id === userId)?.name || 'Unknown',
+            score: stats.score,
+            itemsFound: stats.items
+        }))
+        .sort((a, b) => b.score - a.score)
+        .slice(0, 10);
+};
 
-    const blob = new Blob([icsContent], { type: 'text/calendar;charset=utf-8' });
-    const link = document.createElement('a');
-    link.href = URL.createObjectURL(blob);
-    link.download = `${session.title.replace(/[^a-z0-9]/gi, '_')}.ics`;
-    document.body.appendChild(link);
-    link.click();
-    document.body.removeChild(link);
+// --- AI Context & Media ---
+
+export const getEventContextForAI = async (token: string) => {
+    // Build a text context for the chatbot
+    const config = await getEventConfig();
+    const sessions = await findAll('sessions');
+    const speakers = await findAll('speakers');
+    
+    return `
+        You are the virtual concierge for ${config.event.name}.
+        Event Date: ${config.event.date}. Location: ${config.event.location}.
+        Description: ${config.event.description}.
+        
+        Agenda Highlights:
+        ${sessions.map((s: any) => `- ${s.title} at ${s.startTime} in ${s.location}`).join('\n')}
+        
+        Speakers: ${speakers.map((s: any) => s.name).join(', ')}.
+        
+        Answer questions helpfully and briefly.
+    `;
+};
+
+export const getMediaLibrary = async (token: string) => findAll('media');
+export const uploadFile = uploadFileToStorage;
+export const generateImage = generateImageAI;
+export { generateAiContent };
+export const deleteMedia = async (token: string, id: string) => remove('media', id);
+
+// --- System ---
+
+export const getDatabaseSchema = async (token: string) => {
+    return `
+        -- In-Memory Schema Representation --
+        Users (id, email, passwordHash, roleId)
+        Registrations (id, eventId, name, email, ...)
+        Events (id, name, config)
+        Sessions, Speakers, Sponsors...
+        Transactions, Bookings, etc.
+    `;
+};
+
+export const generateSqlExport = async (token: string) => {
+    return "-- SQL Export Not Implemented in Mock Mode --";
 };

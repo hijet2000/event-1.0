@@ -1,7 +1,7 @@
 
 import React, { useState, useEffect, useMemo } from 'react';
 import { type RegistrationData, type EventConfig, Permission } from '../types';
-import { getRegistrations, getEventConfig, updateRegistrationStatus, deleteAdminRegistration } from '../server/api';
+import { getRegistrations, getEventConfig, updateRegistrationStatus, deleteAdminRegistration, verifyTicketToken } from '../server/api';
 import { ContentLoader } from './ContentLoader';
 import { DelegateDetailView } from './DelegateDetailView';
 import { BulkImportModal } from './BulkImportModal';
@@ -108,37 +108,26 @@ export const RegistrationsDashboard: React.FC<RegistrationsDashboardProps> = ({ 
       }
   };
 
-  const handleScan = async (data: string) => {
+  const handleScan = async (token: string) => {
     setIsScannerOpen(false);
     setScanStatus(null);
     
-    // Assuming QR code contains the registration ID
-    const registrationId = data;
-    const registration = registrations.find(r => r.id === registrationId);
-
-    if (!registration) {
-      setScanStatus({ type: 'error', message: `Registration not found for ID: ${registrationId}` });
-      return;
-    }
-
-    if (registration.checkedIn) {
-      setScanStatus({ type: 'error', message: `${registration.name} is already checked in.` });
-      return;
-    }
-
-    // Optimistic update
-    const originalRegistrations = [...registrations];
-    setRegistrations(prev => prev.map(r => r.id === registrationId ? { ...r, checkedIn: true } : r));
-    setScanStatus({ type: 'success', message: `Successfully checked in ${registration.name}.` });
-    setTimeout(() => setScanStatus(null), 4000);
-
+    // Call verification endpoint
     try {
-      await updateRegistrationStatus(adminToken, 'main-event', registrationId, { checkedIn: true });
-    } catch (error) {
-      // Revert on error
-      setScanStatus({ type: 'error', message: 'Failed to save check-in status to the server.' });
-      setRegistrations(originalRegistrations);
+        const result = await verifyTicketToken(adminToken, token);
+        
+        if (result.success) {
+             // Update local state for immediate feedback
+             setRegistrations(prev => prev.map(r => r.id === result.user.id ? { ...r, checkedIn: true } : r));
+             setScanStatus({ type: 'success', message: result.message });
+        } else {
+             setScanStatus({ type: 'error', message: result.message });
+        }
+    } catch (e) {
+        setScanStatus({ type: 'error', message: "Verification failed. Please try again." });
     }
+    
+    setTimeout(() => setScanStatus(null), 4000);
   };
 
   const handleExportCSV = () => {

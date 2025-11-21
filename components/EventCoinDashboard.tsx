@@ -183,13 +183,13 @@ export const EventCoinDashboard: React.FC<EventCoinDashboardProps> = ({ adminTok
     const [successMsg, setSuccessMsg] = useState<string | null>(null);
 
     // Live Queries
-    const { data: stats, isLoading: statsLoading, error: statsError, refresh: refreshStats } = useLiveQuery(
+    const { data: stats, isLoading: statsLoading, error: statsError, refresh: refreshStats } = useLiveQuery<EventCoinStats>(
         () => getEventCoinStats(adminToken),
         ['transactions'],
         [adminToken]
     );
 
-    const { data: transactions, isLoading: txLoading, error: txError, refresh: refreshTx } = useLiveQuery(
+    const { data: transactions, isLoading: txLoading, error: txError, refresh: refreshTx } = useLiveQuery<Transaction[]>(
         () => getAllTransactions(adminToken),
         ['transactions'],
         [adminToken]

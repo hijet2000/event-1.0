@@ -1,6 +1,8 @@
-import React, { useState } from 'react';
+
+import React, { useState, useEffect } from 'react';
 import { type RegistrationData } from '../types';
 import { useTheme } from '../contexts/ThemeContext';
+import { getSignedTicketToken } from '../server/api';
 import { jsPDF } from 'jspdf';
 import { Spinner } from './Spinner';
 
@@ -28,13 +30,31 @@ const getBase64ImageFromUrl = async (imageUrl: string): Promise<string> => {
 export const EventPassView: React.FC<EventPassViewProps> = ({ user }) => {
   const { config } = useTheme();
   const [isGenerating, setIsGenerating] = useState(false);
+  const [ticketToken, setTicketToken] = useState<string | null>(null);
+
+  useEffect(() => {
+      // Fetch the secure token when component mounts
+      const loadToken = async () => {
+          const delegateToken = localStorage.getItem('delegateToken');
+          if (delegateToken) {
+              try {
+                  const token = await getSignedTicketToken(delegateToken);
+                  setTicketToken(token);
+              } catch (e) {
+                  console.error("Failed to load ticket token", e);
+              }
+          }
+      };
+      loadToken();
+  }, []);
 
   if (!user || !user.id) {
     return <p>Could not load your event pass. Please try again later.</p>;
   }
 
-  // Generate the same QR code URL as the backend
-  const qrCodeUrl = `https://api.qrserver.com/v1/create-qr-code/?size=250x250&data=${user.id}`;
+  // Use signed token if available, otherwise fallback to ID (for mock mode)
+  const qrData = ticketToken || user.id;
+  const qrCodeUrl = `https://api.qrserver.com/v1/create-qr-code/?size=250x250&data=${encodeURIComponent(qrData)}`;
 
   const handleDownloadPDF = async () => {
       if (!config) return;
@@ -125,13 +145,25 @@ export const EventPassView: React.FC<EventPassViewProps> = ({ user }) => {
         <p className="text-lg font-semibold text-gray-900 dark:text-white">{user.name}</p>
         <p className="text-sm text-gray-500 mb-4">{user.email}</p>
         
-        <div className="bg-white p-2 rounded-lg shadow-sm">
-             <img src={qrCodeUrl} alt="Your Event QR Code" className="w-64 h-64 rounded-md" />
+        <div className="bg-white p-2 rounded-lg shadow-sm relative">
+             {ticketToken ? (
+                 <img src={qrCodeUrl} alt="Your Event QR Code" className="w-64 h-64 rounded-md" />
+             ) : (
+                 <div className="w-64 h-64 flex items-center justify-center bg-gray-100 rounded-md">
+                     <Spinner />
+                 </div>
+             )}
+             {/* Secure Badge Overlay */}
+             <div className="absolute -bottom-3 -right-3 bg-green-500 text-white p-1.5 rounded-full shadow-md" title="Verified Secure">
+                 <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" viewBox="0 0 20 20" fill="currentColor">
+                    <path fillRule="evenodd" d="M2.166 10.324l.912-5.651A1.518 1.518 0 014.511 3.52h10.978a1.518 1.518 0 011.433 1.154l.912 5.651a6.942 6.942 0 01-1.434 5.397l-4.9 5.926a1.518 1.518 0 01-2.313 0l-4.9-5.926a6.942 6.942 0 01-1.434-5.397zM10 14a4 4 0 100-8 4 4 0 000 8z" clipRule="evenodd" />
+                 </svg>
+             </div>
         </div>
 
         <button
             onClick={handleDownloadPDF}
-            disabled={isGenerating}
+            disabled={isGenerating || !ticketToken}
             className="mt-6 flex items-center px-6 py-3 bg-primary hover:bg-primary/90 text-white font-medium rounded-md shadow-md transition-colors disabled:opacity-70"
         >
             {isGenerating ? (
@@ -150,9 +182,9 @@ export const EventPassView: React.FC<EventPassViewProps> = ({ user }) => {
         </button>
 
         <div className="mt-6 text-center max-w-md">
-            <h3 className="font-semibold text-gray-800 dark:text-gray-200">How to Use Your Pass</h3>
+            <h3 className="font-semibold text-gray-800 dark:text-gray-200">Secure Entry Pass</h3>
             <p className="text-sm text-gray-600 dark:text-gray-400 mt-2">
-                Present this QR code at event check-in, meal redemption points, and hotel check-in for quick and easy access. This is your all-in-one pass for the event.
+                This QR code contains a cryptographically signed token. It is required for event check-in and meal redemption. Do not share it.
             </p>
         </div>
       </div>
