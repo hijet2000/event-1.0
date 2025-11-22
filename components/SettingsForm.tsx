@@ -1,7 +1,7 @@
 
 import React, { useState, useEffect } from 'react';
 import { type EventConfig, type FormField } from '../types';
-import { getEventConfig, saveConfig, syncConfigFromGitHub, sendTestEmail } from '../server/api';
+import { getEventConfig, saveConfig, syncConfigFromGitHub, sendTestEmail, getSystemApiKey } from '../server/api';
 import { ContentLoader } from './ContentLoader';
 import { Spinner } from './Spinner';
 import { Alert } from './Alert';
@@ -82,6 +82,7 @@ export const SettingsForm: React.FC<SettingsFormProps> = ({ adminToken }) => {
   const [error, setError] = useState<string | null>(null);
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
   const [activeTab, setActiveTab] = useState<Tab>('general');
+  const [apiKey, setApiKey] = useState<string>('');
 
   // Test Email State
   const [testEmailTo, setTestEmailTo] = useState('');
@@ -105,7 +106,10 @@ export const SettingsForm: React.FC<SettingsFormProps> = ({ adminToken }) => {
             .catch(err => setError('Failed to load event settings.'))
             .finally(() => setIsLoading(false));
       }
-  }, [contextConfig, isContextLoading]);
+      
+      // Load API Key if user has permission (simulated)
+      getSystemApiKey(adminToken).then(setApiKey).catch(() => {});
+  }, [contextConfig, isContextLoading, adminToken]);
   
   const handleInputChange = (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement>, section: 'event' | 'host' | 'theme' | 'smtp' | 'githubSync') => {
     if (!config) return;
@@ -684,6 +688,37 @@ export const SettingsForm: React.FC<SettingsFormProps> = ({ adminToken }) => {
                 {/* INTEGRATIONS */}
                 {activeTab === 'integrations' && (
                     <div className="animate-fade-in space-y-6">
+                        {/* Developer API Section */}
+                        <div className="bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 p-6 rounded-xl">
+                             <div className="flex items-center justify-between mb-6">
+                                <div>
+                                    <h3 className="text-lg font-bold">Developer API</h3>
+                                    <p className="text-sm text-gray-500">Use this key to connect your external applications to the platform.</p>
+                                </div>
+                            </div>
+                            <div className="space-y-4">
+                                <div>
+                                    <label className="block text-sm font-medium mb-1">Server API Key</label>
+                                    <div className="flex gap-2">
+                                        <input 
+                                            type="text" 
+                                            value={apiKey || 'Loading...'} 
+                                            readOnly
+                                            className="flex-grow rounded border-gray-300 dark:border-gray-600 p-2 font-mono text-xs bg-gray-50 dark:bg-gray-900" 
+                                        />
+                                        <button 
+                                            type="button"
+                                            onClick={() => navigator.clipboard.writeText(apiKey)}
+                                            className="px-3 py-2 bg-gray-200 dark:bg-gray-700 rounded text-sm"
+                                        >
+                                            Copy
+                                        </button>
+                                    </div>
+                                    <p className="text-xs text-gray-500 mt-2">Include this key in the <code>x-api-key</code> header of your HTTP requests.</p>
+                                </div>
+                            </div>
+                        </div>
+
                         <div className="bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 p-6 rounded-xl">
                              <div className="flex items-center justify-between mb-6">
                                 <div>

@@ -35,6 +35,9 @@ const app = express();
 const port = process.env.PORT || 3001;
 const JWT_SECRET = process.env.JWT_SECRET || 'default-secret-change-me';
 const TICKET_SECRET = process.env.TICKET_SECRET || 'ticket-signing-secret-key'; // Separate secret for tickets
+// This key is used for server-to-server communication (External Apps)
+const SERVER_API_KEY = process.env.SERVER_API_KEY || 'pk_live_12345_generated_secret_key'; 
+
 const IS_PROD = process.env.NODE_ENV === 'production';
 const FRONTEND_URL = process.env.FRONTEND_URL || 'http://localhost:3000';
 
@@ -341,10 +344,23 @@ const runMaintenance = async () => {
 setInterval(runMaintenance, 60 * 60 * 1000);
 
 
-// 3. Authenticate: Verifies JWT from HttpOnly Cookie
+// 3. Authenticate: Verifies JWT from HttpOnly Cookie OR x-api-key Header
 const authenticate = (req: any, res: any, next: NextFunction) => {
+    // 1. Check for API Key (External Server-to-Server access)
+    const apiKey = req.headers['x-api-key'];
+    if (apiKey && apiKey === SERVER_API_KEY) {
+        // Grant Super Admin Access for valid API Key
+        req.user = { 
+            id: 'system_api', 
+            email: 'api@system', 
+            permissions: ['view_dashboard', 'manage_registrations', 'manage_settings', 'manage_users', 'manage_tasks', 'manage_dining', 'manage_accommodation', 'manage_agenda', 'manage_speakers_sponsors', 'view_eventcoin_dashboard', 'send_invitations'], 
+            type: 'admin' 
+        };
+        return next();
+    }
+
+    // 2. Check for Cookie Token (Browser access)
     const token = req.cookies.token;
-    
     if (!token) return res.status(401).json({ message: 'Unauthorized' });
 
     jwt.verify(token, JWT_SECRET, (err: any, user: any) => {
@@ -388,6 +404,12 @@ app.get('/api/health', async (req: any, res: any) => {
         logger.error("Health check failed:", e);
         res.status(503).json({ status: 'error', message: 'Database unavailable', timestamp: Date.now() });
     }
+});
+
+// --- Developer / Integration Endpoints ---
+app.get('/api/admin/api-key', authenticate, requirePermission('manage_settings'), (req: any, res: any) => {
+    // Returns the server API key so admin can copy it for external integrations
+    res.json({ apiKey: SERVER_API_KEY });
 });
 
 // --- Secure Ticket Endpoints ---

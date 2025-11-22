@@ -8,7 +8,7 @@ import {
     EventCoinStats, Transaction, Session, Speaker, Sponsor,
     NetworkingProfile, NetworkingMatch, ScavengerHuntItem, LeaderboardEntry,
     DiningReservation, AccommodationBookingStatus, MealType,
-    SessionFeedback, EmailContent
+    SessionFeedback, EmailContent, HotelRoomStatus
 } from '../types';
 import { 
     find, findAll, insert, update, remove, count, updateWhere, removeWhere 
@@ -199,6 +199,15 @@ export const syncConfigFromGitHub = async (adminToken: string): Promise<EventCon
 export const sendTestEmail = async (adminToken: string, to: string, config: EventConfig) => {
     if (USE_REAL_API) return apiFetch('/admin/test-email', 'POST', { to, config }, adminToken);
     await sendEmail({ to, subject: "Test Email", body: "This is a test." }, config);
+};
+
+export const getSystemApiKey = async (adminToken: string): Promise<string> => {
+    if (USE_REAL_API) {
+        const res = await apiFetch<{ apiKey: string }>('/admin/api-key', 'GET', undefined, adminToken);
+        return res.apiKey;
+    }
+    // In mock mode, return a fake static key
+    return "pk_test_mock_api_key_12345";
 };
 
 // --- Registration ---
@@ -522,9 +531,17 @@ export const generateHotelRooms = async (adminToken: string, hotelId: string, ro
     }
 };
 
+export const getAllRooms = async (adminToken: string, hotelId: string) => {
+    return findAll('hotelRooms', (r: any) => r.hotelId === hotelId);
+}
+
 export const getAvailableRooms = async (adminToken: string, hotelId: string, roomTypeId: string) => {
     // Find rooms that are 'Available' AND not currently booked in active bookings
     return findAll('hotelRooms', (r: any) => r.hotelId === hotelId && r.roomTypeId === roomTypeId && r.status === 'Available');
+};
+
+export const updateRoomStatus = async (adminToken: string, roomId: string, status: HotelRoomStatus) => {
+    await update('hotelRooms', roomId, { status });
 };
 
 export const getAccommodationBookings = async (adminToken: string) => {
@@ -552,9 +569,70 @@ export const updateBookingStatus = async (adminToken: string, id: string, status
     await update('accommodationBookings', id, { status });
 };
 
+export const processCheckOut = async (adminToken: string, bookingId: string) => {
+    const booking = await find('accommodationBookings', (b: any) => b.id === bookingId);
+    if (!booking) throw new Error("Booking not found");
+
+    // 1. Mark Booking as CheckedOut
+    await update('accommodationBookings', bookingId, { status: 'CheckedOut' });
+    
+    // 2. Mark Room as Cleaning
+    if (booking.hotelRoomId) {
+        await update('hotelRooms', booking.hotelRoomId, { status: 'Cleaning' });
+    }
+    return true;
+};
+
 export const assignRoomToBooking = async (adminToken: string, bookingId: string, roomId: string) => {
     await update('accommodationBookings', bookingId, { hotelRoomId: roomId, status: 'CheckedIn' });
     await update('hotelRooms', roomId, { status: 'Occupied' });
+};
+
+export const bookAccommodation = async (token: string, hotelId: string, roomTypeId: string, checkInDate: string, checkOutDate: string) => {
+    const payload = verifyToken(token);
+    if (!payload) throw new Error("Invalid token");
+
+    // STRICT AVAILABILITY CHECK
+    const hotel = await find('hotels', (h: any) => h.id === hotelId);
+    const roomType = hotel.roomTypes.find((rt: any) => rt.id === roomTypeId);
+    
+    if (!roomType) throw new Error("Room type not found");
+
+    // 1. Count total inventory
+    // In a real system, we might query the hotelRooms table, but roomType.totalRooms is our source of truth for capacity in this model
+    const totalCapacity = roomType.totalRooms;
+
+    // 2. Count overlapping bookings
+    const existingBookings = await findAll('accommodationBookings', (b: any) => {
+        if (b.roomTypeId !== roomTypeId) return false;
+        if (b.status === 'CheckedOut') return false; // Ignore completed stays
+        
+        const bStart = new Date(b.checkInDate).getTime();
+        const bEnd = new Date(b.checkOutDate).getTime();
+        const reqStart = new Date(checkInDate).getTime();
+        const reqEnd = new Date(checkOutDate).getTime();
+
+        // Check for overlap
+        return (bStart < reqEnd && bEnd > reqStart);
+    });
+
+    if (existingBookings.length >= totalCapacity) {
+        throw new Error("Sold Out: No rooms available for these dates.");
+    }
+
+    // Remove existing booking for this user if replacing
+    await removeWhere('accommodationBookings', (b: any) => b.delegateId === payload.id);
+    
+    await insert('accommodationBookings', { 
+        id: `bk_${Date.now()}`, 
+        delegateId: payload.id, 
+        hotelId, 
+        roomTypeId, 
+        checkInDate, 
+        checkOutDate, 
+        status: 'Confirmed', 
+        hotelRoomId: null // Assigned at check-in
+    });
 };
 
 // --- Economy ---
@@ -698,14 +776,6 @@ export const assignMealPlan = async (token: string, mealPlanId: string, startDat
     // Remove existing
     await removeWhere('mealPlanAssignments', (a: any) => a.delegateId === payload.id);
     await insert('mealPlanAssignments', { id: `mpa_${Date.now()}`, delegateId: payload.id, mealPlanId, startDate, endDate });
-};
-
-export const bookAccommodation = async (token: string, hotelId: string, roomTypeId: string, checkInDate: string, checkOutDate: string) => {
-    const payload = verifyToken(token);
-    if (!payload) throw new Error("Invalid token");
-    // Remove existing
-    await removeWhere('accommodationBookings', (b: any) => b.delegateId === payload.id);
-    await insert('accommodationBookings', { id: `bk_${Date.now()}`, delegateId: payload.id, hotelId, roomTypeId, checkInDate, checkOutDate, status: 'Confirmed' });
 };
 
 export const makeDiningReservation = async (token: string, restaurantId: string, reservationTime: string, partySize: number) => {
