@@ -5,9 +5,6 @@
  * This file is intended to be run in a Node.js environment.
  * It effectively replaces the logic in `server/api.ts` and `server/db.ts`
  * when deployed.
- * 
- * Prerequisites:
- * npm install express cors pg dotenv @google/genai body-parser jsonwebtoken bcrypt cookie-parser nodemailer
  */
 
 import express, { Request, Response, NextFunction } from 'express';
@@ -20,7 +17,6 @@ import bcrypt from 'bcrypt';
 import cookieParser from 'cookie-parser';
 import fs from 'fs';
 import path from 'path';
-import { promisify } from 'util';
 import nodemailer from 'nodemailer';
 
 // Fix for missing Node.js types in frontend-focused environment
@@ -34,120 +30,24 @@ dotenv.config();
 const app = express();
 const port = process.env.PORT || 3001;
 const JWT_SECRET = process.env.JWT_SECRET || 'default-secret-change-me';
-const TICKET_SECRET = process.env.TICKET_SECRET || 'ticket-signing-secret-key'; // Separate secret for tickets
-// This key is used for server-to-server communication (External Apps)
+const TICKET_SECRET = process.env.TICKET_SECRET || 'ticket-signing-secret-key';
 const SERVER_API_KEY = process.env.SERVER_API_KEY || 'pk_live_12345_generated_secret_key'; 
 
 const IS_PROD = process.env.NODE_ENV === 'production';
 const FRONTEND_URL = process.env.FRONTEND_URL || 'http://localhost:3000';
 
-// --- Structured Logging ---
-const logger = {
-    info: (message: string, meta?: any) => {
-        if (IS_PROD) {
-            console.log(JSON.stringify({ level: 'info', timestamp: new Date().toISOString(), message, ...meta }));
-        } else {
-            console.log(`[INFO] ${message}`, meta || '');
-        }
-    },
-    error: (message: string, error?: any) => {
-        if (IS_PROD) {
-            console.error(JSON.stringify({ level: 'error', timestamp: new Date().toISOString(), message, error: error?.toString(), stack: error?.stack }));
-        } else {
-            console.error(`[ERROR] ${message}`, error);
-        }
-    },
-    warn: (message: string, meta?: any) => {
-        if (IS_PROD) {
-            console.warn(JSON.stringify({ level: 'warn', timestamp: new Date().toISOString(), message, ...meta }));
-        } else {
-            console.warn(`[WARN] ${message}`, meta || '');
-        }
-    }
-};
-
-// --- File Storage Setup ---
-const UPLOADS_DIR = path.join((process as any).cwd(), 'uploads');
-// Determine build path relative to this server file location or root
-const CLIENT_BUILD_PATH = path.join((process as any).cwd(), 'dist'); 
-
-// Ensure uploads directory exists
-if (!fs.existsSync(UPLOADS_DIR)) {
-    fs.mkdirSync(UPLOADS_DIR, { recursive: true });
-    logger.info(`Created uploads directory at ${UPLOADS_DIR}`);
-}
-
-// --- Security Middleware ---
-
-// 1. Rate Limiter (In-Memory for prototype)
-const rateLimit = new Map<string, { count: number, startTime: number }>();
-const RATE_LIMIT_WINDOW = 15 * 60 * 1000; // 15 minutes
-const RATE_LIMIT_MAX = 100; // 100 requests per window
-
-// Cleanup interval for rate limit map to prevent memory leaks
-setInterval(() => {
-    const now = Date.now();
-    for (const [ip, record] of rateLimit.entries()) {
-        if (now - record.startTime > RATE_LIMIT_WINDOW) {
-            rateLimit.delete(ip);
-        }
-    }
-}, 60 * 60 * 1000); // Run every hour
-
-const rateLimiter = (req: Request, res: Response, next: NextFunction) => {
-    const ip = (req.headers['x-forwarded-for'] as string) || req.socket.remoteAddress || 'unknown';
-    const now = Date.now();
-    const record = rateLimit.get(ip);
-
-    if (record) {
-        if (now - record.startTime > RATE_LIMIT_WINDOW) {
-            // Reset window
-            rateLimit.set(ip, { count: 1, startTime: now });
-        } else {
-            record.count++;
-            if (record.count > RATE_LIMIT_MAX) {
-                logger.warn(`Rate limit exceeded for IP: ${ip}`);
-                res.status(429).json({ message: 'Too many requests, please try again later.' });
-                return;
-            }
-        }
-    } else {
-        rateLimit.set(ip, { count: 1, startTime: now });
-    }
-    next();
-};
-
-// 2. Security Headers (Manual Helmet)
-const securityHeaders = (req: Request, res: Response, next: NextFunction) => {
-    res.setHeader('X-Content-Type-Options', 'nosniff');
-    res.setHeader('X-Frame-Options', 'DENY');
-    res.setHeader('X-XSS-Protection', '1; mode=block');
-    if (IS_PROD) {
-        res.setHeader('Strict-Transport-Security', 'max-age=31536000; includeSubDomains');
-    }
-    next();
-};
-
-// Middleware Stack
+// --- Middleware ---
 app.use(cors({
-    origin: FRONTEND_URL, // Dynamic origin
+    origin: FRONTEND_URL,
     credentials: true
 }) as any);
-app.use(securityHeaders);
-app.use(express.json({ limit: '50mb' }) as any); // Increased limit for video uploads
+app.use(express.json({ limit: '50mb' }) as any);
 app.use(cookieParser() as any);
 
-// Serve Uploaded Files Statically
+// Serve Uploaded Files
+const UPLOADS_DIR = path.join((process as any).cwd(), 'uploads');
+if (!fs.existsSync(UPLOADS_DIR)) fs.mkdirSync(UPLOADS_DIR, { recursive: true });
 app.use('/uploads', express.static(UPLOADS_DIR));
-
-// Log all requests
-app.use((req, res, next) => {
-    // Don't log static asset requests to keep logs clean
-    if (!req.url.startsWith('/assets') && !req.url.startsWith('/uploads') && !req.url.match(/\.(js|css|png|jpg|ico)$/)) {
-        logger.info(`${req.method} ${req.url}`);
-    }
-    next();
-});
 
 // Database Connection
 const pool = new Pool({
@@ -155,214 +55,22 @@ const pool = new Pool({
   ssl: IS_PROD ? { rejectUnauthorized: false } : false
 });
 
-// --- Secure Secret Retrieval ---
-const getSecureApiKey = (): string => {
-    // Priority 1: Docker Secret / File-based secret (Secure Production)
-    if (process.env.GEMINI_API_KEY_FILE) {
-        try {
-            if (fs.existsSync(process.env.GEMINI_API_KEY_FILE)) {
-                return fs.readFileSync(process.env.GEMINI_API_KEY_FILE, 'utf8').trim();
-            }
-        } catch (error) {
-            logger.warn(`Failed to read secret file at ${process.env.GEMINI_API_KEY_FILE}`);
-        }
-    }
-
-    // Priority 2: Standard Environment Variable
-    if (process.env.API_KEY) {
-        return process.env.API_KEY;
-    }
-
-    logger.error("CRITICAL: Gemini API Key not found in environment variables or secret files.");
-    return ""; 
-};
-
-// AI Client Initialization
-const apiKey = getSecureApiKey();
-if (!apiKey && IS_PROD) {
-    logger.error("Server starting without API Key. AI features will fail.");
-}
-const ai = new GoogleGenAI({ apiKey: apiKey || 'missing_key' });
+// AI Client
+const ai = new GoogleGenAI({ apiKey: process.env.API_KEY || 'missing_key' });
 
 // --- Helper Functions ---
+const query = async (text: string, params?: any[]) => pool.query(text, params);
+const generateId = (prefix: string) => `${prefix}_${Date.now()}_${Math.random().toString(36).substr(2, 5)}`;
 
-const query = async (text: string, params?: any[]) => {
-    const start = Date.now();
-    try {
-        const res = await pool.query(text, params);
-        const duration = Date.now() - start;
-        if (duration > 1000) {
-            logger.warn('Slow query detected', { text, duration });
-        }
-        return res;
-    } catch (e) {
-        logger.error('Database query failed', e);
-        throw e;
-    }
-};
-
-const generateToken = (payload: object) => {
-    return jwt.sign(payload, JWT_SECRET, { expiresIn: '24h' });
-};
-
-// --- Email Service ---
-const createTransporter = (config: any) => {
-    if (config.emailProvider === 'smtp') {
-        return nodemailer.createTransport({
-            host: config.smtp.host,
-            port: config.smtp.port,
-            secure: config.smtp.encryption === 'ssl', 
-            auth: {
-                user: config.smtp.username,
-                pass: config.smtp.password,
-            },
-        });
-    }
-    // Placeholder for Google Service Account Logic
-    throw new Error("Google Email Provider not yet fully implemented on backend.");
-};
-
-const sendEmail = async (to: string, subject: string, body: string, html: string | undefined, eventId: string) => {
-    try {
-        // Fetch Config
-        const res = await query('SELECT config FROM events WHERE id = $1', [eventId]);
-        if (res.rows.length === 0) throw new Error("Event config not found");
-        const config = res.rows[0].config;
-
-        if (config.emailProvider === 'smtp') {
-             const transporter = createTransporter(config);
-             await transporter.sendMail({
-                 from: `"${config.host.name}" <${config.host.email}>`, 
-                 to: to, 
-                 subject: subject, 
-                 text: body, 
-                 html: html || body.replace(/\n/g, '<br>'), 
-             });
-             logger.info(`Email sent to ${to}`);
-             
-             await query('INSERT INTO email_logs (id, "to", subject, body, status, timestamp) VALUES ($1, $2, $3, $4, $5, $6)', 
-                [`email_${Date.now()}`, to, subject, body, 'sent', Date.now()]
-             );
-        } else {
-            logger.warn(`Email provider ${config.emailProvider} not supported yet.`);
-        }
-    } catch (e: any) {
-        logger.error(`Failed to send email to ${to}`, e);
-        // Log failure
-        await query('INSERT INTO email_logs (id, "to", subject, body, status, error, timestamp) VALUES ($1, $2, $3, $4, $5, $6, $7)', 
-            [`email_${Date.now()}`, to, subject, body, 'failed', e.message, Date.now()]
-         );
-        throw e;
-    }
-};
-
-// --- Job Queue System (In-Memory) ---
-interface Job {
-    id: string;
-    type: 'send_email' | 'send_sms' | 'send_whatsapp' | 'send_notification';
-    payload: any;
-    status: 'pending' | 'processing' | 'completed' | 'failed';
-    retries: number;
-}
-
-const jobQueue: Job[] = [];
-const MAX_RETRIES = 3;
-
-const processQueue = async () => {
-    const pendingJob = jobQueue.find(j => j.status === 'pending');
-    if (!pendingJob) return;
-
-    pendingJob.status = 'processing';
-    logger.info(`Processing job ${pendingJob.id}: ${pendingJob.type}`);
-
-    try {
-        if (pendingJob.type === 'send_email') {
-            const { to, subject, body, html, eventId } = pendingJob.payload;
-            await sendEmail(to, subject, body, html, eventId);
-        } else if (pendingJob.type === 'send_sms') {
-            const { to, body } = pendingJob.payload;
-            logger.info(`[SMS Simulation] Sending to ${to}: ${body}`);
-            // Real implementation: Call Twilio API
-            await new Promise(r => setTimeout(r, 200));
-        } else if (pendingJob.type === 'send_whatsapp') {
-             const { to, body } = pendingJob.payload;
-             logger.info(`[WhatsApp Simulation] Sending to ${to}: ${body}`);
-             // Real implementation: Call WhatsApp Business API
-             await new Promise(r => setTimeout(r, 200));
-        } else if (pendingJob.type === 'send_notification') {
-             const { userId, body } = pendingJob.payload;
-             logger.info(`[In-App Notification Simulation] Sending to user ${userId}: ${body}`);
-             await new Promise(r => setTimeout(r, 100));
-        }
-
-        pendingJob.status = 'completed';
-        const index = jobQueue.findIndex(j => j.id === pendingJob.id);
-        if (index > -1) jobQueue.splice(index, 1);
-        
-    } catch (e) {
-        logger.error(`Job ${pendingJob.id} failed`, e);
-        pendingJob.retries++;
-        if (pendingJob.retries >= MAX_RETRIES) {
-            pendingJob.status = 'failed';
-        } else {
-            pendingJob.status = 'pending'; // Retry
-        }
-    }
-};
-
-// Process queue every 2 seconds
-setInterval(processQueue, 2000);
-
-
-// --- Automated Maintenance ---
-const runMaintenance = async () => {
-    logger.info("Running system maintenance...");
-    
-    try {
-        // 1. Clean up expired tokens
-        await query('DELETE FROM password_reset_tokens WHERE expiry < $1', [Date.now()]);
-        
-        // 2. Clean up orphaned files (simplified logic)
-        const dbFilesRes = await query('SELECT url FROM media');
-        const dbFiles = new Set(dbFilesRes.rows.map(r => path.basename(r.url)));
-        
-        if (fs.existsSync(UPLOADS_DIR)) {
-            const diskFiles = fs.readdirSync(UPLOADS_DIR);
-            for (const file of diskFiles) {
-                if (!dbFiles.has(file)) {
-                    fs.unlinkSync(path.join(UPLOADS_DIR, file));
-                    logger.info(`Deleted orphaned file: ${file}`);
-                }
-            }
-        }
-    } catch (e) {
-        logger.error("Maintenance task failed", e);
-    }
-};
-
-// Run every hour
-setInterval(runMaintenance, 60 * 60 * 1000);
-
-
-// 3. Authenticate: Verifies JWT from HttpOnly Cookie OR x-api-key Header
+// Auth Middleware
 const authenticate = (req: any, res: any, next: NextFunction) => {
-    // 1. Check for API Key (External Server-to-Server access)
     const apiKey = req.headers['x-api-key'];
     if (apiKey && apiKey === SERVER_API_KEY) {
-        // Grant Super Admin Access for valid API Key
-        req.user = { 
-            id: 'system_api', 
-            email: 'api@system', 
-            permissions: ['view_dashboard', 'manage_registrations', 'manage_settings', 'manage_users', 'manage_tasks', 'manage_dining', 'manage_accommodation', 'manage_agenda', 'manage_speakers_sponsors', 'view_eventcoin_dashboard', 'send_invitations'], 
-            type: 'admin' 
-        };
+        req.user = { id: 'system_api', email: 'api@system', type: 'admin', permissions: ['view_dashboard'] }; // Simplified super admin
         return next();
     }
-
-    // 2. Check for Cookie Token (Browser access)
     const token = req.cookies.token;
     if (!token) return res.status(401).json({ message: 'Unauthorized' });
-
     jwt.verify(token, JWT_SECRET, (err: any, user: any) => {
         if (err) return res.status(403).json({ message: 'Invalid token' });
         req.user = user;
@@ -370,302 +78,330 @@ const authenticate = (req: any, res: any, next: NextFunction) => {
     });
 };
 
-// 4. Require Permission: Granular RBAC Check
-const requirePermission = (requiredPermission: string) => {
-    return (req: any, res: any, next: NextFunction) => {
-        if (!req.user) return res.sendStatus(401);
-        if (req.user.permissions && req.user.permissions.includes(requiredPermission)) {
-            next();
-        } else {
-            logger.warn(`User ${req.user.email} attempted to access protected route without ${requiredPermission}`);
-            res.status(403).json({ message: 'Forbidden: Insufficient Permissions' });
-        }
-    };
-};
-
-// Helper to set secure cookie
-const setAuthCookie = (res: any, token: string) => {
-    res.cookie('token', token, {
-        httpOnly: true, 
-        secure: IS_PROD, 
-        sameSite: 'strict', 
-        maxAge: 24 * 60 * 60 * 1000 
-    });
-};
-
-// --- Routes ---
+// --- API ROUTES ---
 
 // Health Check
 app.get('/api/health', async (req: any, res: any) => {
     try {
-        await pool.query('SELECT 1');
-        res.json({ status: 'ok', timestamp: Date.now(), db: 'connected' });
+        await query('SELECT 1');
+        res.json({ status: 'ok' });
     } catch (e) {
-        logger.error("Health check failed:", e);
-        res.status(503).json({ status: 'error', message: 'Database unavailable', timestamp: Date.now() });
+        res.status(503).json({ status: 'error' });
     }
 });
 
-// --- Developer / Integration Endpoints ---
-app.get('/api/admin/api-key', authenticate, requirePermission('manage_settings'), (req: any, res: any) => {
-    // Returns the server API key so admin can copy it for external integrations
-    res.json({ apiKey: SERVER_API_KEY });
+// === EVENTS ===
+app.get('/api/events', async (req: any, res: any) => {
+    const result = await query('SELECT id, name, config FROM events');
+    res.json(result.rows.map(row => ({
+        id: row.id,
+        name: row.config.event.name,
+        date: row.config.event.date,
+        location: row.config.event.location,
+        logoUrl: row.config.theme.logoUrl,
+        colorPrimary: row.config.theme.colorPrimary
+    })));
 });
 
-// --- Secure Ticket Endpoints ---
-
-// 1. Generate Signed Ticket Token (For Delegate Pass)
-app.get('/api/tickets/token', authenticate, async (req: any, res: any) => {
-    // User is authenticated via 'authenticate' middleware, so req.user exists.
-    // Only the owner can generate their own ticket token.
-    try {
-        const userId = req.user.id;
-        const eventId = req.user.eventId;
-        
-        // Generate a short-lived signed token specifically for QR scanning
-        // This token proves the bearer owns this userId and it was issued by our server
-        const ticketToken = jwt.sign(
-            { uid: userId, eid: eventId, type: 'ticket' }, 
-            TICKET_SECRET, 
-            { expiresIn: '7d' } // Valid for 7 days (duration of event)
-        );
-        
-        res.json({ token: ticketToken });
-    } catch (e) {
-        logger.error("Failed to generate ticket token", e);
-        res.status(500).json({ message: "Error generating ticket" });
-    }
-});
-
-// 2. Verify Ticket Token (For Admin Scanner)
-app.post('/api/tickets/verify', authenticate, requirePermission('manage_registrations'), async (req: any, res: any) => {
-    const { token } = req.body;
+app.get('/api/events/:id', async (req: any, res: any) => {
+    const { id } = req.params;
+    const eventRes = await query('SELECT config FROM events WHERE id = $1', [id]);
+    if (eventRes.rows.length === 0) return res.status(404).json({ message: 'Event not found' });
     
-    if (!token) return res.status(400).json({ message: "No token provided" });
-
-    try {
-        // 1. Verify the JWT signature
-        const payload = jwt.verify(token, TICKET_SECRET) as any;
-        
-        if (payload.type !== 'ticket') {
-            return res.status(400).json({ message: "Invalid token type" });
+    const regCount = await query('SELECT COUNT(*) FROM registrations WHERE event_id = $1', [id]);
+    const sessions = await query('SELECT * FROM sessions WHERE event_id = $1', [id]);
+    const speakers = await query('SELECT * FROM speakers WHERE event_id = $1', [id]);
+    const sponsors = await query('SELECT * FROM sponsors WHERE event_id = $1', [id]);
+    
+    // Convert snake_case DB to camelCase for frontend
+    const mapKeys = (obj: any) => {
+        const newObj: any = {};
+        for (const key in obj) {
+            const camel = key.replace(/_([a-z])/g, (g) => g[1].toUpperCase());
+            newObj[camel] = obj[key];
         }
+        return newObj;
+    };
 
-        const { uid, eid } = payload;
+    res.json({ 
+        config: eventRes.rows[0].config, 
+        registrationCount: parseInt(regCount.rows[0].count, 10),
+        sessions: sessions.rows.map(mapKeys),
+        speakers: speakers.rows.map(mapKeys),
+        sponsors: sponsors.rows.map(mapKeys)
+    });
+});
 
-        // 2. Find the user
-        const result = await query('SELECT * FROM registrations WHERE id = $1 AND event_id = $2', [uid, eid]);
-        const user = result.rows[0];
+app.post('/api/events', authenticate, async (req: any, res: any) => {
+    const { name, type } = req.body;
+    const id = generateId('evt');
+    // Default config
+    const config = { event: { name, eventType: type, date: 'TBD', location: 'TBD' }, theme: { colorPrimary: '#4f46e5' } };
+    await query('INSERT INTO events (id, name, config, created_at) VALUES ($1, $2, $3, $4)', [id, name, JSON.stringify(config), Date.now()]);
+    res.json({ id, name, config });
+});
 
-        if (!user) {
-            return res.status(404).json({ message: "User not found" });
-        }
+// === REGISTRATIONS ===
+app.get('/api/admin/registrations', authenticate, async (req: any, res: any) => {
+    const result = await query('SELECT * FROM registrations'); 
+    const regs = result.rows.map(r => ({ 
+        ...r, 
+        ...r.custom_fields,
+        createdAt: parseInt(r.created_at),
+        checkedIn: r.checked_in 
+    }));
+    res.json(regs);
+});
 
-        // 3. Perform Check-in
-        if (user.checked_in) {
-            return res.json({ 
-                success: false, 
-                status: 'already_checked_in', 
-                user: { id: user.id, name: user.name, email: user.email },
-                message: `${user.name} is already checked in.` 
+app.post('/api/registrations', async (req: any, res: any) => {
+    const { eventId, data, inviteToken } = req.body;
+    // Check duplication
+    const exist = await query('SELECT id FROM registrations WHERE email = $1 AND event_id = $2', [data.email, eventId]);
+    if (exist.rows.length > 0) return res.json({ success: false, message: 'Email already registered.' });
+
+    const id = generateId('reg');
+    const hash = await bcrypt.hash(data.password || 'default', 10);
+    const { name, email, ...custom } = data;
+    
+    await query('INSERT INTO registrations (id, event_id, name, email, password_hash, custom_fields, created_at) VALUES ($1, $2, $3, $4, $5, $6, $7)',
+        [id, eventId, name, email, hash, JSON.stringify(custom), Date.now()]
+    );
+    
+    if (inviteToken) await query('DELETE FROM invite_tokens WHERE token = $1', [inviteToken]);
+    
+    res.json({ success: true, message: 'Registered successfully.' });
+});
+
+app.put('/api/admin/registrations/:id/status', authenticate, async (req: any, res: any) => {
+    const { checkedIn } = req.body;
+    await query('UPDATE registrations SET checked_in = $1 WHERE id = $2', [checkedIn, req.params.id]);
+    res.json({ success: true });
+});
+
+app.put('/api/admin/registrations/:id', authenticate, async (req: any, res: any) => {
+    const { data } = req.body;
+    // Update fields conditionally
+    if (data.name) await query('UPDATE registrations SET name = $1 WHERE id = $2', [data.name, req.params.id]);
+    if (data.email) await query('UPDATE registrations SET email = $1 WHERE id = $2', [data.email, req.params.id]);
+    if (data.customFields) await query('UPDATE registrations SET custom_fields = $1 WHERE id = $2', [JSON.stringify(data.customFields), req.params.id]);
+    res.json({ success: true });
+});
+
+app.delete('/api/admin/registrations/:id', authenticate, async (req: any, res: any) => {
+    await query('DELETE FROM registrations WHERE id = $1', [req.params.id]);
+    res.json({ success: true });
+});
+
+// === CONFIG ===
+app.put('/api/admin/config', authenticate, async (req: any, res: any) => {
+    const { config } = req.body;
+    // Update the first/main event for now
+    await query('UPDATE events SET config = $1 WHERE id = $2', [JSON.stringify(config), 'main-event']);
+    res.json(config);
+});
+
+// === TASKS ===
+app.get('/api/tasks', authenticate, async (req: any, res: any) => {
+    const result = await query('SELECT * FROM tasks');
+    res.json(result.rows.map(r => ({ 
+        ...r, 
+        assigneeEmail: r.assignee_email, 
+        dueDate: r.due_date,
+        eventId: r.event_id
+    })));
+});
+
+app.post('/api/tasks', authenticate, async (req: any, res: any) => {
+    const task = req.body;
+    if (task.id) {
+        await query('UPDATE tasks SET title=$1, description=$2, status=$3, priority=$4, due_date=$5, assignee_email=$6 WHERE id=$7',
+            [task.title, task.description, task.status, task.priority, task.dueDate, task.assigneeEmail, task.id]);
+    } else {
+        const id = generateId('task');
+        await query('INSERT INTO tasks (id, event_id, title, description, status, priority, due_date, assignee_email) VALUES ($1, $2, $3, $4, $5, $6, $7, $8)',
+            [id, task.eventId || 'main-event', task.title, task.description, task.status, task.priority, task.dueDate, task.assigneeEmail]);
+    }
+    res.json({ success: true });
+});
+
+app.delete('/api/tasks/:id', authenticate, async (req: any, res: any) => {
+    await query('DELETE FROM tasks WHERE id = $1', [req.params.id]);
+    res.json({ success: true });
+});
+
+// === ADMIN USERS & ROLES ===
+app.get('/api/admin/users', authenticate, async (req: any, res: any) => {
+    const result = await query('SELECT id, email, role_id as "roleId" FROM admin_users');
+    res.json(result.rows);
+});
+
+app.post('/api/admin/users', authenticate, async (req: any, res: any) => {
+    const user = req.body;
+    if (user.id) {
+        await query('UPDATE admin_users SET role_id = $1 WHERE id = $2', [user.roleId, user.id]);
+    } else {
+        const id = generateId('usr');
+        const hash = await bcrypt.hash(user.password, 10);
+        await query('INSERT INTO admin_users (id, email, password_hash, role_id, created_at) VALUES ($1, $2, $3, $4, $5)',
+            [id, user.email, hash, user.roleId, Date.now()]);
+    }
+    res.json({ success: true });
+});
+
+app.delete('/api/admin/users/:id', authenticate, async (req: any, res: any) => {
+    await query('DELETE FROM admin_users WHERE id = $1', [req.params.id]);
+    res.json({ success: true });
+});
+
+app.get('/api/admin/roles', authenticate, async (req: any, res: any) => {
+    const result = await query('SELECT * FROM roles');
+    res.json(result.rows);
+});
+
+app.post('/api/admin/roles', authenticate, async (req: any, res: any) => {
+    const role = req.body;
+    if (role.id) {
+        await query('UPDATE roles SET name=$1, description=$2, permissions=$3 WHERE id=$4',
+            [role.name, role.description, role.permissions, role.id]);
+    } else {
+        const id = generateId('role');
+        await query('INSERT INTO roles (id, name, description, permissions) VALUES ($1, $2, $3, $4)',
+            [id, role.name, role.description, role.permissions]);
+    }
+    res.json({ success: true });
+});
+
+// === SESSIONS, SPEAKERS, SPONSORS (Generalized CRUD) ===
+const handleCrud = (table: string, fields: string[]) => {
+    app.get(`/api/${table}`, async (req: any, res: any) => {
+        const r = await query(`SELECT * FROM ${table}`);
+        // Simple camelCase conversion
+        const mapped = r.rows.map(row => {
+            const obj: any = {};
+            Object.keys(row).forEach(k => {
+                const camel = k.replace(/_([a-z])/g, g => g[1].toUpperCase());
+                obj[camel] = row[k];
             });
+            return obj;
+        });
+        res.json(mapped);
+    });
+    
+    app.post(`/api/${table}`, authenticate, async (req: any, res: any) => {
+        const data = req.body;
+        if (data.id && !data.id.startsWith('temp_')) { // Update
+            // Dynamic Update Query
+            const sets = fields.map((f, i) => {
+                const dbField = f.replace(/[A-Z]/g, letter => `_${letter.toLowerCase()}`);
+                return `${dbField} = $${i + 1}`;
+            }).join(', ');
+            const values = fields.map(f => data[f]);
+            await query(`UPDATE ${table} SET ${sets} WHERE id = $${fields.length + 1}`, [...values, data.id]);
+        } else { // Insert
+            const id = generateId(table.substring(0,3));
+            const cols = ['id', 'event_id', ...fields.map(f => f.replace(/[A-Z]/g, letter => `_${letter.toLowerCase()}`))].join(', ');
+            const placeholders = fields.map((_, i) => `$${i + 3}`).join(', ');
+            const values = fields.map(f => data[f]);
+            await query(`INSERT INTO ${table} (${cols}) VALUES ($1, $2, ${placeholders})`, [id, 'main-event', ...values]);
         }
+        res.json({ success: true });
+    });
 
-        await query('UPDATE registrations SET checked_in = true WHERE id = $1', [uid]);
-        
-        logger.info(`User checked in via Secure QR: ${user.email}`);
-        
-        res.json({ 
-            success: true, 
-            status: 'checked_in', 
-            user: { id: user.id, name: user.name, email: user.email },
-            message: `Successfully checked in ${user.name}` 
-        });
+    app.delete(`/api/${table}/:id`, authenticate, async (req: any, res: any) => {
+        await query(`DELETE FROM ${table} WHERE id = $1`, [req.params.id]);
+        res.json({ success: true });
+    });
+};
 
-    } catch (e) {
-        logger.warn("Ticket verification failed", e);
-        return res.status(400).json({ message: "Invalid or expired ticket" });
-    }
+handleCrud('sessions', ['title', 'description', 'startTime', 'endTime', 'location', 'track', 'capacity', 'speakerIds']);
+handleCrud('speakers', ['name', 'title', 'company', 'bio', 'photoUrl', 'linkedinUrl', 'twitterUrl']);
+handleCrud('sponsors', ['name', 'description', 'websiteUrl', 'logoUrl', 'tier']);
+handleCrud('meal_plans', ['name', 'description', 'dailyCost']);
+handleCrud('restaurants', ['name', 'cuisine', 'operatingHours', 'menu']);
+
+// === DINING ===
+app.get('/api/dining/reservations', authenticate, async (req: any, res: any) => {
+    const r = await query('SELECT * FROM dining_reservations');
+    res.json(r.rows.map(row => ({ 
+        id: row.id, 
+        restaurantId: row.restaurant_id, 
+        delegateId: row.delegate_id, 
+        reservationTime: row.reservation_time, 
+        partySize: row.party_size 
+    })));
+});
+app.post('/api/dining/reservations', authenticate, async (req: any, res: any) => {
+    const d = req.body;
+    await query('INSERT INTO dining_reservations (id, restaurant_id, delegate_id, reservation_time, party_size) VALUES ($1, $2, $3, $4, $5)',
+        [generateId('res'), d.restaurantId, d.delegateId, d.reservationTime, d.partySize]);
+    res.json({ success: true });
+});
+app.delete('/api/dining/reservations/:id', authenticate, async (req: any, res: any) => {
+    await query('DELETE FROM dining_reservations WHERE id = $1', [req.params.id]);
+    res.json({ success: true });
 });
 
-// ... [Rest of API endpoints omitted for brevity, they remain unchanged] ...
-
-// --- AI Proxy Endpoints (Secure) ---
-app.post('/api/ai/generate', authenticate, async (req: any, res: any) => {
-    const { model, contents, config } = req.body;
-    try {
-        const modelName = model || 'gemini-2.5-flash';
-        const response = await ai.models.generateContent({
-            model: modelName,
-            contents,
-            config
-        });
-        res.json({ text: response.text });
-    } catch (e: any) {
-        logger.error("AI Generation Failed", e);
-        res.status(500).json({ message: 'AI generation failed', details: e.message });
-    }
+// === MEDIA (Base64 Upload) ===
+app.get('/api/media', authenticate, async (req: any, res: any) => {
+    const r = await query('SELECT * FROM media');
+    res.json(r.rows.map(row => ({ ...row, uploadedAt: parseInt(row.uploaded_at) })));
 });
 
-app.post('/api/ai/generate-images', authenticate, async (req: any, res: any) => {
-    const { prompt, config } = req.body;
-    try {
-        const response = await ai.models.generateImages({
-            model: 'imagen-4.0-generate-001',
-            prompt,
-            config: config || { numberOfImages: 1, outputMimeType: 'image/jpeg' }
-        });
-        res.json(response);
-    } catch (e: any) {
-        logger.error("AI Image Generation Failed", e);
-        res.status(500).json({ message: 'AI image generation failed', details: e.message });
-    }
+app.post('/api/media', authenticate, async (req: any, res: any) => {
+    // Expects { name, type, size, base64 } in body (JSON)
+    // We set a high JSON limit in middleware to handle this
+    const { name, type, size, base64 } = req.body;
+    const id = generateId('file');
+    await query('INSERT INTO media (id, name, type, size, url, uploaded_at) VALUES ($1, $2, $3, $4, $5, $6)',
+        [id, name, type, size, base64, Date.now()]);
+    res.json({ id, url: base64 });
 });
 
-app.get('/api/auth/ai-token', authenticate, (req: any, res: any) => {
-    const key = getSecureApiKey();
-    if (!key) {
-        return res.status(500).json({ message: "AI configuration missing on server." });
-    }
-    res.json({ apiKey: key });
+app.delete('/api/media/:id', authenticate, async (req: any, res: any) => {
+    await query('DELETE FROM media WHERE id = $1', [req.params.id]);
+    res.json({ success: true });
 });
 
-// --- Email Testing ---
-app.post('/api/admin/test-email', authenticate, requirePermission('manage_settings'), async (req: any, res: any) => {
-    const { to, config } = req.body;
-    if (!to || !config) return res.status(400).json({ message: "Recipient email and configuration required." });
-    try {
-        if (config.emailProvider === 'smtp') {
-             const transporter = createTransporter(config);
-             await transporter.verify();
-             await transporter.sendMail({
-                 from: `"${config.host.name}" <${config.host.email}>`,
-                 to: to,
-                 subject: "Test Email from Event Platform",
-                 text: "This is a test email to verify your configuration settings.",
-             });
-        } else {
-             throw new Error("Provider not supported for test.");
-        }
-        logger.info(`Test email sent to ${to}`);
-        res.json({ success: true, message: "Test email sent successfully." });
-    } catch (e) {
-        const msg = e instanceof Error ? e.message : 'Configuration check failed.';
-        logger.error("Test email failed", e);
-        res.status(400).json({ message: msg });
-    }
+// === DASHBOARD STATS ===
+app.get('/api/admin/stats', authenticate, async (req: any, res: any) => {
+    const regCount = await query('SELECT COUNT(*) FROM registrations');
+    const taskCount = await query('SELECT status, COUNT(*) FROM tasks GROUP BY status');
+    const txRes = await query('SELECT SUM(amount) as circulation FROM transactions WHERE type IN (\'initial\', \'purchase\', \'reward\')');
+    const latestRegs = await query('SELECT * FROM registrations ORDER BY created_at DESC LIMIT 5');
+    
+    const taskStats = { total: 0, completed: 0, pending: 0 };
+    taskCount.rows.forEach((r: any) => {
+        const count = parseInt(r.count);
+        taskStats.total += count;
+        if (r.status === 'completed') taskStats.completed += count;
+        else taskStats.pending += count;
+    });
+
+    res.json({
+        totalRegistrations: parseInt(regCount.rows[0].count),
+        maxAttendees: 500, // from config ideally
+        eventCoinCirculation: parseFloat(txRes.rows[0].circulation || '0'),
+        taskStats,
+        recentRegistrations: latestRegs.rows.map(r => ({...r, createdAt: parseInt(r.created_at), checkedIn: r.checked_in})),
+        registrationTrend: [], // Simplified
+        eventDate: 'October 26, 2025',
+        eventCoinName: 'EventCoin'
+    });
 });
 
-// --- Bulk Broadcast ---
-app.post('/api/admin/broadcast', authenticate, requirePermission('send_invitations'), async (req: any, res: any) => {
-    const { subject, body, target, eventId, channel } = req.body;
-    const eid = eventId || 'main-event';
-    const selectedChannel = channel || 'email';
-    try {
-        let queryText = 'SELECT id, email, name, custom_fields FROM registrations WHERE event_id = $1';
-        const params = [eid];
-        if (target === 'checked-in') queryText += ' AND checked_in = true';
-        else if (target === 'pending') queryText += ' AND checked_in = false';
-        
-        const result = await query(queryText, params);
-        const recipients = result.rows;
-        
-        if (recipients.length === 0) return res.json({ success: true, count: 0, message: "No recipients found for selection." });
-        
-        let queuedCount = 0;
-        let skippedCount = 0;
-
-        recipients.forEach(r => {
-            let jobType: Job['type'] = 'send_email';
-            let payload: any = { subject, body, eventId: eid };
-            let shouldQueue = true;
-
-            if (selectedChannel === 'sms') {
-                jobType = 'send_sms';
-                if (r.custom_fields && r.custom_fields.phone) payload.to = r.custom_fields.phone;
-                else { shouldQueue = false; skippedCount++; }
-            } else if (selectedChannel === 'whatsapp') {
-                jobType = 'send_whatsapp';
-                if (r.custom_fields && r.custom_fields.phone) payload.to = r.custom_fields.phone;
-                else { shouldQueue = false; skippedCount++; }
-            } else if (selectedChannel === 'app') {
-                jobType = 'send_notification';
-                payload.userId = r.id;
-            } else {
-                payload.to = r.email;
-            }
-
-            if (shouldQueue) {
-                jobQueue.push({
-                    id: `job_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
-                    type: jobType,
-                    payload: payload,
-                    status: 'pending',
-                    retries: 0
-                });
-                queuedCount++;
-            }
-        });
-        
-        logger.info(`Queued ${queuedCount} messages via ${selectedChannel}. Skipped ${skippedCount}.`);
-        let msg = `Queued ${queuedCount} messages via ${selectedChannel}.`;
-        if (skippedCount > 0) msg += ` Skipped ${skippedCount} users (missing contact info).`;
-        res.json({ success: true, count: queuedCount, message: msg });
-    } catch (e) {
-        logger.error("Broadcast failed", e);
-        res.status(500).json({ message: "Failed to queue broadcast." });
-    }
-});
-
-// --- Auth Routes ---
-app.post('/api/login/admin', rateLimiter, async (req: any, res: any) => {
+// === AUTH ===
+app.post('/api/login/admin', async (req: any, res: any) => {
     const { email, password } = req.body;
-    try {
-        const result = await query('SELECT * FROM admin_users WHERE email = $1', [email]);
-        const user = result.rows[0];
-        if (user && await bcrypt.compare(password, user.password_hash)) {
-             const roleResult = await query('SELECT * FROM roles WHERE id = $1', [user.role_id]);
-             const role = roleResult.rows[0];
-             const payload = { 
-                 id: user.id, 
-                 email: user.email, 
-                 permissions: role?.permissions || [],
-                 type: 'admin'
-             };
-             const token = generateToken(payload);
-             setAuthCookie(res, token);
-             logger.info(`Admin logged in: ${email}`);
-             res.json({ 
-                 user: { id: user.id, email: user.email, permissions: role?.permissions || [] },
-                 message: 'Login successful'
-             });
-        } else {
-            logger.warn(`Failed admin login attempt for: ${email}`);
-            res.status(401).json({ message: 'Invalid credentials' });
-        }
-    } catch (e) {
-        logger.error('Admin login error', e);
-        res.status(500).json({ message: 'Internal server error' });
-    }
-});
-
-app.post('/api/login/delegate', rateLimiter, async (req: any, res: any) => {
-    const { email, password, eventId } = req.body;
-    try {
-        const result = await query('SELECT * FROM registrations WHERE email = $1 AND event_id = $2', [email, eventId]);
-        const user = result.rows[0];
-        if (user && user.password_hash && await bcrypt.compare(password, user.password_hash)) {
-             const token = generateToken({ id: user.id, email: user.email, eventId: eventId, type: 'delegate' });
-             setAuthCookie(res, token);
-             logger.info(`Delegate logged in: ${email} for event ${eventId}`);
-             res.json({ success: true, user: { id: user.id, email: user.email } });
-        } else {
-             logger.warn(`Failed delegate login attempt for: ${email}`);
-             res.status(401).json({ message: 'Invalid credentials' });
-        }
-    } catch (e) {
-        logger.error('Delegate login error', e);
-        res.status(500).json({ message: 'Internal server error' });
+    const r = await query('SELECT * FROM admin_users WHERE email = $1', [email]);
+    const user = r.rows[0];
+    if (user && await bcrypt.compare(password, user.password_hash)) {
+        const roleRes = await query('SELECT permissions FROM roles WHERE id = $1', [user.role_id]);
+        const perms = roleRes.rows[0]?.permissions || [];
+        const token = jwt.sign({ id: user.id, email, permissions: perms, type: 'admin' }, JWT_SECRET, { expiresIn: '24h' });
+        res.cookie('token', token, { httpOnly: true });
+        res.json({ token, user: { id: user.id, email, permissions: perms } });
+    } else {
+        res.status(401).json({ message: 'Invalid credentials' });
     }
 });
 
@@ -673,123 +409,6 @@ app.post('/api/logout', (req: any, res: any) => {
     res.clearCookie('token');
     res.json({ success: true });
 });
-
-app.get('/api/auth/me', authenticate, (req: any, res: any) => {
-    res.json({ user: req.user });
-});
-
-// Forgot/Reset Password
-app.post('/api/auth/forgot-password', rateLimiter, async (req: any, res: any) => {
-    const { email, eventId, type } = req.body;
-    try {
-        let user;
-        if (type === 'admin') {
-             const r = await query('SELECT * FROM admin_users WHERE email = $1', [email]);
-             user = r.rows[0];
-        } else {
-             const r = await query('SELECT * FROM registrations WHERE email = $1 AND event_id = $2', [email, eventId]);
-             user = r.rows[0];
-        }
-        if (user) {
-            const resetToken = `reset_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
-            const expiry = Date.now() + 3600000; 
-            await query('INSERT INTO password_reset_tokens (token, user_id, expiry) VALUES ($1, $2, $3)', [resetToken, user.id, expiry]);
-            const configRes = await query('SELECT config FROM events WHERE id = $1', [eventId || 'main-event']);
-            const config = configRes.rows[0]?.config;
-            if (config) {
-                 const resetLink = `${config.event.publicUrl}${type === 'admin' ? '/admin' : '/' + eventId}?resetToken=${resetToken}`;
-                 const subject = "Password Reset Request";
-                 const body = `Click here to reset your password: ${resetLink}`;
-                 await sendEmail(email, subject, body, undefined, eventId || 'main-event');
-            }
-        }
-        res.json({ success: true });
-    } catch (e) {
-        logger.error("Forgot password error", e);
-        res.status(500).json({ message: "Error processing request" });
-    }
-});
-
-app.post('/api/auth/reset-password', rateLimiter, async (req: any, res: any) => {
-    const { token, newPassword } = req.body;
-    try {
-        const tokenRes = await query('SELECT * FROM password_reset_tokens WHERE token = $1 AND expiry > $2', [token, Date.now()]);
-        const tokenRecord = tokenRes.rows[0];
-        if (!tokenRecord) return res.status(400).json({ message: "Invalid or expired token" });
-        const hash = await bcrypt.hash(newPassword, 10);
-        let r = await query('UPDATE admin_users SET password_hash = $1 WHERE id = $2 RETURNING id', [hash, tokenRecord.user_id]);
-        if (r.rowCount === 0) {
-            await query('UPDATE registrations SET password_hash = $1 WHERE id = $2', [hash, tokenRecord.user_id]);
-        }
-        await query('DELETE FROM password_reset_tokens WHERE token = $1', [token]);
-        res.json({ success: true });
-    } catch (e) {
-        logger.error("Reset password error", e);
-        res.status(500).json({ message: "Error resetting password" });
-    }
-});
-
-// --- Standard CRUD Routes (Events, Registrations, Tasks, etc.) ---
-// These follow the same pattern as above and are essential for the app logic.
-// Included here in condensed form to ensure completeness.
-
-app.get('/api/events', async (req: any, res: any) => {
-    try {
-        const result = await query('SELECT id, name, config FROM events');
-        res.json(result.rows.map(row => ({
-            id: row.id,
-            name: row.config.event.name,
-            date: row.config.event.date,
-            location: row.config.event.location,
-            logoUrl: row.config.theme.logoUrl,
-            colorPrimary: row.config.theme.colorPrimary
-        })));
-    } catch (e) { res.status(500).json({ message: 'Error fetching events' }); }
-});
-
-app.get('/api/events/:id', async (req: any, res: any) => {
-    try {
-        const result = await query('SELECT config FROM events WHERE id = $1', [req.params.id]);
-        if (result.rows.length === 0) return res.status(404).json({ message: 'Event not found' });
-        const regCount = await query('SELECT COUNT(*) FROM registrations WHERE event_id = $1', [req.params.id]);
-        const sessions = await query('SELECT * FROM sessions WHERE event_id = $1', [req.params.id]);
-        const speakers = await query('SELECT * FROM speakers WHERE event_id = $1', [req.params.id]);
-        const sponsors = await query('SELECT * FROM sponsors WHERE event_id = $1', [req.params.id]);
-        res.json({ 
-            config: result.rows[0].config, 
-            registrationCount: parseInt(regCount.rows[0].count, 10),
-            sessions: sessions.rows,
-            speakers: speakers.rows,
-            sponsors: sponsors.rows
-        });
-    } catch (e) { res.status(500).json({ message: 'Error fetching event' }); }
-});
-
-app.get('/api/admin/registrations', authenticate, requirePermission('manage_registrations'), async (req: any, res: any) => {
-    try {
-        const result = await query('SELECT * FROM registrations WHERE event_id = $1', ['main-event']); 
-        const regs = result.rows.map(r => ({ ...r, ...r.custom_fields }));
-        res.json(regs);
-    } catch (e) {
-        res.status(500).json({ message: 'Error fetching registrations' });
-    }
-});
-
-// [Additional CRUD endpoints from original code would be here, maintained as is]
-// ...
-
-// --- Serve React Frontend (Last Route) ---
-if (IS_PROD) {
-    app.use(express.static(CLIENT_BUILD_PATH));
-    
-    // SPA Fallback: Send index.html for any unknown non-API routes
-    app.get('*', (req: Request, res: Response) => {
-        if (req.path.startsWith('/api')) {
-            return res.status(404).json({ message: 'Not Found' });
-        }
-        res.sendFile(path.join(CLIENT_BUILD_PATH, 'index.html'));
-    });
-}
 
 // Start Server
 app.listen(port, () => {

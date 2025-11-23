@@ -27,7 +27,7 @@ const notifySubscribers = (table: string) => {
     listeners.forEach(cb => cb(table));
 };
 
-// BroadcastChannel for cross-tab sync
+// 1. BroadcastChannel for fast cross-tab sync
 let channel: BroadcastChannel | null = null;
 
 try {
@@ -47,10 +47,33 @@ try {
     console.warn("BroadcastChannel not supported or restricted. Cross-tab sync disabled.");
 }
 
+// 2. Storage Event Listener as a fallback/supplement for cross-tab sync
+if (typeof window !== 'undefined') {
+    window.addEventListener('storage', (event) => {
+        if (event.key === 'event_platform_db_v1' && event.newValue) {
+            // The DB key changed, we reload everything or specific tables if we tracked diffs.
+            // Since we store whole DB in one key, we just parse it and see.
+            // Ideally, we reload all tables that components are watching.
+            // Simple brute force reload:
+            try {
+                const parsed = JSON.parse(event.newValue);
+                Object.keys(parsed).forEach(key => {
+                    if (Array.isArray(parsed[key])) {
+                        db[key] = parsed[key];
+                        notifySubscribers(key);
+                    }
+                });
+            } catch (e) {
+                console.error("Failed to sync from storage event", e);
+            }
+        }
+    });
+}
+
 const notifyChange = (table: string) => {
     // 1. Notify local components
     notifySubscribers(table);
-    // 2. Notify other tabs
+    // 2. Notify other tabs via BroadcastChannel
     channel?.postMessage({ action: 'refresh', table });
 };
 

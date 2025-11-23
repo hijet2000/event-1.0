@@ -239,7 +239,8 @@ export const HotelsDashboard: React.FC<HotelsDashboardProps> = ({ adminToken }) 
             const [bookingsData, hotelsData] = await Promise.all([
                 getAccommodationBookings(adminToken),
                 getHotels(adminToken)
-            ]);
+            ]) as [EnrichedAccommodationBooking[], Hotel[]];
+            
             setBookings(bookingsData);
             setHotels(hotelsData);
             

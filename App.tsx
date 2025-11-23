@@ -1,6 +1,7 @@
+
 import React, { useState, useEffect, Suspense } from 'react';
 import { type RegistrationData, type Permission, type Session, type Speaker, type Sponsor } from './types';
-import { registerUser, loginDelegate, triggerRegistrationEmails, getInvitationDetails, getPublicEventData } from './server/api';
+import { registerUser, loginDelegate, triggerRegistrationEmails, getInvitationDetails, getPublicEventData, initializeApi } from './server/api';
 import { verifyToken } from './server/auth';
 import { RegistrationForm } from './components/RegistrationForm';
 import { Alert } from './components/Alert';
@@ -437,6 +438,8 @@ const EventPage: React.FC<EventPageContentProps> = (props) => (
 );
 
 function App() {
+  const [isAppReady, setAppReady] = useState(false);
+  
   const [adminSession, setAdminSession] = useState<AdminSession | null>(() => {
     const token = localStorage.getItem('adminToken');
     if (token) {
@@ -454,6 +457,13 @@ function App() {
 
   // Routing State
   const [currentPath, setCurrentPath] = useState(window.location.pathname);
+
+  useEffect(() => {
+      // Check for backend status before rendering main app
+      initializeApi().then(() => {
+          setAppReady(true);
+      });
+  }, []);
 
   useEffect(() => {
     const handleLocationChange = () => {
@@ -485,6 +495,16 @@ function App() {
     setAdminSession(null);
     navigate('/');
   };
+
+  if (!isAppReady) {
+      return (
+          <div className="min-h-screen flex items-center justify-center bg-gray-50 dark:bg-gray-900">
+              <div className="text-center">
+                  <ContentLoader text="Connecting to server..." />
+              </div>
+          </div>
+      );
+  }
 
   return (
     <ErrorBoundary>

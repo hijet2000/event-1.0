@@ -409,3 +409,13 @@ export interface LeaderboardEntry {
     score: number;
     itemsFound: number;
 }
+
+// Media Types
+export interface MediaItem {
+    id: string;
+    name: string;
+    type: string;
+    size: number;
+    url: string;
+    uploadedAt: number;
+}

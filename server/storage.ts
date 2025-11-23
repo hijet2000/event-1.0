@@ -1,14 +1,6 @@
 
 import { insert } from './db';
-
-export interface MediaItem {
-    id: string;
-    name: string;
-    type: string;
-    size: number;
-    url: string;
-    uploadedAt: number;
-}
+import { MediaItem } from '../types';
 
 /**
  * Simulates uploading a file to cloud storage.
