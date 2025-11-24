@@ -1,7 +1,12 @@
 
 import React, { useState, useEffect } from 'react';
 import { Spinner } from './Spinner';
-import { purchaseEventCoins } from '../server/api';
+import { createPaymentIntent, purchaseEventCoins } from '../server/api';
+import { loadStripe } from '@stripe/stripe-js';
+import { Elements, CardElement, useStripe, useElements } from '@stripe/react-stripe-js';
+
+// Initialize Stripe with public key (mock key for dev, replace with env var in prod)
+const stripePromise = loadStripe('pk_test_51MOCK_KEY_REPLACE_THIS');
 
 interface PaymentModalProps {
     isOpen: boolean;
@@ -16,61 +21,89 @@ const PACKAGES = [
     { id: 'premium', coins: 250, price: 200 }, // 20% discount
 ];
 
+const CheckoutForm: React.FC<{ 
+    amount: number, 
+    coins: number, 
+    delegateToken: string, 
+    onSuccess: () => void 
+}> = ({ amount, coins, delegateToken, onSuccess }) => {
+    const stripe = useStripe();
+    const elements = useElements();
+    const [error, setError] = useState<string | null>(null);
+    const [processing, setProcessing] = useState(false);
+
+    const handleSubmit = async (event: React.FormEvent) => {
+        event.preventDefault();
+
+        if (!stripe || !elements) return;
+
+        setProcessing(true);
+        setError(null);
+
+        try {
+            // 1. Create PaymentIntent on Server
+            const { clientSecret } = await createPaymentIntent(delegateToken, amount);
+
+            // 2. Confirm Card Payment
+            const result = await stripe.confirmCardPayment(clientSecret, {
+                payment_method: {
+                    card: elements.getElement(CardElement)!,
+                }
+            });
+
+            if (result.error) {
+                setError(result.error.message || "Payment failed");
+            } else if (result.paymentIntent?.status === 'succeeded') {
+                // 3. Fulfill Order (In real app, webhook handles this securely. Here we simulate client-side completion for feedback)
+                await purchaseEventCoins(delegateToken, coins, amount);
+                onSuccess();
+            }
+        } catch (e) {
+            setError("An error occurred during payment processing.");
+        } finally {
+            setProcessing(false);
+        }
+    };
+
+    return (
+        <form onSubmit={handleSubmit} className="space-y-4">
+            <div className="p-4 border rounded bg-gray-50 dark:bg-gray-800 border-gray-200 dark:border-gray-700">
+                <CardElement options={{
+                    style: {
+                        base: {
+                            fontSize: '16px',
+                            color: '#424770',
+                            '::placeholder': { color: '#aab7c4' },
+                        },
+                        invalid: { color: '#9e2146' },
+                    },
+                }} />
+            </div>
+            {error && <div className="text-sm text-red-500">{error}</div>}
+            <button 
+                type="submit" 
+                disabled={!stripe || processing}
+                className="w-full py-3 bg-primary text-white rounded-lg text-sm font-medium hover:bg-primary/90 flex items-center justify-center disabled:opacity-70"
+            >
+                {processing ? <Spinner /> : `Pay $${amount.toFixed(2)}`}
+            </button>
+        </form>
+    );
+};
+
 export const PaymentModal: React.FC<PaymentModalProps> = ({ isOpen, onClose, delegateToken, onSuccess }) => {
     const [selectedPkg, setSelectedPkg] = useState(PACKAGES[1]);
-    const [cardNumber, setCardNumber] = useState('');
-    const [cardName, setCardName] = useState('');
-    const [expiry, setExpiry] = useState('');
-    const [cvc, setCvc] = useState('');
-    const [isProcessing, setIsProcessing] = useState(false);
     const [step, setStep] = useState<'select' | 'pay' | 'success'>('select');
 
     if (!isOpen) return null;
 
-    const handleCardNumberChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-        let val = e.target.value.replace(/\D/g, '');
-        if (val.length > 16) val = val.slice(0, 16);
-        // Add spaces every 4 digits for display
-        const formatted = val.replace(/(.{4})/g, '$1 ').trim();
-        setCardNumber(formatted);
-    };
-
-    const handleExpiryChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-        let val = e.target.value.replace(/\D/g, '');
-        if (val.length > 4) val = val.slice(0, 4);
-        if (val.length >= 2) val = val.slice(0, 2) + '/' + val.slice(2);
-        setExpiry(val);
-    };
-
-    const handleSubmit = async (e: React.FormEvent) => {
-        e.preventDefault();
-        setIsProcessing(true);
-        try {
-            // Remove spaces from card number for "validation"
-            const rawNum = cardNumber.replace(/\s/g, '');
-            if (rawNum.length < 16 || expiry.length < 5 || cvc.length < 3 || !cardName) {
-                throw new Error("Please fill in all card details.");
-            }
-
-            await purchaseEventCoins(delegateToken, selectedPkg.coins, selectedPkg.price);
-            setStep('success');
-            setTimeout(() => {
-                onSuccess();
-                onClose();
-                // Reset state after close
-                setTimeout(() => {
-                    setStep('select');
-                    setCardNumber('');
-                    setCardName('');
-                    setExpiry('');
-                    setCvc('');
-                }, 500);
-            }, 2000);
-        } catch (err) {
-            alert(err instanceof Error ? err.message : "Payment failed.");
-        } finally {
-            setIsProcessing(false);
-        }
+    const handleSuccess = () => {
+        setStep('success');
+        setTimeout(() => {
+            onSuccess();
+            onClose();
+            setStep('select');
+        }, 2000);
     };
 
     return (
@@ -123,86 +156,16 @@ export const PaymentModal: React.FC<PaymentModalProps> = ({ isOpen, onClose, del
                         </div>
                     ) : (
                         <div className="h-full flex flex-col">
-                            <h3 className="text-xl font-bold mb-6 text-gray-900 dark:text-white">Card Details</h3>
-                            
-                            {/* Credit Card Visual */}
-                            <div className="mb-8 p-6 rounded-xl bg-gradient-to-br from-gray-800 to-gray-900 text-white shadow-xl relative overflow-hidden">
-                                <div className="absolute top-0 right-0 -mt-4 -mr-4 w-24 h-24 bg-white/10 rounded-full blur-xl"></div>
-                                <div className="flex justify-between items-start mb-8">
-                                    <div className="w-12 h-8 bg-yellow-500/80 rounded-md"></div>
-                                    <span className="text-xs font-mono opacity-70">DEBIT</span>
-                                </div>
-                                <div className="font-mono text-xl tracking-widest mb-6">{cardNumber || '•••• •••• •••• ••••'}</div>
-                                <div className="flex justify-between items-end">
-                                    <div>
-                                        <div className="text-[10px] opacity-60 uppercase">Card Holder</div>
-                                        <div className="font-medium tracking-wide uppercase text-sm">{cardName || 'YOUR NAME'}</div>
-                                    </div>
-                                    <div>
-                                        <div className="text-[10px] opacity-60 uppercase">Expires</div>
-                                        <div className="font-medium tracking-wide text-sm">{expiry || 'MM/YY'}</div>
-                                    </div>
-                                </div>
-                            </div>
-
-                            {/* Form */}
-                            <form onSubmit={handleSubmit} className="space-y-4 flex-1">
-                                <div className="space-y-4">
-                                    <div>
-                                        <label className="block text-xs font-medium text-gray-500 mb-1">Card Number</label>
-                                        <input 
-                                            type="text" 
-                                            value={cardNumber}
-                                            onChange={handleCardNumberChange}
-                                            className="block w-full border-b border-gray-300 dark:border-gray-700 bg-transparent py-2 px-1 focus:outline-none focus:border-primary transition-colors"
-                                            placeholder="0000 0000 0000 0000"
-                                            required
-                                        />
-                                    </div>
-                                    <div>
-                                        <label className="block text-xs font-medium text-gray-500 mb-1">Cardholder Name</label>
-                                        <input 
-                                            type="text" 
-                                            value={cardName}
-                                            onChange={e => setCardName(e.target.value)}
-                                            className="block w-full border-b border-gray-300 dark:border-gray-700 bg-transparent py-2 px-1 focus:outline-none focus:border-primary transition-colors"
-                                            placeholder="Jane Doe"
-                                            required
-                                        />
-                                    </div>
-                                    <div className="flex gap-4">
-                                        <div className="flex-1">
-                                            <label className="block text-xs font-medium text-gray-500 mb-1">Expiry Date</label>
-                                            <input 
-                                                type="text" 
-                                                value={expiry}
-                                                onChange={handleExpiryChange}
-                                                className="block w-full border-b border-gray-300 dark:border-gray-700 bg-transparent py-2 px-1 focus:outline-none focus:border-primary transition-colors"
-                                                placeholder="MM/YY"
-                                                required
-                                            />
-                                        </div>
-                                        <div className="w-24">
-                                            <label className="block text-xs font-medium text-gray-500 mb-1">CVC</label>
-                                            <input 
-                                                type="password" 
-                                                value={cvc}
-                                                onChange={e => setCvc(e.target.value.slice(0,3))}
-                                                className="block w-full border-b border-gray-300 dark:border-gray-700 bg-transparent py-2 px-1 focus:outline-none focus:border-primary transition-colors"
-                                                placeholder="123"
-                                                required
-                                            />
-                                        </div>
-                                    </div>
-                                </div>
-
-                                <div className="mt-auto pt-6 flex gap-3">
-                                    <button type="button" onClick={onClose} className="flex-1 py-3 border border-gray-300 dark:border-gray-600 rounded-lg text-sm font-medium hover:bg-gray-50 dark:hover:bg-gray-800">Cancel</button>
-                                    <button type="submit" disabled={isProcessing} className="flex-1 py-3 bg-primary text-white rounded-lg text-sm font-medium hover:bg-primary/90 flex items-center justify-center disabled:opacity-70">
-                                        {isProcessing ? <Spinner /> : `Pay $${selectedPkg.price}`}
-                                    </button>
-                                </div>
-                            </form>
+                            <h3 className="text-xl font-bold mb-6 text-gray-900 dark:text-white">Secure Payment</h3>
+                            <Elements stripe={stripePromise}>
+                                <CheckoutForm 
+                                    amount={selectedPkg.price} 
+                                    coins={selectedPkg.coins} 
+                                    delegateToken={delegateToken} 
+                                    onSuccess={handleSuccess} 
+                                />
+                            </Elements>
+                            <button onClick={onClose} className="mt-auto py-3 border border-gray-300 dark:border-gray-600 rounded-lg text-sm font-medium hover:bg-gray-50 dark:hover:bg-gray-800">Cancel</button>
                         </div>
                     )}
                 </div>

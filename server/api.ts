@@ -219,6 +219,14 @@ export const getRegistrations = async (adminToken: string) => {
     return findAll('registrations');
 };
 
+// === PAYMENTS ===
+export const createPaymentIntent = async (token: string, amount: number, currency: string = 'usd') => {
+    if (USE_REAL_API) return apiFetch<{ clientSecret: string }>('/create-payment-intent', 'POST', { amount, currency }, token);
+    // Mock logic
+    await new Promise(resolve => setTimeout(resolve, 1000));
+    return { clientSecret: 'mock_client_secret' };
+}
+
 // ... Re-export other services
 export const generateImage = generateImageAI;
 export { generateAiContent };
@@ -371,7 +379,12 @@ export const updateDelegateProfile = async (token: string, data: any) => { retur
 export const getDelegateBalance = async (token: string) => ({ balance: 0, currencyName: 'Coins' });
 export const getDelegateTransactions = async (token: string) => [];
 export const sendCoins = async (token: string, email: string, amount: number, message: string) => {};
-export const purchaseEventCoins = async (token: string, coins: number, price: number) => {};
+export const purchaseEventCoins = async (token: string, coins: number, price: number) => {
+    // In production, this is handled by payment webhooks, but for immediate feedback in UI (mock mode):
+    if (!USE_REAL_API) {
+        // simulate update
+    }
+};
 export const addToAgenda = async (token: string, sessionId: string) => {};
 export const removeFromAgenda = async (token: string, sessionId: string) => {};
 export const submitSessionFeedback = async (token: string, sessionId: string, rating: number, comment: string) => {};

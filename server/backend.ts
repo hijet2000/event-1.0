@@ -18,6 +18,7 @@ import cookieParser from 'cookie-parser';
 import fs from 'fs';
 import path from 'path';
 import nodemailer from 'nodemailer';
+import Stripe from 'stripe';
 
 // Fix for missing Node.js types in frontend-focused environment
 declare var require: any;
@@ -32,9 +33,15 @@ const port = process.env.PORT || 3001;
 const JWT_SECRET = process.env.JWT_SECRET || 'default-secret-change-me';
 const TICKET_SECRET = process.env.TICKET_SECRET || 'ticket-signing-secret-key';
 const SERVER_API_KEY = process.env.SERVER_API_KEY || 'pk_live_12345_generated_secret_key'; 
+const STRIPE_SECRET_KEY = process.env.STRIPE_SECRET_KEY || '';
 
 const IS_PROD = process.env.NODE_ENV === 'production';
 const FRONTEND_URL = process.env.FRONTEND_URL || 'http://localhost:3000';
+
+// Initialize Stripe
+const stripe = new Stripe(STRIPE_SECRET_KEY, {
+    apiVersion: '2025-01-27.acacia' as any, // Use latest API version
+});
 
 // --- Middleware ---
 app.use(cors({
@@ -87,6 +94,35 @@ app.get('/api/health', async (req: any, res: any) => {
         res.json({ status: 'ok' });
     } catch (e) {
         res.status(503).json({ status: 'error' });
+    }
+});
+
+// === PAYMENTS (STRIPE) ===
+app.post('/api/create-payment-intent', authenticate, async (req: any, res: any) => {
+    try {
+        const { amount, currency = 'usd' } = req.body;
+        
+        // Basic validation
+        if (!amount || amount <= 0) return res.status(400).json({ message: 'Invalid amount' });
+
+        // Create a PaymentIntent with the order amount and currency
+        const paymentIntent = await stripe.paymentIntents.create({
+            amount: Math.round(amount * 100), // Stripe expects cents
+            currency: currency,
+            automatic_payment_methods: {
+                enabled: true,
+            },
+            metadata: {
+                userId: req.user.id,
+                email: req.user.email
+            }
+        });
+
+        res.send({
+            clientSecret: paymentIntent.client_secret,
+        });
+    } catch (e: any) {
+        res.status(500).json({ message: e.message });
     }
 });
 
