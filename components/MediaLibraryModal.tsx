@@ -1,6 +1,7 @@
 
 import React, { useState, useEffect, useRef } from 'react';
-import { getMediaLibrary, uploadFile, deleteMedia, type MediaItem } from '../server/api';
+import { getMediaLibrary, uploadFile, deleteMedia } from '../server/api';
+import { type MediaItem } from '../types';
 import { ContentLoader } from './ContentLoader';
 import { Spinner } from './Spinner';
 import { Alert } from './Alert';

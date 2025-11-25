@@ -1,53 +1,75 @@
 
 export type Permission = 
-  'view_dashboard' | 
-  'manage_registrations' | 
-  'manage_settings' | 
-  'manage_users' |
-  'manage_tasks' |
-  'manage_dining' |
-  'manage_accommodation' |
-  'manage_agenda' |
-  'manage_speakers_sponsors' |
-  'view_eventcoin_dashboard'|
-  'send_invitations';
+  | 'view_dashboard' 
+  | 'manage_registrations' 
+  | 'manage_settings' 
+  | 'manage_users'
+  | 'manage_tasks'
+  | 'manage_dining'
+  | 'manage_accommodation'
+  | 'manage_agenda'
+  | 'manage_speakers_sponsors'
+  | 'view_eventcoin_dashboard'
+  | 'send_invitations';
 
 export const ALL_PERMISSIONS: Record<Permission, string> = {
-  view_dashboard: 'Can view the main dashboard and event statistics.',
-  manage_registrations: 'Can view, edit, and manage attendee registrations.',
-  send_invitations: 'Can send email invitations to potential delegates.',
-  manage_settings: 'Can change event settings, theme, and registration form.',
-  manage_users: 'Can create, edit, and delete admin users and roles.',
-  manage_tasks: 'Can manage the event task board.',
-  manage_dining: 'Can manage restaurants and meal plans.',
-  manage_accommodation: 'Can manage hotels and room types.',
-  manage_agenda: 'Can create, edit, and manage the event agenda.',
-  manage_speakers_sponsors: 'Can manage speakers and sponsors.',
-  view_eventcoin_dashboard: 'Can view the EventCoin dashboard.'
+  view_dashboard: 'View Dashboard',
+  manage_registrations: 'Manage Registrations',
+  manage_settings: 'Manage Settings',
+  manage_users: 'Manage Users',
+  manage_tasks: 'Manage Tasks',
+  manage_dining: 'Manage Dining',
+  manage_accommodation: 'Manage Accommodation',
+  manage_agenda: 'Manage Agenda',
+  manage_speakers_sponsors: 'Manage Speakers & Sponsors',
+  view_eventcoin_dashboard: 'View EventCoin Dashboard',
+  send_invitations: 'Send Invitations'
 };
 
-export interface Role {
+export interface RegistrationData {
+  id?: string;
+  name: string;
+  email: string;
+  company?: string;
+  role?: string;
+  createdAt: number;
+  checkedIn?: boolean;
+  [key: string]: any;
+}
+
+export interface Session {
+  id: string;
+  title: string;
+  description: string;
+  startTime: string;
+  endTime: string;
+  location: string;
+  track?: string;
+  capacity?: number;
+  speakerIds: string[];
+}
+
+export interface Speaker {
+  id: string;
+  name: string;
+  title: string;
+  company: string;
+  bio: string;
+  photoUrl: string;
+  linkedinUrl?: string;
+  twitterUrl?: string;
+}
+
+export type SponsorshipTier = 'Platinum' | 'Gold' | 'Silver' | 'Bronze';
+export const SPONSORSHIP_TIERS: SponsorshipTier[] = ['Platinum', 'Gold', 'Silver', 'Bronze'];
+
+export interface Sponsor {
   id: string;
   name: string;
   description: string;
-  permissions: Permission[];
-}
-
-export interface AdminUser {
-    id: string;
-    email: string;
-    passwordHash: string;
-    roleId: string;
-}
-
-export interface FormField {
-  id: string;
-  label: string;
-  type: 'text' | 'textarea' | 'dropdown';
-  placeholder?: string;
-  required: boolean;
-  enabled: boolean;
-  options?: string[];
+  websiteUrl: string;
+  logoUrl: string;
+  tier: SponsorshipTier;
 }
 
 export interface EventConfig {
@@ -76,10 +98,10 @@ export interface EventConfig {
   };
   formFields: FormField[];
   emailTemplates: {
-    userConfirmation: { subject: string; body: string };
-    hostNotification: { subject: string; body: string };
-    passwordReset: { subject: string; body: string };
-    delegateInvitation: { subject: string; body: string };
+    userConfirmation: EmailContent;
+    hostNotification: EmailContent;
+    passwordReset: EmailContent;
+    delegateInvitation: EmailContent;
   };
   emailProvider: 'smtp' | 'google';
   smtp: {
@@ -90,7 +112,7 @@ export interface EventConfig {
     encryption: 'none' | 'ssl' | 'tls';
   };
   googleConfig: {
-      serviceAccountKeyJson: string;
+    serviceAccountKeyJson: string;
   };
   badgeConfig: {
     showName: boolean;
@@ -109,8 +131,7 @@ export interface EventConfig {
     enabled: boolean;
     configUrl: string;
     lastSyncTimestamp?: number;
-    lastSyncStatus?: 'success' | 'failure';
-    lastSyncMessage?: string;
+    lastSyncStatus?: 'success' | 'failed';
   };
   whatsapp: {
     enabled: boolean;
@@ -126,17 +147,14 @@ export interface EventConfig {
   };
 }
 
-// Base registration data, used for both form state and backend
-export interface RegistrationData {
-  id?: string;
-  name: string;
-  email: string;
-  password?: string;
-  passwordHash?: string;
-  createdAt: number;
-  verified?: boolean;
-  checkedIn?: boolean;
-  [key: string]: any; // For custom form fields
+export interface FormField {
+  id: string;
+  label: string;
+  type: 'text' | 'textarea' | 'dropdown';
+  placeholder?: string;
+  required: boolean;
+  enabled: boolean;
+  options?: string[];
 }
 
 export interface EmailContent {
@@ -144,19 +162,58 @@ export interface EmailContent {
   body: string;
 }
 
-export interface EmailPayload extends EmailContent {
+export interface EmailPayload {
   to: string;
+  subject: string;
+  body: string;
 }
 
 export interface DashboardStats {
   totalRegistrations: number;
   maxAttendees: number;
   eventDate: string;
-  eventCoinName: string;
-  eventCoinCirculation: number;
-  recentRegistrations: RegistrationData[];
   registrationTrend: { date: string; count: number }[];
   taskStats: { total: number; completed: number; pending: number };
+  recentRegistrations: RegistrationData[];
+  eventCoinName: string;
+  eventCoinCirculation: number;
+  activeWallets: number;
+  totalTransactions: number;
+}
+
+export interface Transaction {
+  id: string;
+  timestamp: number;
+  fromId: string;
+  toId: string;
+  fromName: string;
+  toName: string;
+  fromEmail: string;
+  toEmail: string;
+  amount: number;
+  type: 'initial' | 'p2p' | 'purchase' | 'reward' | 'admin_adjustment';
+  message: string;
+}
+
+export interface EventCoinStats {
+  totalCirculation: number;
+  totalTransactions: number;
+  activeWallets: number;
+}
+
+export interface AdminUser {
+  id: string;
+  email: string;
+  roleId: string;
+  permissions?: Permission[];
+  createdAt: number;
+}
+
+export interface Role {
+  id: string;
+  name: string;
+  description: string;
+  permissions: Permission[];
 }
 
 export interface PublicEvent {
@@ -164,44 +221,37 @@ export interface PublicEvent {
   name: string;
   date: string;
   location: string;
-  logoUrl: string;
-  colorPrimary: string;
+  logoUrl?: string;
+  colorPrimary?: string;
+  config: EventConfig;
 }
 
 export interface EventData {
     id: string;
     name: string;
-    config: EventConfig;
+    type: string;
 }
 
-// Delegate Portal Types
-export interface DelegateProfile {
-  user: RegistrationData;
-  mealPlanAssignment: MealPlanAssignment | null;
-  restaurants: Restaurant[];
-  accommodationBooking: AccommodationBooking | null;
-  hotels: Hotel[];
-  sessions: Session[];
-  mySessionIds: string[];
-  speakers: Speaker[];
-  sponsors: Sponsor[];
-}
+export type TaskStatus = 'todo' | 'in_progress' | 'completed';
+export type TaskPriority = 'low' | 'medium' | 'high';
 
-// Dining Types
-export type MealType = 'breakfast' | 'lunch' | 'dinner';
-
-export interface MealConsumptionLog {
+export interface Task {
   id: string;
-  delegateId: string;
-  mealType: MealType;
-  date: string; // YYYY-MM-DD
-  timestamp: number;
+  eventId: string;
+  title: string;
+  description: string;
+  status: TaskStatus;
+  priority: TaskPriority;
+  assigneeEmail?: string;
+  dueDate?: string;
+  createdAt: number;
 }
+
 export interface MealPlan {
   id: string;
   name: string;
   description: string;
-  dailyCost: number; // in EventCoin
+  dailyCost: number;
 }
 
 export interface Restaurant {
@@ -209,56 +259,17 @@ export interface Restaurant {
   name: string;
   cuisine: string;
   operatingHours: string;
-  menu: string;
+  menu?: string;
 }
+
+export type MealType = 'breakfast' | 'lunch' | 'dinner';
 
 export interface MealPlanAssignment {
   id: string;
   delegateId: string;
   mealPlanId: string;
-  startDate: string; // YYYY-MM-DD
-  endDate: string; // YYYY-MM-DD
-  totalCost: number;
-}
-
-export interface DiningReservation {
-    id: string;
-    restaurantId: string;
-    delegateId: string;
-    delegateName: string;
-    reservationTime: string; // ISO string
-    partySize: number;
-}
-
-// Accommodation Types
-export type HotelRoomStatus = 'Available' | 'Occupied' | 'Cleaning' | 'OutOfOrder';
-export type AccommodationBookingStatus = 'Confirmed' | 'CheckedIn' | 'CheckedOut';
-
-export interface Hotel {
-  id: string;
-  name: string;
-  description: string;
-  address: string;
-  bookingUrl?: string;
-  roomTypes: RoomType[];
-}
-
-export interface HotelRoom {
-  id: string;
-  hotelId: string;
-  roomTypeId: string;
-  roomNumber: string;
-  status: HotelRoomStatus;
-}
-
-export interface RoomType {
-  id: string;
-  name: string;
-  description: string;
-  amenities: string[];
-  capacity: number;
-  totalRooms: number;
-  costPerNight: number;
+  startDate: string;
+  endDate: string;
 }
 
 export interface AccommodationBooking {
@@ -266,12 +277,31 @@ export interface AccommodationBooking {
   delegateId: string;
   hotelId: string;
   roomTypeId: string;
-  hotelRoomId: string;
-  checkInDate: string; // YYYY-MM-DD
-  checkOutDate: string; // YYYY-MM-DD
+  checkInDate: string;
+  checkOutDate: string;
   status: AccommodationBookingStatus;
-  totalCost: number;
 }
+
+export interface Hotel {
+  id: string;
+  name: string;
+  address: string;
+  description: string;
+  bookingUrl?: string;
+  roomTypes: RoomType[];
+}
+
+export interface RoomType {
+  id: string;
+  name: string;
+  description: string;
+  capacity: number;
+  totalRooms: number;
+  costPerNight: number;
+  amenities: string[];
+}
+
+export type AccommodationBookingStatus = 'Confirmed' | 'CheckedIn' | 'CheckedOut';
 
 export interface EnrichedAccommodationBooking extends AccommodationBooking {
     delegateName: string;
@@ -279,100 +309,69 @@ export interface EnrichedAccommodationBooking extends AccommodationBooking {
     hotelName: string;
     roomTypeName: string;
     roomNumber: string;
+    hotelRoomId?: string;
 }
 
-// EventCoin Types
-export interface EventCoinStats {
-  totalCirculation: number;
-  totalTransactions: number;
-  activeWallets: number;
-}
+export type HotelRoomStatus = 'Available' | 'Occupied' | 'Cleaning' | 'OutOfOrder';
 
-export interface Transaction {
-  id: string;
-  fromId: string;
-  fromName: string;
-  fromEmail: string;
-  toId: string;
-  toName: string;
-  toEmail: string;
-  amount: number;
-  message: string;
-  type: 'initial' | 'p2p' | 'purchase' | 'reward' | 'admin_adjustment';
-  timestamp: number;
-}
-
-// Task Management Types
-export type TaskStatus = 'todo' | 'in_progress' | 'completed';
-export type TaskPriority = 'low' | 'medium' | 'high';
-
-export interface Task {
+export interface HotelRoom {
     id: string;
-    eventId: string;
+    hotelId: string;
+    roomTypeId: string;
+    roomNumber: string;
+    status: HotelRoomStatus;
+}
+
+export interface DiningReservation {
+    id: string;
+    restaurantId: string;
+    delegateId: string;
+    delegateName: string;
+    reservationTime: string;
+    partySize: number;
+}
+
+export interface AppNotification {
+    id: string;
+    userId: string;
+    type: 'info' | 'success' | 'warning' | 'error';
     title: string;
+    message: string;
+    timestamp: number;
+    read: boolean;
+}
+
+export interface SessionQuestion {
+    id: string;
+    sessionId: string;
+    userId: string;
+    userName: string;
+    text: string;
+    upvotes: number;
+    timestamp: number;
+    isAnswered: boolean;
+}
+
+export interface TicketTier {
+    id: string;
+    name: string;
+    price: number;
+    currency: string;
+    limit: number;
+    sold: number;
     description: string;
-    status: TaskStatus;
-    priority: TaskPriority;
-    assigneeEmail: string;
-    dueDate: string; // YYYY-MM-DD
+    benefits: string[];
+    active: boolean;
 }
 
-// Agenda Types
-export interface Session {
-  id: string;
-  title: string;
-  description: string;
-  startTime: string; // ISO String
-  endTime: string; // ISO String
-  location: string;
-  speakerIds: string[];
-  track?: string; // e.g. "Workshop", "Main Stage"
-  capacity?: number;
-}
-
-export interface SessionFeedback {
-  id: string;
-  sessionId: string;
-  userId: string;
-  rating: number; // 1-5
-  comment: string;
-  timestamp: number;
-}
-
-// Speaker & Sponsor Types
-export interface Speaker {
-  id: string;
-  name: string;
-  title: string;
-  company: string;
-  bio: string;
-  photoUrl: string;
-  linkedinUrl?: string;
-  twitterUrl?: string;
-}
-
-export type SponsorshipTier = 'Platinum' | 'Gold' | 'Silver' | 'Bronze';
-
-export const SPONSORSHIP_TIERS: SponsorshipTier[] = ['Platinum', 'Gold', 'Silver', 'Bronze'];
-
-export interface Sponsor {
-  id: string;
-  name: string;
-  description: string;
-  websiteUrl: string;
-  logoUrl: string;
-  tier: SponsorshipTier;
-}
-
-// Networking Types
 export interface NetworkingProfile {
     userId: string;
-    bio: string;
-    interests: string[]; // Array of tags
-    linkedinUrl?: string;
     jobTitle: string;
     company: string;
-    lookingFor: string; // e.g. "Networking", "Hiring", "Mentorship"
+    bio: string;
+    interests: string[];
+    lookingFor: string;
+    linkedinUrl?: string;
     isVisible: boolean;
 }
 
@@ -381,36 +380,44 @@ export interface NetworkingMatch {
     name: string;
     jobTitle: string;
     company: string;
-    score: number; // 0-100
+    score: number;
     reason: string;
     icebreaker: string;
     profile: NetworkingProfile;
 }
 
-// Gamification Types
 export interface ScavengerHuntItem {
     id: string;
     name: string;
     hint: string;
+    secretCode: string;
     rewardAmount: number;
-    secretCode: string; // The value encoded in the QR
-}
-
-export interface ScavengerHuntLog {
-    id: string;
-    userId: string;
-    itemId: string;
-    timestamp: number;
 }
 
 export interface LeaderboardEntry {
     userId: string;
     name: string;
-    score: number;
     itemsFound: number;
+    score: number;
 }
 
-// Media Types
+export interface ChatMessage {
+    id: string;
+    senderId: string;
+    receiverId: string;
+    content: string;
+    timestamp: number;
+    read: boolean;
+}
+
+export interface ChatConversation {
+    withUserId: string;
+    withUserName: string;
+    lastMessage: string;
+    lastTimestamp: number;
+    unreadCount: number;
+}
+
 export interface MediaItem {
     id: string;
     name: string;
@@ -419,3 +426,22 @@ export interface MediaItem {
     url: string;
     uploadedAt: number;
 }
+
+export interface VenueMap {
+    id: string;
+    name: string;
+    imageUrl: string;
+    pins: MapPin[];
+}
+
+export interface MapPin {
+    id: string;
+    x: number; // Percentage 0-100
+    y: number; // Percentage 0-100
+    label: string;
+    type: 'room' | 'sponsor' | 'facility' | 'info';
+    linkedId?: string; // ID of session/room or sponsor
+    description?: string;
+}
+
+export const PIN_TYPES = ['room', 'sponsor', 'facility', 'info'];

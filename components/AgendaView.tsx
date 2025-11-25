@@ -1,14 +1,11 @@
 
-
-
-
-
 import React, { useState, useMemo } from 'react';
 import { type Session, type Speaker } from '../types';
 import { addToAgenda, removeFromAgenda, submitSessionFeedback, downloadSessionIcs } from '../server/api';
 import { StarRating } from './StarRating';
 import { Spinner } from './Spinner';
 import { Alert } from './Alert';
+import { SessionQAModal } from './SessionQAModal';
 
 interface AgendaViewProps {
   sessions: Session[];
@@ -74,8 +71,9 @@ const SessionCard: React.FC<{
     isAdded?: boolean, 
     onToggle?: () => void,
     onRate?: () => void,
+    onQA?: () => void,
     readOnly?: boolean
-}> = ({ session, speakers, isAdded, onToggle, onRate, readOnly }) => {
+}> = ({ session, speakers, isAdded, onToggle, onRate, onQA, readOnly }) => {
   const formatTime = (isoString: string) => new Date(isoString).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: true });
 
   const sessionSpeakers = useMemo(() => 
@@ -85,8 +83,6 @@ const SessionCard: React.FC<{
       .join(', '),
     [session.speakerIds, speakers]
   );
-  
-  const isPast = new Date(session.endTime).getTime() < Date.now();
   
   const handleDownloadIcs = (e: React.MouseEvent) => {
       e.stopPropagation();
@@ -129,10 +125,19 @@ const SessionCard: React.FC<{
                  {onRate && (
                      <button 
                         onClick={onRate}
-                        className="text-xs font-medium text-primary hover:underline flex items-center gap-1"
+                        className="text-xs font-medium text-gray-500 hover:text-primary hover:underline flex items-center gap-1"
                      >
                          <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" viewBox="0 0 20 20" fill="currentColor"><path d="M9.049 2.927c.3-.921 1.603-.921 1.902 0l1.07 3.292a1 1 0 00.95.69h3.462c.969 0 1.371 1.24.588 1.81l-2.8 2.034a1 1 0 00-.364 1.118l1.07 3.292c.3.921-.755 1.688-1.54 1.118l-2.8-2.034a1 1 0 00-1.175 0l-2.8 2.034c-.784.57-1.838-.197-1.539-1.118l1.07-3.292a1 1 0 00-.364-1.118L2.98 8.72c-.783-.57-.38-1.81.588-1.81h3.461a1 1 0 00.951-.69l1.07-3.292z" /></svg>
-                         Rate Session
+                         Rate
+                     </button>
+                 )}
+                 {onQA && (
+                     <button 
+                        onClick={onQA}
+                        className="text-xs font-medium text-gray-500 hover:text-primary hover:underline flex items-center gap-1"
+                     >
+                         <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" viewBox="0 0 20 20" fill="currentColor"><path fillRule="evenodd" d="M18 10c0 3.866-3.582 7-8 7a8.841 8.841 0 01-4.083-.98L2 17l1.338-3.123C2.493 12.767 2 11.434 2 10c0-3.866 3.582-7 8-7s8 3.134 8 7zM7 9H5v2h2V9zm8 0h-2v2h2V9zM9 9h2v2H9V9z" clipRule="evenodd" /></svg>
+                         Q&A
                      </button>
                  )}
             </div>
@@ -158,6 +163,7 @@ export const AgendaView: React.FC<AgendaViewProps> = ({ sessions, speakers, mySe
   const [viewMode, setViewMode] = useState<'all' | 'my'>('all');
   const [localMySessionIds, setLocalMySessionIds] = useState<Set<string>>(new Set(mySessionIds));
   const [feedbackSession, setFeedbackSession] = useState<Session | null>(null);
+  const [qaSession, setQaSession] = useState<Session | null>(null);
   const [feedbackSuccess, setFeedbackSuccess] = useState(false);
 
   const handleToggle = async (sessionId: string) => {
@@ -172,7 +178,6 @@ export const AgendaView: React.FC<AgendaViewProps> = ({ sessions, speakers, mySe
     }
     setLocalMySessionIds(newSet);
 
-    // If provided, call parent handler or API directly
     if (onToggleSession) {
         onToggleSession(sessionId, !isAdded);
     } else if (delegateToken) {
@@ -183,7 +188,6 @@ export const AgendaView: React.FC<AgendaViewProps> = ({ sessions, speakers, mySe
                 await addToAgenda(delegateToken, sessionId);
             }
         } catch (e) {
-            // Revert on error
             console.error("Failed to update agenda", e);
             setLocalMySessionIds(prev => {
                 const revertSet = new Set(prev);
@@ -264,6 +268,7 @@ export const AgendaView: React.FC<AgendaViewProps> = ({ sessions, speakers, mySe
                         isAdded={readOnly ? false : localMySessionIds.has(session.id)}
                         onToggle={() => handleToggle(session.id)}
                         onRate={delegateToken && !readOnly ? () => setFeedbackSession(session) : undefined}
+                        onQA={delegateToken && !readOnly ? () => setQaSession(session) : undefined}
                         readOnly={readOnly}
                     />
                 ))}
@@ -284,6 +289,16 @@ export const AgendaView: React.FC<AgendaViewProps> = ({ sessions, speakers, mySe
         sessionTitle={feedbackSession?.title || ''} 
         onSubmit={handleFeedbackSubmit} 
       />
+
+      {qaSession && delegateToken && (
+          <SessionQAModal 
+            isOpen={!!qaSession} 
+            onClose={() => setQaSession(null)} 
+            sessionId={qaSession.id} 
+            sessionTitle={qaSession.title} 
+            delegateToken={delegateToken} 
+          />
+      )}
     </div>
   );
 };

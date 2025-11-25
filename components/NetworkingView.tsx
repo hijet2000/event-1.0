@@ -8,8 +8,10 @@ import { ContentLoader } from './ContentLoader';
 
 interface NetworkingViewProps {
   delegateToken: string;
+  onStartChat?: (userId: string) => void;
 }
 
+// ... ProfileEditor component remains unchanged ...
 const ProfileEditor: React.FC<{ profile: NetworkingProfile, onSave: (p: Partial<NetworkingProfile>) => Promise<void> }> = ({ profile, onSave }) => {
     const [formData, setFormData] = useState(profile);
     const [isSaving, setIsSaving] = useState(false);
@@ -106,7 +108,7 @@ const ProfileEditor: React.FC<{ profile: NetworkingProfile, onSave: (p: Partial<
     );
 };
 
-const MatchCard: React.FC<{ match: NetworkingMatch }> = ({ match }) => {
+const MatchCard: React.FC<{ match: NetworkingMatch, onMessage: (id: string) => void }> = ({ match, onMessage }) => {
     let scoreColor = 'bg-gray-100 text-gray-800';
     if (match.score >= 80) scoreColor = 'bg-green-100 text-green-800';
     else if (match.score >= 50) scoreColor = 'bg-yellow-100 text-yellow-800';
@@ -122,7 +124,7 @@ const MatchCard: React.FC<{ match: NetworkingMatch }> = ({ match }) => {
                     {match.score}% Match
                 </span>
             </div>
-            <div className="px-4 pb-2">
+            <div className="px-4 pb-2 flex-1">
                  <div className="flex flex-wrap gap-1 mb-3">
                     {match.profile.interests.slice(0, 3).map(tag => (
                         <span key={tag} className="text-xs bg-gray-100 dark:bg-gray-700 px-2 py-0.5 rounded">{tag}</span>
@@ -136,16 +138,22 @@ const MatchCard: React.FC<{ match: NetworkingMatch }> = ({ match }) => {
                 </p>
             </div>
             <div className="mt-auto p-4 border-t dark:border-gray-700 flex justify-between items-center">
-                 <span className="text-xs text-gray-500">{match.profile.lookingFor}</span>
-                 {match.profile.linkedinUrl && (
-                     <a href={match.profile.linkedinUrl} target="_blank" rel="noopener noreferrer" className="text-sm text-blue-600 hover:underline">Connect on LinkedIn</a>
-                 )}
+                 {match.profile.linkedinUrl ? (
+                     <a href={match.profile.linkedinUrl} target="_blank" rel="noopener noreferrer" className="text-sm text-blue-600 hover:underline">LinkedIn</a>
+                 ) : <span></span>}
+                 
+                 <button 
+                    onClick={() => onMessage(match.userId)} 
+                    className="px-4 py-1.5 bg-primary text-white text-sm font-medium rounded hover:bg-primary/90"
+                 >
+                     Message
+                 </button>
             </div>
         </div>
     );
 };
 
-export const NetworkingView: React.FC<NetworkingViewProps> = ({ delegateToken }) => {
+export const NetworkingView: React.FC<NetworkingViewProps> = ({ delegateToken, onStartChat }) => {
     const [loading, setLoading] = useState(true);
     const [profile, setProfile] = useState<NetworkingProfile | null>(null);
     const [matches, setMatches] = useState<NetworkingMatch[]>([]);
@@ -190,6 +198,10 @@ export const NetworkingView: React.FC<NetworkingViewProps> = ({ delegateToken })
         await updateNetworkingProfile(delegateToken, emptyProfile);
         await loadData();
         setActiveTab('profile'); // Send them to edit profile first
+    };
+    
+    const handleMessage = (id: string) => {
+        if (onStartChat) onStartChat(id);
     };
 
     if (loading) return <ContentLoader text="Loading Networking Hub..." />;
@@ -237,7 +249,13 @@ export const NetworkingView: React.FC<NetworkingViewProps> = ({ delegateToken })
                     </p>
                     {matches.length > 0 ? (
                         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-                            {matches.map(match => <MatchCard key={match.userId} match={match} />)}
+                            {matches.map(match => (
+                                <MatchCard 
+                                    key={match.userId} 
+                                    match={match} 
+                                    onMessage={handleMessage}
+                                />
+                            ))}
                         </div>
                     ) : (
                         <div className="text-center py-12 bg-gray-50 dark:bg-gray-800/50 rounded-lg">
@@ -268,7 +286,10 @@ export const NetworkingView: React.FC<NetworkingViewProps> = ({ delegateToken })
                                         <span key={tag} className="text-[10px] bg-gray-100 dark:bg-gray-700 px-1.5 py-0.5 rounded">{tag}</span>
                                     ))}
                                 </div>
-                                {c.linkedinUrl && <a href={c.linkedinUrl} target="_blank" rel="noreferrer" className="text-xs text-blue-500 hover:underline">View LinkedIn</a>}
+                                <div className="flex justify-between items-center mt-2">
+                                    {c.linkedinUrl ? <a href={c.linkedinUrl} target="_blank" rel="noreferrer" className="text-xs text-blue-500 hover:underline">LinkedIn</a> : <span></span>}
+                                    <button onClick={() => handleMessage(c.userId)} className="text-xs text-primary hover:underline font-bold">Message</button>
+                                </div>
                             </div>
                         ))}
                         {filteredDirectory.length === 0 && <p className="col-span-full text-center text-gray-500 py-8">No attendees found.</p>}
