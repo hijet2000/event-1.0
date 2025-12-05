@@ -1,5 +1,5 @@
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { type EventConfig, type FormField } from '../types';
 import { getEventConfig, saveConfig, syncConfigFromGitHub, sendTestEmail, getSystemApiKey } from '../server/api';
 import { ContentLoader } from './ContentLoader';
@@ -9,6 +9,7 @@ import { ImageUpload } from './ImageUpload';
 import { useTheme } from '../contexts/ThemeContext';
 import { ToggleSwitch } from './ToggleSwitch';
 import { FormFieldEditorModal } from './FormFieldEditorModal';
+import { TextInput } from './TextInput';
 
 interface SettingsFormProps {
   adminToken: string;
@@ -94,15 +95,31 @@ export const SettingsForm: React.FC<SettingsFormProps> = ({ adminToken }) => {
   const [editingField, setEditingField] = useState<FormField | null>(null);
   const [editingFieldIndex, setEditingFieldIndex] = useState<number | null>(null);
 
+  // Safety timer to prevent infinite loading
   useEffect(() => {
+      const timer = setTimeout(() => {
+          if (isLoading) {
+              console.warn("Settings loading timed out, forcing stop.");
+              setIsLoading(false);
+              if (!config) setError("Loading timed out. Please try refreshing.");
+          }
+      }, 8000); // 8 seconds timeout
+      return () => clearTimeout(timer);
+  }, [isLoading, config]);
+
+  useEffect(() => {
+      // Prioritize context config if available
       if (contextConfig) {
           setConfig(contextConfig);
           setIsLoading(false);
-      } else if (isContextLoading) {
-          setIsLoading(true);
-      } else {
+          setError(null);
+      } else if (!isContextLoading) {
+          // If context finished loading but returned nothing (or error), try direct fetch as fallback
            getEventConfig()
-            .then(setConfig)
+            .then(data => {
+                setConfig(data);
+                setError(null);
+            })
             .catch(err => setError('Failed to load event settings.'))
             .finally(() => setIsLoading(false));
       }
@@ -120,6 +137,9 @@ export const SettingsForm: React.FC<SettingsFormProps> = ({ adminToken }) => {
       if (!prevConfig) return null;
       
       const newConfig = JSON.parse(JSON.stringify(prevConfig));
+      // Ensure section exists (defensive)
+      if (!newConfig[section]) newConfig[section] = {};
+      
       const finalValue = type === 'number' ? parseInt(value, 10) || 0 : value;
       newConfig[section][name] = finalValue;
       return newConfig;
@@ -347,7 +367,14 @@ export const SettingsForm: React.FC<SettingsFormProps> = ({ adminToken }) => {
   };
 
   if (isLoading) return <ContentLoader text="Loading settings..." />;
-  if (error && !config) return <Alert type="error" message={error} />;
+  
+  if (error && !config) return (
+      <div className="bg-white dark:bg-gray-800 rounded-lg shadow p-6 text-center">
+          <Alert type="error" message={error} />
+          <button onClick={() => window.location.reload()} className="mt-4 text-primary hover:underline">Reload Page</button>
+      </div>
+  );
+  
   if (!config) return <Alert type="error" message="Could not load configuration." />;
 
   const tabs: { id: Tab, label: string }[] = [
@@ -772,11 +799,23 @@ export const SettingsForm: React.FC<SettingsFormProps> = ({ adminToken }) => {
 };
 
 const ColorPickerInput: React.FC<{label: string, name: string, value: string, onChange: (e: React.ChangeEvent<HTMLInputElement>) => void}> = ({ label, name, value, onChange }) => (
-    <div>
-        <label htmlFor={`theme.${name}`} className="block text-sm font-medium text-gray-700 dark:text-gray-300">{label}</label>
-        <div className="flex items-center gap-2 mt-1">
-            <input type="color" name={name} id={`theme.${name}`} value={value} onChange={onChange} className="h-10 w-10 p-1 rounded-md border-gray-300 dark:border-gray-600 shadow-sm cursor-pointer" />
-            <input type="text" name={name} value={value} onChange={onChange} className="block w-full rounded-md border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 shadow-sm sm:text-sm" />
+    <div className="flex items-end gap-3">
+        <div className="flex-grow">
+            <TextInput 
+                label={label} 
+                name={name} 
+                value={value} 
+                onChange={onChange}
+            />
+        </div>
+        <div className="flex-shrink-0">
+            <input 
+                type="color" 
+                name={name} 
+                value={value} 
+                onChange={onChange}
+                className="h-10 w-10 rounded border border-gray-300 dark:border-gray-600 cursor-pointer p-1 bg-white dark:bg-gray-700" 
+            />
         </div>
     </div>
 );

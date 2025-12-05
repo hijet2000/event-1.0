@@ -147,13 +147,8 @@ export const WalletView: React.FC<WalletViewProps> = ({ delegateToken }) => {
                         <ul className="-my-5 divide-y divide-gray-200 dark:divide-gray-700 max-h-[400px] overflow-y-auto">
                             {transactions.map(tx => {
                                 const isSystem = tx.fromId === 'system' || tx.fromId === 'payment_gateway';
-                                // A simplistic check: if I am the recipient, it's incoming (+), else outgoing (-)
-                                // Since we don't have the user ID readily available in this component scope without decoding token again,
-                                // we rely on the fact that the API returns TXs relevant to us. 
-                                // We can check if the 'toEmail' is 'me' or similar, but let's rely on color coding for now based on amounts if possible, 
-                                // or just show the flow.
-                                // Better approach: API should return direction or we decode token. 
-                                // Let's assume if fromId is 'system' or 'payment_gateway', it's Green.
+                                // Simple assumption for now as API returns relevant transactions
+                                // In production, check sender ID from token payload to determine direction
                                 
                                 return (
                                     <li key={tx.id} className="py-4">

@@ -8,6 +8,11 @@ import { MediaItem } from '../types';
  */
 export const uploadFileToStorage = async (file: File): Promise<MediaItem> => {
     return new Promise((resolve, reject) => {
+        if (typeof FileReader === 'undefined') {
+            reject(new Error("File upload is not supported in this environment (FileReader missing)."));
+            return;
+        }
+
         const reader = new FileReader();
         
         reader.onload = async () => {

@@ -1,6 +1,7 @@
 
 import React, { useState, useEffect, Suspense } from 'react';
-import { type RegistrationData, type Permission, type Session, type Speaker, type Sponsor } from './types';
+import ReactDOM from 'react-dom/client';
+import { type RegistrationData, type Permission, type Session, type Speaker, type Sponsor, type TicketTier } from './types';
 import { registerUser, loginDelegate, triggerRegistrationEmails, getInvitationDetails, getPublicEventData, initializeApi } from './server/api';
 import { verifyToken } from './server/auth';
 import { RegistrationForm } from './components/RegistrationForm';
@@ -34,6 +35,7 @@ export interface RegistrationFormState {
   lastName: string;
   email: string;
   password?: string;
+  ticketTierId?: string;
   [key: string]: any;
 }
 
@@ -96,6 +98,7 @@ const EventPageContent: React.FC<EventPageContentProps> = ({ onAdminLogin, event
   const [sessions, setSessions] = useState<Session[]>([]);
   const [speakers, setSpeakers] = useState<Speaker[]>([]);
   const [sponsors, setSponsors] = useState<Sponsor[]>([]);
+  const [ticketTiers, setTicketTiers] = useState<TicketTier[]>([]);
   const [publicDataLoading, setPublicDataLoading] = useState(true);
 
   // Navigation State
@@ -120,7 +123,7 @@ const EventPageContent: React.FC<EventPageContentProps> = ({ onAdminLogin, event
     return null;
   });
 
-  const initialFormData: RegistrationFormState = { firstName: '', lastName: '', email: '', password: '' };
+  const initialFormData: RegistrationFormState = { firstName: '', lastName: '', email: '', password: '', ticketTierId: '' };
   const [formData, setFormData] = useState<RegistrationFormState>(initialFormData);
 
   // Load Public Data (Sessions, Speakers)
@@ -130,6 +133,7 @@ const EventPageContent: React.FC<EventPageContentProps> = ({ onAdminLogin, event
               setSessions(data.sessions);
               setSpeakers(data.speakers);
               setSponsors(data.sponsors);
+              setTicketTiers(data.ticketTiers || []);
               setPublicDataLoading(false);
           }).catch(e => {
               console.warn("Failed to load public data for event:", eventId);
@@ -335,6 +339,7 @@ const EventPageContent: React.FC<EventPageContentProps> = ({ onAdminLogin, event
                     config={config} 
                     speakers={speakers} 
                     sponsors={sponsors}
+                    ticketTiers={ticketTiers}
                     onRegister={() => setPublicTab('register')} 
                 />
             )}
@@ -357,56 +362,84 @@ const EventPageContent: React.FC<EventPageContentProps> = ({ onAdminLogin, event
             )}
 
           {publicTab === 'register' && config && (
-             <div className="max-w-3xl mx-auto animate-fade-in">
+             <div className="max-w-4xl mx-auto animate-fade-in py-4">
                 {view === 'passwordReset' && resetToken && (
                     <PasswordResetForm token={resetToken} />
                 )}
                 
                 {(view === 'registration' || view === 'success') && (
-                    <div className="bg-white dark:bg-gray-800 shadow-2xl rounded-2xl overflow-hidden">
-                    <div className="p-8 sm:p-12">
-                        <header className="text-center">
-                        <h1 className="text-3xl font-bold tracking-tight text-primary sm:text-4xl" style={{ color: config.theme.colorPrimary }}>
-                            Register for {config.event.name}
-                        </h1>
-                         <p className="mt-4 text-gray-600 dark:text-gray-400">
-                            Secure your spot today.
-                        </p>
-                        </header>
+                    <div className="bg-white dark:bg-gray-800 shadow-2xl rounded-[2.5rem] overflow-hidden border border-gray-100 dark:border-gray-700 relative">
+                        {/* Decorative Top Bar */}
+                        <div className="h-2.5 bg-gradient-to-r from-primary via-indigo-500 to-secondary w-full absolute top-0 left-0" />
                         
-                        <div className="mt-10">
-                        {error && <div className="mb-6"><Alert type="error" message={error} /></div>}
+                        <div className="p-8 sm:p-14">
+                            <header className="text-center mb-12">
+                                <div className="inline-flex items-center justify-center p-1.5 mb-6 bg-primary/5 rounded-full">
+                                    <span className="px-4 py-1.5 rounded-full bg-primary text-white text-xs font-bold uppercase tracking-widest shadow-sm">
+                                        Registration Open
+                                    </span>
+                                </div>
+                                <h1 className="text-4xl sm:text-5xl font-extrabold tracking-tight text-gray-900 dark:text-white mb-6 leading-tight">
+                                    {config.event.name}
+                                </h1>
+                                <div className="flex flex-col sm:flex-row items-center justify-center gap-2 sm:gap-6 text-gray-600 dark:text-gray-400 text-lg mb-6">
+                                    <span className="flex items-center">
+                                        <svg className="w-5 h-5 mr-2 text-primary" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z"></path></svg>
+                                        {config.event.date}
+                                    </span>
+                                    <span className="hidden sm:block text-gray-300">•</span>
+                                    <span className="flex items-center">
+                                        <svg className="w-5 h-5 mr-2 text-primary" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M17.657 16.657L13.414 20.9a1.998 1.998 0 01-2.827 0l-4.244-4.243a8 8 0 1111.314 0z"></path><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M15 11a3 3 0 11-6 0 3 3 0 016 0z"></path></svg>
+                                        {config.event.location}
+                                    </span>
+                                </div>
+                                <p className="text-lg text-gray-600 dark:text-gray-400 max-w-2xl mx-auto leading-relaxed">
+                                    Join us for an unforgettable experience. Secure your spot now.
+                                </p>
+                            </header>
+                            
+                            <div className="mt-8">
+                            {error && <div className="mb-6"><Alert type="error" message={error} /></div>}
 
-                        {view === 'success' ? (
-                            <div className="text-center">
-                            <Alert type="success" message="Registration Successful! Please check your email for a confirmation message." />
-                            <button
-                                onClick={() => {
-                                setView('registration');
-                                handleReset();
-                                }}
-                                className="mt-6 w-full sm:w-auto inline-flex justify-center items-center py-3 px-6 border border-transparent rounded-md shadow-sm text-sm font-medium text-white bg-primary hover:bg-primary/90"
-                            >
-                                Register Another Person
-                            </button>
+                            {view === 'success' ? (
+                                <div className="text-center py-10 animate-fade-in-up">
+                                <div className="mx-auto flex items-center justify-center h-24 w-24 rounded-full bg-green-100 dark:bg-green-900/50 mb-8 animate-bounce">
+                                    <svg className="h-12 w-12 text-green-600 dark:text-green-300 transform transition-transform duration-500 scale-110" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={3} d="M5 13l4 4L19 7" />
+                                    </svg>
+                                </div>
+                                <h3 className="text-3xl font-bold text-gray-900 dark:text-white mb-3">You're All Set!</h3>
+                                <p className="text-lg text-gray-600 dark:text-gray-300 mb-10 max-w-md mx-auto">
+                                    Registration confirmed. Check your email for your ticket and event details.
+                                </p>
+                                <button
+                                    onClick={() => {
+                                    setView('registration');
+                                    handleReset();
+                                    }}
+                                    className="inline-flex justify-center items-center py-3.5 px-8 border border-transparent rounded-xl shadow-lg text-lg font-bold text-white bg-primary hover:bg-primary/90 transform transition hover:-translate-y-1 hover:shadow-xl"
+                                >
+                                    Register Another Person
+                                </button>
+                                </div>
+                            ) : isSoldOut ? (
+                                <div className="text-center p-12 bg-yellow-50 dark:bg-yellow-900/20 rounded-2xl border border-yellow-200 dark:border-yellow-800">
+                                    <h2 className="text-2xl font-bold text-gray-800 dark:text-gray-200">Registration Closed</h2>
+                                    <p className="mt-2 text-gray-600 dark:text-gray-400">We're sorry, but this event has reached its maximum capacity. Registration is no longer available.</p>
+                                </div>
+                            ) : (
+                                <RegistrationForm
+                                formData={formData}
+                                onFormChange={handleFormChange}
+                                onSubmit={handleSubmit}
+                                onReset={handleReset}
+                                isLoading={false}
+                                config={config.formFields}
+                                ticketTiers={ticketTiers}
+                                />
+                            )}
                             </div>
-                        ) : isSoldOut ? (
-                            <div className="text-center p-8 bg-yellow-50 dark:bg-yellow-900/20 rounded-lg">
-                                <h2 className="text-2xl font-bold text-gray-800 dark:text-gray-200">Registration Closed</h2>
-                                <p className="mt-2 text-gray-600 dark:text-gray-400">We're sorry, but this event has reached its maximum capacity. Registration is no longer available.</p>
-                            </div>
-                        ) : (
-                            <RegistrationForm
-                            formData={formData}
-                            onFormChange={handleFormChange}
-                            onSubmit={handleSubmit}
-                            onReset={handleReset}
-                            isLoading={false}
-                            config={config.formFields}
-                            />
-                        )}
                         </div>
-                    </div>
                     </div>
                 )}
              </div>
@@ -510,7 +543,10 @@ function App() {
     <ErrorBoundary>
       {adminSession ? (
         <Suspense fallback={<div className="min-h-screen flex items-center justify-center"><ContentLoader text="Loading dashboard..." /></div>}>
-             <AdminPortal onLogout={handleAdminLogout} adminToken={adminSession.token} user={adminSession.user} />
+             {/* Wrap AdminPortal in ThemeProvider to ensure SettingsForm has context */}
+             <ThemeProvider eventId="main-event">
+                <AdminPortal onLogout={handleAdminLogout} adminToken={adminSession.token} user={adminSession.user} />
+             </ThemeProvider>
         </Suspense>
       ) : (
         (() => {

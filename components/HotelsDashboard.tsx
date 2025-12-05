@@ -1,7 +1,7 @@
 
 import React, { useState, useEffect } from 'react';
-import { type EnrichedAccommodationBooking, type Hotel, type AccommodationBookingStatus, type HotelRoom, HotelRoomStatus } from '../types';
-import { getAccommodationBookings, updateBookingStatus, getHotels, saveHotel, deleteHotel, generateHotelRooms, getAvailableRooms, assignRoomToBooking, getAllRooms, updateRoomStatus, processCheckOut } from '../server/api';
+import { type EnrichedAccommodationBooking, type Hotel, type AccommodationBookingStatus, type HotelRoom, HotelRoomStatus, type RegistrationData } from '../types';
+import { getAccommodationBookings, updateBookingStatus, getHotels, saveHotel, deleteHotel, generateHotelRooms, getAvailableRooms, assignRoomToBooking, getAllRooms, updateRoomStatus, processCheckOut, cancelAccommodationBooking, getRegistrations, createAdminAccommodationBooking } from '../server/api';
 import { ContentLoader } from './ContentLoader';
 import { Alert } from './Alert';
 import { Spinner } from './Spinner';
@@ -16,13 +16,73 @@ const BookingStatusBadge: React.FC<{ status: AccommodationBookingStatus }> = ({ 
         Confirmed: 'bg-blue-100 text-blue-800 dark:bg-blue-900 dark:text-blue-200',
         CheckedIn: 'bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-200',
         CheckedOut: 'bg-gray-100 text-gray-800 dark:bg-gray-700 dark:text-gray-200',
+        Cancelled: 'bg-red-100 text-red-800 dark:bg-red-900 dark:text-red-200',
     };
     return (
         <span className={`px-2 inline-flex text-xs leading-5 font-semibold rounded-full ${colors[status] || colors.Confirmed}`}>
-            {status}
+            {status.replace(/([A-Z])/g, ' $1').trim()}
         </span>
     );
 };
+
+const StatBox: React.FC<{ label: string, value: string | number, sub?: string, color?: string }> = ({ label, value, sub, color = 'bg-white dark:bg-gray-800' }) => (
+    <div className={`${color} p-4 rounded-lg shadow-sm border border-gray-100 dark:border-gray-700`}>
+        <p className="text-xs text-gray-500 uppercase font-bold">{label}</p>
+        <p className="text-2xl font-bold text-gray-900 dark:text-white mt-1">{value}</p>
+        {sub && <p className="text-xs text-gray-400 mt-1">{sub}</p>}
+    </div>
+);
+
+const HotelCard: React.FC<{ hotel: Hotel, onEdit: () => void, onDelete: () => void, onInventory: () => void }> = ({ hotel, onEdit, onDelete, onInventory }) => {
+    const totalRooms = hotel.roomTypes.reduce((acc, rt) => acc + rt.totalRooms, 0);
+    const minPrice = hotel.roomTypes.length > 0 ? Math.min(...hotel.roomTypes.map(rt => rt.costPerNight)) : 0;
+    const maxPrice = hotel.roomTypes.length > 0 ? Math.max(...hotel.roomTypes.map(rt => rt.costPerNight)) : 0;
+    
+    const priceRange = minPrice === maxPrice ? `${minPrice}` : `${minPrice} - ${maxPrice}`;
+
+    return (
+        <div className="bg-white dark:bg-gray-800 shadow-sm hover:shadow-md transition-shadow rounded-lg p-5 border border-gray-200 dark:border-gray-700 flex flex-col h-full">
+            <div className="flex-1">
+                <h4 className="font-bold text-lg text-gray-900 dark:text-white mb-1">{hotel.name}</h4>
+                <p className="text-sm text-gray-500 dark:text-gray-400 mb-3 flex items-start">
+                    <svg className="w-4 h-4 mr-1 mt-0.5 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M17.657 16.657L13.414 20.9a1.998 1.998 0 01-2.827 0l-4.244-4.243a8 8 0 1111.314 0z"/><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M15 11a3 3 0 11-6 0 3 3 0 016 0z"/></svg>
+                    {hotel.address}
+                </p>
+                
+                <div className="flex gap-4 mb-4 text-sm">
+                    <div className="flex-1 bg-gray-50 dark:bg-gray-700/30 p-2 rounded text-center">
+                        <span className="block text-xs text-gray-500 uppercase font-bold">Capacity</span>
+                        <span className="block font-semibold text-gray-800 dark:text-gray-200">{totalRooms} Rooms</span>
+                    </div>
+                    <div className="flex-1 bg-gray-50 dark:bg-gray-700/30 p-2 rounded text-center">
+                        <span className="block text-xs text-gray-500 uppercase font-bold">Rates</span>
+                        <span className="block font-semibold text-primary">{priceRange} EC</span>
+                    </div>
+                </div>
+
+                {hotel.description && <p className="text-sm text-gray-600 dark:text-gray-300 line-clamp-3 mb-4">{hotel.description}</p>}
+                
+                <div className="text-xs text-gray-500 mb-2">
+                    <span className="font-semibold">Room Types:</span> {hotel.roomTypes.map(rt => rt.name).join(', ') || 'None'}
+                </div>
+            </div>
+            
+            <div className="mt-5 pt-4 border-t border-gray-100 dark:border-gray-700 flex justify-between items-center gap-2">
+                <button onClick={onInventory} className="flex-1 text-xs bg-indigo-50 dark:bg-indigo-900/30 text-indigo-700 dark:text-indigo-300 px-3 py-2 rounded hover:bg-indigo-100 dark:hover:bg-indigo-900/50 font-medium transition-colors">
+                    Manage Inventory
+                </button>
+                <div className="flex gap-1">
+                    <button onClick={onEdit} className="p-2 text-gray-500 hover:text-primary hover:bg-gray-100 dark:hover:bg-gray-700 rounded transition-colors" title="Edit Details">
+                        <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" /></svg>
+                    </button>
+                    <button onClick={onDelete} className="p-2 text-gray-500 hover:text-red-600 hover:bg-red-50 dark:hover:bg-red-900/20 rounded transition-colors" title="Delete Property">
+                        <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" /></svg>
+                    </button>
+                </div>
+            </div>
+        </div>
+    );
+}
 
 // New Modal for Generating Inventory
 const GenerateInventoryModal: React.FC<{ isOpen: boolean, onClose: () => void, hotel: Hotel | null, adminToken: string }> = ({ isOpen, onClose, hotel, adminToken }) => {
@@ -150,6 +210,107 @@ const CheckInModal: React.FC<{
     );
 };
 
+// Add Booking Modal
+const AddBookingModal: React.FC<{ isOpen: boolean, onClose: () => void, adminToken: string, hotels: Hotel[], onSuccess: () => void }> = ({ isOpen, onClose, adminToken, hotels, onSuccess }) => {
+    const [delegates, setDelegates] = useState<RegistrationData[]>([]);
+    const [selectedDelegate, setSelectedDelegate] = useState('');
+    const [selectedHotel, setSelectedHotel] = useState('');
+    const [selectedRoomType, setSelectedRoomType] = useState('');
+    const [checkIn, setCheckIn] = useState(new Date().toISOString().split('T')[0]);
+    const [checkOut, setCheckOut] = useState(new Date(Date.now() + 86400000).toISOString().split('T')[0]);
+    const [loading, setLoading] = useState(false);
+    const [loadingDelegates, setLoadingDelegates] = useState(false);
+    const [error, setError] = useState<string | null>(null);
+
+    useEffect(() => {
+        if (isOpen) {
+            setLoadingDelegates(true);
+            getRegistrations(adminToken).then(setDelegates).finally(() => setLoadingDelegates(false));
+            if (hotels.length > 0) setSelectedHotel(hotels[0].id);
+        }
+    }, [isOpen, adminToken, hotels]);
+
+    const activeHotel = hotels.find(h => h.id === selectedHotel);
+
+    useEffect(() => {
+        if (activeHotel && activeHotel.roomTypes.length > 0) {
+            setSelectedRoomType(activeHotel.roomTypes[0].id);
+        } else {
+            setSelectedRoomType('');
+        }
+    }, [selectedHotel, activeHotel]);
+
+    if (!isOpen) return null;
+
+    const handleSubmit = async (e: React.FormEvent) => {
+        e.preventDefault();
+        if (!selectedDelegate || !selectedHotel || !selectedRoomType) {
+            setError("All fields are required.");
+            return;
+        }
+        
+        setLoading(true);
+        setError(null);
+        try {
+            await createAdminAccommodationBooking(adminToken, selectedDelegate, selectedHotel, selectedRoomType, checkIn, checkOut);
+            onSuccess();
+            onClose();
+        } catch (e) {
+            setError(e instanceof Error ? e.message : "Failed to create booking.");
+        } finally {
+            setLoading(false);
+        }
+    };
+
+    return (
+        <div className="fixed inset-0 bg-black bg-opacity-60 z-50 flex items-center justify-center p-4" onClick={onClose}>
+            <div className="bg-white dark:bg-gray-800 rounded-lg shadow-xl w-full max-w-lg p-6" onClick={e => e.stopPropagation()}>
+                <h3 className="text-xl font-bold mb-4 dark:text-white">Create Booking</h3>
+                {error && <Alert type="error" message={error} />}
+                <form onSubmit={handleSubmit} className="space-y-4">
+                    <div>
+                        <label className="block text-sm font-medium mb-1">Delegate</label>
+                        {loadingDelegates ? <Spinner /> : (
+                            <select value={selectedDelegate} onChange={e => setSelectedDelegate(e.target.value)} className="w-full border p-2 rounded dark:bg-gray-700">
+                                <option value="">Select a delegate...</option>
+                                {delegates.map(d => <option key={d.id} value={d.id}>{d.name} ({d.email})</option>)}
+                            </select>
+                        )}
+                    </div>
+                    <div>
+                        <label className="block text-sm font-medium mb-1">Hotel</label>
+                        <select value={selectedHotel} onChange={e => setSelectedHotel(e.target.value)} className="w-full border p-2 rounded dark:bg-gray-700">
+                            {hotels.map(h => <option key={h.id} value={h.id}>{h.name}</option>)}
+                        </select>
+                    </div>
+                    <div>
+                        <label className="block text-sm font-medium mb-1">Room Type</label>
+                        <select value={selectedRoomType} onChange={e => setSelectedRoomType(e.target.value)} className="w-full border p-2 rounded dark:bg-gray-700" disabled={!activeHotel}>
+                            {activeHotel?.roomTypes.map(rt => <option key={rt.id} value={rt.id}>{rt.name} ({rt.totalRooms} rooms)</option>)}
+                        </select>
+                    </div>
+                    <div className="grid grid-cols-2 gap-4">
+                        <div>
+                            <label className="block text-sm font-medium mb-1">Check-in</label>
+                            <input type="date" value={checkIn} onChange={e => setCheckIn(e.target.value)} className="w-full border p-2 rounded dark:bg-gray-700" />
+                        </div>
+                        <div>
+                            <label className="block text-sm font-medium mb-1">Check-out</label>
+                            <input type="date" value={checkOut} onChange={e => setCheckOut(e.target.value)} className="w-full border p-2 rounded dark:bg-gray-700" />
+                        </div>
+                    </div>
+                    <div className="flex justify-end gap-3 pt-4">
+                        <button type="button" onClick={onClose} className="px-4 py-2 border rounded">Cancel</button>
+                        <button type="submit" disabled={loading} className="px-4 py-2 bg-primary text-white rounded hover:bg-primary/90">
+                            {loading ? <Spinner /> : 'Create Booking'}
+                        </button>
+                    </div>
+                </form>
+            </div>
+        </div>
+    );
+};
+
 const RoomCard: React.FC<{ room: HotelRoom, onClick: () => void }> = ({ room, onClick }) => {
     const statusColors: Record<HotelRoomStatus, string> = {
         Available: 'bg-green-100 border-green-300 text-green-800 dark:bg-green-900/30 dark:border-green-800 dark:text-green-200',
@@ -221,6 +382,9 @@ export const HotelsDashboard: React.FC<HotelsDashboardProps> = ({ adminToken }) 
     const [error, setError] = useState<string | null>(null);
     const [actionLoading, setActionLoading] = useState<Record<string, boolean>>({});
     
+    // Filters
+    const [bookingStatusFilter, setBookingStatusFilter] = useState<string>('active');
+    
     // Modal State
     const [isHotelModalOpen, setHotelModalOpen] = useState(false);
     const [editingHotel, setEditingHotel] = useState<Hotel | null>(null);
@@ -228,6 +392,7 @@ export const HotelsDashboard: React.FC<HotelsDashboardProps> = ({ adminToken }) 
     // New Modals
     const [inventoryHotel, setInventoryHotel] = useState<Hotel | null>(null);
     const [checkInBooking, setCheckInBooking] = useState<EnrichedAccommodationBooking | null>(null);
+    const [isBookingModalOpen, setIsBookingModalOpen] = useState(false);
     
     // Housekeeping
     const [selectedRoom, setSelectedRoom] = useState<HotelRoom | null>(null);
@@ -283,6 +448,18 @@ export const HotelsDashboard: React.FC<HotelsDashboardProps> = ({ adminToken }) 
             }
             return;
         }
+        
+        if (newStatus === 'Cancelled') {
+             if (window.confirm(`Are you sure you want to cancel the booking for ${booking.delegateName}? This will release the room inventory.`)) {
+                try {
+                    await cancelAccommodationBooking(adminToken, booking.id);
+                    fetchData();
+                } catch (e) {
+                    alert("Failed to cancel booking.");
+                }
+             }
+             return;
+        }
 
         setActionLoading(prev => ({ ...prev, [booking.id]: true }));
         try {
@@ -317,6 +494,23 @@ export const HotelsDashboard: React.FC<HotelsDashboardProps> = ({ adminToken }) 
         }
     };
 
+    const filteredBookings = bookings.filter(b => {
+        if (bookingStatusFilter === 'active') {
+            return b.status !== 'Cancelled' && b.status !== 'CheckedOut';
+        }
+        if (bookingStatusFilter === 'all') return true;
+        return b.status === bookingStatusFilter;
+    });
+
+    // Calculate Stats
+    const totalBookings = bookings.length;
+    const activeBookings = bookings.filter(b => b.status === 'CheckedIn').length;
+    const confirmedBookings = bookings.filter(b => b.status === 'Confirmed').length;
+    
+    // Calculate total capacity
+    const totalCapacity = hotels.reduce((acc, h) => acc + h.roomTypes.reduce((rtAcc, rt) => rtAcc + rt.totalRooms, 0), 0);
+    const occupancyRate = totalCapacity > 0 ? Math.round(((activeBookings) / totalCapacity) * 100) : 0;
+
     if (isLoading) return <ContentLoader text="Loading accommodation data..." />;
     if (error) return <Alert type="error" message={error} />;
 
@@ -336,10 +530,40 @@ export const HotelsDashboard: React.FC<HotelsDashboardProps> = ({ adminToken }) 
                 </div>
             </div>
 
+            {/* Header Stats */}
+            <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-8">
+                <StatBox label="Total Properties" value={hotels.length} />
+                <StatBox label="Total Capacity" value={totalCapacity} sub="Rooms across all hotels" />
+                <StatBox label="Active Stays" value={activeBookings} sub={`${confirmedBookings} arriving soon`} />
+                <StatBox label="Occupancy Rate" value={`${occupancyRate}%`} color={occupancyRate > 80 ? 'bg-red-50 dark:bg-red-900/20' : 'bg-white dark:bg-gray-800'} />
+            </div>
+
             {/* Bookings Tab */}
             {activeTab === 'bookings' && (
                 <>
-                    <h3 className="text-lg font-semibold mb-4">Recent Bookings</h3>
+                    <div className="flex flex-col sm:flex-row justify-between items-center mb-4 gap-4">
+                        <div className="flex items-center space-x-2">
+                            <label className="text-sm font-medium text-gray-700 dark:text-gray-300">Filter:</label>
+                            <select 
+                                value={bookingStatusFilter} 
+                                onChange={(e) => setBookingStatusFilter(e.target.value)} 
+                                className="border border-gray-300 dark:border-gray-600 rounded-md shadow-sm py-1.5 px-3 text-sm dark:bg-gray-700"
+                            >
+                                <option value="active">Active (Confirmed & Checked In)</option>
+                                <option value="all">All Bookings</option>
+                                <option value="Confirmed">Confirmed Only</option>
+                                <option value="CheckedIn">Checked In Only</option>
+                                <option value="CheckedOut">Checked Out Only</option>
+                                <option value="Cancelled">Cancelled Only</option>
+                            </select>
+                        </div>
+                        <button 
+                            onClick={() => setIsBookingModalOpen(true)}
+                            className="py-2 px-4 text-sm font-medium text-white bg-primary rounded-md shadow-sm hover:bg-primary/90"
+                        >
+                            + New Booking
+                        </button>
+                    </div>
                     <div className="overflow-x-auto bg-white dark:bg-gray-800 shadow-md rounded-lg">
                         <table className="min-w-full divide-y divide-gray-200 dark:divide-gray-700">
                             <thead className="bg-gray-50 dark:bg-gray-700/50">
@@ -352,40 +576,48 @@ export const HotelsDashboard: React.FC<HotelsDashboardProps> = ({ adminToken }) 
                                 </tr>
                             </thead>
                             <tbody className="divide-y divide-gray-200 dark:divide-gray-700">
-                            {bookings.map(b => (
+                            {filteredBookings.map(b => (
                                 <tr key={b.id}>
                                     <td className="px-6 py-4">
-                                        <div className="text-sm font-medium text-gray-900 dark:text-white">{b.delegateName}</div>
+                                        <div className="text-sm font-bold text-gray-900 dark:text-white">{b.delegateName}</div>
                                         <div className="text-xs text-gray-500">{b.delegateEmail}</div>
                                     </td>
                                     <td className="px-6 py-4">
-                                        <div className="text-sm text-gray-900 dark:text-white">{b.hotelName}</div>
+                                        <div className="text-sm font-medium text-gray-900 dark:text-white">{b.hotelName}</div>
                                         <div className="text-xs text-gray-500">
-                                            {b.roomTypeName} 
-                                            {b.roomNumber !== 'Pending' ? <span className="ml-1 font-bold text-primary">#{b.roomNumber}</span> : <span className="ml-1 italic text-yellow-600">(Unassigned)</span>}
+                                            <span className="font-semibold">{b.roomTypeName}</span>
+                                            {b.roomNumber && b.roomNumber !== 'Pending' && (
+                                                <span className="ml-2 px-1.5 py-0.5 bg-gray-100 dark:bg-gray-700 rounded text-gray-700 dark:text-gray-300 font-mono">
+                                                    Room {b.roomNumber}
+                                                </span>
+                                            )}
                                         </div>
                                     </td>
-                                    <td className="px-6 py-4 text-sm text-gray-500 dark:text-gray-400">{new Date(b.checkInDate).toLocaleDateString()} - {new Date(b.checkOutDate).toLocaleDateString()}</td>
+                                    <td className="px-6 py-4 text-sm text-gray-500 dark:text-gray-400">
+                                        <div>In: {new Date(b.checkInDate).toLocaleDateString()}</div>
+                                        <div>Out: {new Date(b.checkOutDate).toLocaleDateString()}</div>
+                                    </td>
                                     <td className="px-6 py-4"><BookingStatusBadge status={b.status} /></td>
                                     <td className="px-6 py-4 text-right text-sm font-medium">
                                         <div className="flex items-center justify-end gap-2">
-                                            <select
-                                                value={b.status}
-                                                onChange={(e) => handleBookingStatusChange(b, e.target.value as AccommodationBookingStatus)}
-                                                disabled={actionLoading[b.id] || b.status === 'CheckedOut'}
-                                                className="block w-32 rounded-md border-gray-300 dark:border-gray-600 py-1.5 text-xs shadow-sm focus:border-primary focus:ring-primary bg-white dark:bg-gray-700 text-gray-900 dark:text-white"
-                                            >
-                                                <option value="Confirmed">Confirmed</option>
-                                                <option value="CheckedIn">Check In</option>
-                                                <option value="CheckedOut">Check Out</option>
-                                            </select>
-                                            {actionLoading[b.id] && <Spinner />}
+                                            {actionLoading[b.id] ? <Spinner /> : (
+                                                <select
+                                                    value={b.status}
+                                                    onChange={(e) => handleBookingStatusChange(b, e.target.value as AccommodationBookingStatus)}
+                                                    className="block w-32 rounded-md border-gray-300 dark:border-gray-600 py-1.5 text-xs shadow-sm focus:border-primary focus:ring-primary bg-white dark:bg-gray-700 text-gray-900 dark:text-white"
+                                                >
+                                                    <option value="Confirmed">Confirmed</option>
+                                                    <option value="CheckedIn">Check In</option>
+                                                    <option value="CheckedOut">Check Out</option>
+                                                    <option value="Cancelled">Cancel</option>
+                                                </select>
+                                            )}
                                         </div>
                                     </td>
                                 </tr>
                             ))}
-                            {bookings.length === 0 && (
-                                <tr><td colSpan={5} className="text-center py-10 text-gray-500 italic">No bookings found.</td></tr>
+                            {filteredBookings.length === 0 && (
+                                <tr><td colSpan={5} className="text-center py-10 text-gray-500 italic">No bookings found matching filter.</td></tr>
                             )}
                             </tbody>
                         </table>
@@ -407,19 +639,13 @@ export const HotelsDashboard: React.FC<HotelsDashboardProps> = ({ adminToken }) 
                     </div>
                     <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
                         {hotels.map(hotel => (
-                            <div key={hotel.id} className="bg-white dark:bg-gray-800 shadow rounded-lg p-4 border border-gray-200 dark:border-gray-700">
-                                <h4 className="font-bold text-lg">{hotel.name}</h4>
-                                <p className="text-sm text-gray-500 mb-2">{hotel.address}</p>
-                                <div className="flex justify-between items-center mt-4 pt-4 border-t dark:border-gray-700">
-                                    <button onClick={() => setInventoryHotel(hotel)} className="text-xs bg-secondary/10 text-secondary px-2 py-1 rounded hover:bg-secondary/20">
-                                        Manage Inventory
-                                    </button>
-                                    <div className="space-x-2">
-                                        <button onClick={() => { setEditingHotel(hotel); setHotelModalOpen(true); }} className="text-sm text-primary hover:underline">Edit</button>
-                                        <button onClick={() => handleDeleteHotel(hotel.id)} className="text-sm text-red-600 hover:underline">Delete</button>
-                                    </div>
-                                </div>
-                            </div>
+                            <HotelCard 
+                                key={hotel.id}
+                                hotel={hotel}
+                                onEdit={() => { setEditingHotel(hotel); setHotelModalOpen(true); }}
+                                onDelete={() => handleDeleteHotel(hotel.id)}
+                                onInventory={() => setInventoryHotel(hotel)}
+                            />
                         ))}
                         {hotels.length === 0 && <p className="text-gray-500 italic">No hotels added yet.</p>}
                     </div>
@@ -484,6 +710,14 @@ export const HotelsDashboard: React.FC<HotelsDashboardProps> = ({ adminToken }) 
                 room={selectedRoom}
                 adminToken={adminToken}
                 onUpdate={fetchData}
+            />
+
+            <AddBookingModal
+                isOpen={isBookingModalOpen}
+                onClose={() => setIsBookingModalOpen(false)}
+                adminToken={adminToken}
+                hotels={hotels}
+                onSuccess={fetchData}
             />
         </div>
     );

@@ -1,6 +1,6 @@
 
 import React, { useState, useEffect } from 'react';
-import { getDatabaseSchema, generateSqlExport, isBackendConnected, initializeApi, setForceOffline } from '../server/api';
+import { getDatabaseSchema, generateSqlExport, isBackendConnected, initializeApi, setForceOffline, seedDemoData } from '../server/api';
 import { ContentLoader } from './ContentLoader';
 import { Alert } from './Alert';
 import { Spinner } from './Spinner';
@@ -20,6 +20,10 @@ export const SystemStatus: React.FC<SystemStatusProps> = ({ adminToken }) => {
   const [isOnline, setIsOnline] = useState(isBackendConnected());
   const [isConnecting, setIsConnecting] = useState(false);
   const [connectionError, setConnectionError] = useState<string|null>(null);
+  
+  // Seeding State
+  const [isSeeding, setIsSeeding] = useState(false);
+  const [seedMessage, setSeedMessage] = useState<string|null>(null);
 
   useEffect(() => {
     const load = async () => {
@@ -61,6 +65,20 @@ export const SystemStatus: React.FC<SystemStatusProps> = ({ adminToken }) => {
       } else {
           setForceOffline();
           setIsOnline(false);
+      }
+  };
+  
+  const handleSeedData = async () => {
+      if (!window.confirm("This will add sample sessions, speakers, and venues to your database. Continue?")) return;
+      setIsSeeding(true);
+      setSeedMessage(null);
+      try {
+          await seedDemoData(adminToken);
+          setSeedMessage("Demo data populated successfully!");
+      } catch (e) {
+          setSeedMessage("Failed to populate data.");
+      } finally {
+          setIsSeeding(false);
       }
   };
 
@@ -107,6 +125,22 @@ export const SystemStatus: React.FC<SystemStatusProps> = ({ adminToken }) => {
                   <Alert type="error" message={connectionError} />
               </div>
           )}
+          
+          {/* Demo Data Seeder (Only in Sandbox usually, but allowed in Live for demo purposes) */}
+          <div className="mt-6 pt-6 border-t border-gray-100 dark:border-gray-700 flex justify-between items-center">
+              <div>
+                  <h4 className="font-bold text-gray-800 dark:text-gray-200">Demo Data</h4>
+                  <p className="text-xs text-gray-500">Populate the system with sample content for testing.</p>
+              </div>
+              <button 
+                  onClick={handleSeedData} 
+                  disabled={isSeeding}
+                  className="px-4 py-2 bg-indigo-50 dark:bg-indigo-900/30 text-indigo-600 dark:text-indigo-300 border border-indigo-200 dark:border-indigo-700 rounded-md text-sm font-medium hover:bg-indigo-100 dark:hover:bg-indigo-900/50 transition-colors flex items-center gap-2"
+              >
+                  {isSeeding ? <Spinner /> : 'Populate Sample Data'}
+              </button>
+          </div>
+          {seedMessage && <div className="mt-3"><Alert type="success" message={seedMessage} /></div>}
       </div>
 
       <div className="border-b border-gray-200 dark:border-gray-700 mb-6">

@@ -11,7 +11,6 @@ interface NetworkingViewProps {
   onStartChat?: (userId: string) => void;
 }
 
-// ... ProfileEditor component remains unchanged ...
 const ProfileEditor: React.FC<{ profile: NetworkingProfile, onSave: (p: Partial<NetworkingProfile>) => Promise<void> }> = ({ profile, onSave }) => {
     const [formData, setFormData] = useState(profile);
     const [isSaving, setIsSaving] = useState(false);

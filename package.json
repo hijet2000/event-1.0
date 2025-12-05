@@ -28,7 +28,8 @@
     "vite": "^7.2.4",
     "@stripe/stripe-js": "^8.5.2",
     "stripe": "^20.0.0",
-    "@stripe/react-stripe-js": "^5.4.0"
+    "@stripe/react-stripe-js": "^5.4.0",
+    "body-parser": "^2.2.1"
   },
   "devDependencies": {
     "@types/node": "^22.14.0",

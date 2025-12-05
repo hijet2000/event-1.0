@@ -1,3 +1,4 @@
+
 import React, { useState, useEffect } from 'react';
 import { type EventConfig } from '../types';
 import { getEventConfig, saveConfig } from '../server/api';
@@ -19,13 +20,18 @@ const mockDelegate = {
 };
 
 const BadgePreview: React.FC<{ config: EventConfig }> = ({ config }) => {
-    const { theme, badgeConfig } = config;
-    const { showName, showEmail, showCompany, showRole } = badgeConfig;
+    // Check if config exists before destructuring
+    if (!config) return null;
+
+    const { theme } = config;
+    // Defensive check: ensure badgeConfig exists, fallback to defaults if not
+    const safeBadgeConfig = config.badgeConfig || { showName: true, showEmail: false, showCompany: true, showRole: true };
+    const { showName, showEmail, showCompany, showRole } = safeBadgeConfig;
 
     return (
         <div className="w-full max-w-sm mx-auto aspect-[1/1.618] rounded-xl shadow-lg relative overflow-hidden bg-white dark:bg-gray-700">
             {/* Background Image */}
-            {theme.badgeImageUrl ? (
+            {theme && theme.badgeImageUrl ? (
                 <img src={theme.badgeImageUrl} alt="Badge Background" className="absolute inset-0 w-full h-full object-cover z-0" />
             ) : (
                 <div className="absolute inset-0 bg-gray-100 dark:bg-gray-700 z-0"></div>
@@ -36,15 +42,15 @@ const BadgePreview: React.FC<{ config: EventConfig }> = ({ config }) => {
             <div className="absolute inset-0 z-20 p-6 flex flex-col justify-between text-white">
                 {/* Header with logo and event name */}
                 <header className="flex items-center gap-4">
-                    {theme.logoUrl ? (
+                    {theme && theme.logoUrl ? (
                         <img src={theme.logoUrl} alt="Event Logo" className="h-12 w-12 rounded-full object-contain bg-white/80 p-1" />
                     ) : <div className="h-12 w-12 rounded-full bg-white/80"></div>}
-                    <h3 className="font-bold text-lg tracking-tight text-shadow">{config.event.name}</h3>
+                    <h3 className="font-bold text-lg tracking-tight text-shadow">{config.event?.name || 'Event Name'}</h3>
                 </header>
 
                 {/* Delegate Info */}
                 <div className="text-center">
-                    {showName && <h1 className="text-3xl font-bold uppercase tracking-wider" style={{ color: theme.colorPrimary, textShadow: '1px 1px 2px rgba(0,0,0,0.7)' }}>{mockDelegate.name}</h1>}
+                    {showName && <h1 className="text-3xl font-bold uppercase tracking-wider" style={{ color: theme?.colorPrimary || '#4f46e5', textShadow: '1px 1px 2px rgba(0,0,0,0.7)' }}>{mockDelegate.name}</h1>}
                     {showCompany && <p className="text-lg font-medium">{mockDelegate.company}</p>}
                     {showRole && <p className="text-md text-gray-200">{mockDelegate.role}</p>}
                     {showEmail && <p className="text-sm text-gray-300 mt-2">{mockDelegate.email}</p>}
@@ -100,6 +106,7 @@ export const EventIdDesign: React.FC<EventIdDesignProps> = ({ adminToken }) => {
         setConfig(prevConfig => {
             if (!prevConfig) return null;
             const newConfig = JSON.parse(JSON.stringify(prevConfig));
+            if (!newConfig.badgeConfig) newConfig.badgeConfig = {};
             newConfig.badgeConfig[field] = enabled;
             return newConfig;
         });
@@ -135,6 +142,9 @@ export const EventIdDesign: React.FC<EventIdDesignProps> = ({ adminToken }) => {
         return <Alert type="info" message="Configuration not available." />;
     }
 
+    // Safety fallback for rendering controls
+    const safeBadgeConfig = config.badgeConfig || { showName: true, showEmail: false, showCompany: true, showRole: true };
+
     return (
         <form onSubmit={handleSave}>
             <div className="flex justify-between items-center mb-6">
@@ -168,25 +178,25 @@ export const EventIdDesign: React.FC<EventIdDesignProps> = ({ adminToken }) => {
                         <ToggleSwitch
                             label="Show Full Name"
                             name="showName"
-                            enabled={config.badgeConfig.showName}
+                            enabled={safeBadgeConfig.showName}
                             onChange={(val) => handleBadgeFieldToggle('showName', val)}
                         />
                          <ToggleSwitch
                             label="Show Company"
                             name="showCompany"
-                            enabled={config.badgeConfig.showCompany}
+                            enabled={safeBadgeConfig.showCompany}
                             onChange={(val) => handleBadgeFieldToggle('showCompany', val)}
                         />
                          <ToggleSwitch
                             label="Show Role"
                             name="showRole"
-                            enabled={config.badgeConfig.showRole}
+                            enabled={safeBadgeConfig.showRole}
                             onChange={(val) => handleBadgeFieldToggle('showRole', val)}
                         />
                          <ToggleSwitch
                             label="Show Email Address"
                             name="showEmail"
-                            enabled={config.badgeConfig.showEmail}
+                            enabled={safeBadgeConfig.showEmail}
                             onChange={(val) => handleBadgeFieldToggle('showEmail', val)}
                         />
                     </div>

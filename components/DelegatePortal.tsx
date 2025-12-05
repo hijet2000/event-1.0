@@ -1,5 +1,5 @@
 
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { ProfileView } from './ProfileView';
 import { EventPassView } from './EventPassView';
 import { WalletView } from './WalletView';
@@ -14,6 +14,8 @@ import { VenueMapView } from './VenueMapView';
 import { NotificationBell } from './NotificationBell';
 import { VirtualConcierge } from './VirtualConcierge';
 import { useTheme } from '../contexts/ThemeContext';
+import { getPublicEventData, getMyAgenda } from '../server/api';
+import { Session, Speaker, Sponsor } from '../types';
 
 interface DelegatePortalProps {
     onLogout: () => void;
@@ -34,6 +36,31 @@ export const DelegatePortal: React.FC<DelegatePortalProps> = ({ onLogout, delega
     const [activeTab, setActiveTab] = useState('eventPass');
     const { config } = useTheme();
     const [isConciergeOpen, setIsConciergeOpen] = useState(false);
+    
+    // Data State
+    const [sessions, setSessions] = useState<Session[]>([]);
+    const [speakers, setSpeakers] = useState<Speaker[]>([]);
+    const [sponsors, setSponsors] = useState<Sponsor[]>([]);
+    const [mySessionIds, setMySessionIds] = useState<string[]>([]);
+
+    useEffect(() => {
+        // Load basic event data and my agenda
+        const loadData = async () => {
+            const eventData = await getPublicEventData('main-event'); // assuming main event for now
+            setSessions(eventData.sessions);
+            setSpeakers(eventData.speakers);
+            setSponsors(eventData.sponsors);
+            
+            const myAgenda = await getMyAgenda(delegateToken);
+            setMySessionIds(myAgenda);
+        };
+        loadData();
+    }, [delegateToken]);
+
+    const handleToggleSession = (sessionId: string, isAdded: boolean) => {
+        setMySessionIds(prev => isAdded ? [...prev, sessionId] : prev.filter(id => id !== sessionId));
+        // The API call is handled inside AgendaView, but we update local state here to reflect immediately if needed
+    };
 
     // Placeholder data for views that need props but API hasn't loaded yet
     // In a real app, these would be fetched via hooks in the views or here
@@ -44,8 +71,8 @@ export const DelegatePortal: React.FC<DelegatePortalProps> = ({ onLogout, delega
             case 'profile': return <ProfileView user={mockUser} delegateToken={delegateToken} onProfileUpdate={() => {}} />;
             case 'eventPass': return <EventPassView user={mockUser} />;
             case 'wallet': return <WalletView delegateToken={delegateToken} />;
-            case 'agenda': return <AgendaView sessions={[]} speakers={[]} delegateToken={delegateToken} />;
-            case 'directory': return <DirectoryView speakers={[]} sponsors={[]} />;
+            case 'agenda': return <AgendaView sessions={sessions} speakers={speakers} mySessionIds={mySessionIds} delegateToken={delegateToken} onToggleSession={handleToggleSession} />;
+            case 'directory': return <DirectoryView speakers={speakers} sponsors={sponsors} />;
             case 'dining': return <DiningView mealPlanAssignment={null} restaurants={[]} mealPlans={[]} delegateToken={delegateToken} onUpdate={() => {}} />;
             case 'accommodation': return <AccommodationView accommodationBooking={null} delegateToken={delegateToken} onUpdate={() => {}} />;
             case 'networking': return <NetworkingView delegateToken={delegateToken} />;

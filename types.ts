@@ -32,6 +32,7 @@ export interface RegistrationData {
   email: string;
   company?: string;
   role?: string;
+  ticketTierId?: string;
   createdAt: number;
   checkedIn?: boolean;
   [key: string]: any;
@@ -280,6 +281,8 @@ export interface AccommodationBooking {
   checkInDate: string;
   checkOutDate: string;
   status: AccommodationBookingStatus;
+  hotelRoomId?: string; // ID of the specific room assigned
+  roomNumber?: string; // Cached room number for display
 }
 
 export interface Hotel {
@@ -301,7 +304,7 @@ export interface RoomType {
   amenities: string[];
 }
 
-export type AccommodationBookingStatus = 'Confirmed' | 'CheckedIn' | 'CheckedOut';
+export type AccommodationBookingStatus = 'Confirmed' | 'CheckedIn' | 'CheckedOut' | 'Cancelled';
 
 export interface EnrichedAccommodationBooking extends AccommodationBooking {
     delegateName: string;

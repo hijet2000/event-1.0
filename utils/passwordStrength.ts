@@ -1,7 +1,8 @@
+
 // utils/passwordStrength.ts
 export type PasswordStrengthResult = {
   score: 0 | 1 | 2 | 3 | 4;
-  label: '' | 'Weak' | 'Medium' | 'Strong' | 'Very Strong';
+  label: '' | 'Too Short' | 'Weak' | 'Medium' | 'Strong' | 'Very Strong';
 };
 
 /**
@@ -10,36 +11,36 @@ export type PasswordStrengthResult = {
  * @returns A PasswordStrengthResult object with a score and a label.
  */
 export const checkPasswordStrength = (password: string): PasswordStrengthResult => {
-  let score = 0;
-  // Don't show anything until the password is at least 8 characters.
-  // The form's own validation will show a "too short" error on submit.
-  if (!password || password.length < 8) {
+  if (!password) {
     return { score: 0, label: '' };
   }
 
-  // Base score for meeting the minimum length requirement
-  score++;
+  let score = 0;
+  
+  // Criteria checks
+  const length = password.length;
+  const hasLowerCase = /[a-z]/.test(password);
+  const hasUpperCase = /[A-Z]/.test(password);
+  const hasNumber = /\d/.test(password);
+  const hasSpecialChar = /[^A-Za-z0-9]/.test(password);
 
-  // Add points for character variety
-  const variety = [
-    /[a-z]/.test(password),      // lowercase
-    /[A-Z]/.test(password),      // uppercase
-    /\d/.test(password),         // numbers
-    /[^A-Za-z0-9]/.test(password) // special characters
-  ].filter(Boolean).length;
+  // Base score based on length
+  if (length >= 8) score += 1;
+  if (length >= 12) score += 1;
 
-  if (variety > 1) score++; // Has at least two types of characters
-  if (variety > 2) score++; // Has at least three types of characters
+  // Bonus points for variety
+  const varietyCount = [hasLowerCase, hasUpperCase, hasNumber, hasSpecialChar].filter(Boolean).length;
+  if (varietyCount >= 3) score += 1;
+  if (varietyCount === 4) score += 1;
 
-  // Add a final point for being longer than 12 characters
-  if (password.length >= 12) {
-    score++;
-  }
+  // Penalties
+  if (length < 8) score = Math.min(score, 1); // Cap score if too short
 
-  // Ensure score doesn't exceed the max of 4
-  const finalScore = Math.min(score, 4) as PasswordStrengthResult['score'];
+  // Ensure score is within range
+  const finalScore = Math.min(Math.max(score, 0), 4) as PasswordStrengthResult['score'];
 
   switch (finalScore) {
+    case 0: return { score: 0, label: 'Too Short' };
     case 1: return { score: 1, label: 'Weak' };
     case 2: return { score: 2, label: 'Medium' };
     case 3: return { score: 3, label: 'Strong' };

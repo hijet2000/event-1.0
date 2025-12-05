@@ -1,8 +1,6 @@
 
-
-
-import React, { useState, useRef } from 'react';
-import { type EventConfig } from '../types';
+import React, { useState, useRef, useEffect } from 'react';
+import { type EventConfig, type TicketTier } from '../types';
 import { type RegistrationFormState } from '../App';
 import { TextInput } from './TextInput';
 import { Spinner } from './Spinner';
@@ -17,6 +15,7 @@ interface RegistrationFormProps {
   onReset: () => void;
   isLoading: boolean;
   config: EventConfig['formFields'];
+  ticketTiers?: TicketTier[];
 }
 
 type FormErrors = Record<string, string>;
@@ -28,18 +27,66 @@ export const RegistrationForm: React.FC<RegistrationFormProps> = ({
   onReset,
   isLoading,
   config,
+  ticketTiers = []
 }) => {
   const [errors, setErrors] = useState<FormErrors>({});
   const [confirmPassword, setConfirmPassword] = useState('');
   const [passwordStrength, setPasswordStrength] = useState<PasswordStrengthResult>({ score: 0, label: '' });
+  const [touched, setTouched] = useState<Record<string, boolean>>({});
   const formRef = useRef<HTMLFormElement>(null);
+
+  const activeTicketTiers = ticketTiers.filter(t => t.active);
+
+  // Initialize password strength if form data already has password
+  useEffect(() => {
+    if (formData.password) {
+      setPasswordStrength(checkPasswordStrength(formData.password));
+    }
+  }, []);
   
   const handleFormChangeInternal = (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) => {
-    if (e.target.name === 'password') {
-        const newPassword = e.target.value;
-        setPasswordStrength(checkPasswordStrength(newPassword));
+    const { name, value } = e.target;
+    
+    if (name === 'password') {
+        setPasswordStrength(checkPasswordStrength(value));
+        // Real-time validation for password match if confirm password has been touched
+        if (touched.confirmPassword && confirmPassword) {
+             setErrors(prev => ({
+                 ...prev,
+                 confirmPassword: value !== confirmPassword ? 'Passwords do not match.' : ''
+             }));
+        }
     }
-    onFormChange(e); // Propagate the change up to the parent
+    
+    // Clear error on change if it exists
+    if (errors[name]) {
+        setErrors(prev => ({ ...prev, [name]: '' }));
+    }
+
+    onFormChange(e); 
+  };
+
+  const handleConfirmPasswordChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+      const val = e.target.value;
+      setConfirmPassword(val);
+      if (touched.confirmPassword) {
+          setErrors(prev => ({
+              ...prev,
+              confirmPassword: val !== formData.password ? 'Passwords do not match.' : ''
+          }));
+      }
+  };
+
+  const handleTicketSelect = (tierId: string) => {
+      // Create a synthetic event to reuse onFormChange logic
+      const syntheticEvent = {
+          target: { name: 'ticketTierId', value: tierId }
+      } as React.ChangeEvent<HTMLInputElement>;
+      
+      onFormChange(syntheticEvent);
+      if (errors.ticketTierId) {
+          setErrors(prev => ({ ...prev, ticketTierId: '' }));
+      }
   };
 
   const validateField = (name: string, value: string | undefined, currentData: RegistrationFormState, currentConfirmPassword: string) => {
@@ -50,15 +97,16 @@ export const RegistrationForm: React.FC<RegistrationFormProps> = ({
         return !value?.trim() ? 'Last Name is required.' : '';
       case 'email':
         if (!value?.trim()) return 'Email Address is required.';
-        if (!/\S+@\S+\.\S+/.test(value)) return 'Please enter a valid email address.';
+        if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value)) return 'Please enter a valid email address.';
         return '';
       case 'password':
         if (!value) return 'Password is required.';
         if (value.length < 8) return 'Password must be at least 8 characters long.';
-        if (!/^(?=.*[A-Za-z])(?=.*\d).+$/.test(value)) return 'Password must contain at least one letter and one number.';
         return '';
       case 'confirmPassword':
         return currentData.password !== currentConfirmPassword ? 'Passwords do not match.' : '';
+      case 'ticketTierId':
+        return activeTicketTiers.length > 0 && !value ? 'Please select a ticket option.' : '';
       default:
         const fieldConfig = config.find(field => field.id === name);
         if (fieldConfig?.enabled && fieldConfig?.required && !String(value || '').trim()) {
@@ -70,13 +118,13 @@ export const RegistrationForm: React.FC<RegistrationFormProps> = ({
   
   const handleBlur = (e: React.FocusEvent<HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement>) => {
     const { name, value } = e.target;
+    setTouched(prev => ({ ...prev, [name]: true }));
     
     const currentConfirmPassword = name === 'confirmPassword' ? value : confirmPassword;
     const error = validateField(name, value, formData, currentConfirmPassword);
     
     setErrors(prev => {
         const newErrors: FormErrors = { ...prev, [name]: error };
-        // If password is changed, re-validate confirm password if it exists
         if (name === 'password' && confirmPassword) {
             const confirmError = validateField('confirmPassword', confirmPassword, { ...formData, password: value }, confirmPassword);
             newErrors.confirmPassword = confirmError;
@@ -89,7 +137,7 @@ export const RegistrationForm: React.FC<RegistrationFormProps> = ({
     const newErrors: FormErrors = {};
     let firstErrorId: string | null = null;
     
-    const allFieldIds = ['firstName', 'lastName', 'email', 'password', 'confirmPassword', ...config.filter(f => f.enabled).map(f => f.id)];
+    const allFieldIds = ['firstName', 'lastName', 'email', 'password', 'confirmPassword', 'ticketTierId', ...config.filter(f => f.enabled).map(f => f.id)];
 
     for (const id of allFieldIds) {
         const value = id === 'confirmPassword' ? confirmPassword : formData[id];
@@ -101,9 +149,11 @@ export const RegistrationForm: React.FC<RegistrationFormProps> = ({
     }
     
     setErrors(newErrors);
+    setTouched(allFieldIds.reduce((acc, id) => ({ ...acc, [id]: true }), {}));
 
     if (firstErrorId) {
-        const el = formRef.current?.querySelector<HTMLElement>(`[name="${firstErrorId}"]`);
+        const el = formRef.current?.querySelector<HTMLElement>(`[name="${firstErrorId}"]`) || document.getElementById('ticket-section');
+        el?.scrollIntoView({ behavior: 'smooth', block: 'center' });
         el?.focus();
         return false;
     }
@@ -120,6 +170,7 @@ export const RegistrationForm: React.FC<RegistrationFormProps> = ({
 
   const handleResetClick = () => {
     setErrors({});
+    setTouched({});
     setConfirmPassword('');
     setPasswordStrength({ score: 0, label: '' });
     onReset();
@@ -129,73 +180,115 @@ export const RegistrationForm: React.FC<RegistrationFormProps> = ({
     const errorKeys = Object.keys(errors).filter(key => errors[key]);
     if (errorKeys.length === 0) return null;
 
-    const allFields = [
-      { id: 'firstName', label: 'First Name' },
-      { id: 'lastName', label: 'Last Name' },
-      { id: 'email', label: 'Email Address' },
-      { id: 'password', label: 'Password' },
-      { id: 'confirmPassword', label: 'Confirm Password' },
-      ...config.filter(f => f.enabled)
-    ];
-
-    const handleLinkClick = (e: React.MouseEvent<HTMLAnchorElement>, key: string) => {
-        e.preventDefault();
-        formRef.current?.querySelector<HTMLElement>(`[name="${key}"]`)?.focus();
-    };
-
     return (
-        <div role="alert" className="p-4 mb-6 border-l-4 rounded-r-lg bg-red-100 dark:bg-red-900 border-red-400 dark:border-red-600 text-red-700 dark:text-red-200 animate-fade-in-down">
-            <h3 className="font-bold">Please fix {errorKeys.length === 1 ? '1 error' : `${errorKeys.length} errors`} to continue:</h3>
-            <ul className="list-disc list-inside mt-2 space-y-1">
-                {errorKeys.map(key => {
-                    const field = allFields.find(f => f.id === key);
-                    return (
-                        <li key={key}>
-                            <a 
-                                href={`#${key}`} 
-                                onClick={(e) => handleLinkClick(e, key)}
-                                className="underline hover:no-underline"
-                            >
-                                {field?.label || key}
-                            </a>: {errors[key]}
-                        </li>
-                    )
-                })}
-            </ul>
+        <div role="alert" className="p-4 mb-6 border-l-4 rounded-r-lg bg-red-50 dark:bg-red-900/30 border-red-500 dark:border-red-500 text-red-700 dark:text-red-300 animate-fade-in-down shadow-sm">
+            <h3 className="font-bold flex items-center">
+                <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5 mr-2" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+                </svg>
+                Please correct the errors below
+            </h3>
         </div>
     );
-};
+  };
 
   const enabledCustomFields = config.filter(field => field.enabled);
 
   return (
-    <form onSubmit={handleSubmit} className="space-y-6" ref={formRef} noValidate>
+    <form onSubmit={handleSubmit} className="space-y-8" ref={formRef} noValidate>
       {renderErrorSummary()}
       
-      {/* Core Fields */}
-      <fieldset>
-        <legend className="text-lg font-medium text-gray-900 dark:text-white mb-2">Your Account</legend>
+      {/* Ticket Selection */}
+      {activeTicketTiers.length > 0 && (
+          <div id="ticket-section" className="bg-white dark:bg-gray-800 rounded-2xl p-6 sm:p-8 shadow-sm border border-gray-100 dark:border-gray-700">
+              <h3 className="text-xl font-bold text-gray-900 dark:text-white mb-6 flex items-center">
+                  <span className="flex items-center justify-center w-8 h-8 rounded-full bg-primary/10 text-primary text-sm font-bold mr-3">1</span>
+                  Select Ticket
+              </h3>
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  {activeTicketTiers.map(tier => {
+                      const isSelected = formData.ticketTierId === tier.id;
+                      const isSoldOut = tier.sold >= tier.limit;
+                      return (
+                          <div 
+                              key={tier.id}
+                              onClick={() => !isSoldOut && handleTicketSelect(tier.id)}
+                              className={`relative p-4 rounded-xl border-2 transition-all cursor-pointer ${
+                                  isSelected 
+                                  ? 'border-primary bg-primary/5 shadow-md' 
+                                  : isSoldOut 
+                                    ? 'border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-800 opacity-60 cursor-not-allowed'
+                                    : 'border-gray-200 dark:border-gray-700 hover:border-primary/50 hover:shadow-sm dark:bg-gray-800'
+                              }`}
+                          >
+                              <div className="flex justify-between items-start mb-2">
+                                  <h4 className={`font-bold text-lg ${isSelected ? 'text-primary' : 'text-gray-900 dark:text-white'}`}>{tier.name}</h4>
+                                  <div className="text-right">
+                                      <span className={`block font-bold text-lg ${isSelected ? 'text-primary' : 'text-gray-900 dark:text-white'}`}>
+                                          {tier.price === 0 ? 'Free' : `${tier.currency} ${tier.price}`}
+                                      </span>
+                                  </div>
+                              </div>
+                              <p className="text-sm text-gray-600 dark:text-gray-400 mb-3">{tier.description}</p>
+                              {tier.benefits.length > 0 && (
+                                  <ul className="text-xs text-gray-500 dark:text-gray-400 space-y-1 mb-2">
+                                      {tier.benefits.map((b, i) => (
+                                          <li key={i} className="flex items-center">
+                                              <svg className="w-3 h-3 mr-1.5 text-green-500" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" /></svg>
+                                              {b}
+                                          </li>
+                                      ))}
+                                  </ul>
+                              )}
+                              {isSoldOut && (
+                                  <div className="absolute inset-0 bg-white/50 dark:bg-black/50 flex items-center justify-center rounded-xl">
+                                      <span className="bg-red-100 text-red-800 text-xs font-bold px-3 py-1 rounded-full uppercase tracking-wider transform -rotate-12">Sold Out</span>
+                                  </div>
+                              )}
+                              {isSelected && (
+                                  <div className="absolute top-4 right-4 bg-primary text-white rounded-full p-1">
+                                      <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={3} d="M5 13l4 4L19 7" /></svg>
+                                  </div>
+                              )}
+                          </div>
+                      );
+                  })}
+              </div>
+              {errors.ticketTierId && (
+                  <p className="mt-2 text-sm text-red-600 dark:text-red-400 animate-fade-in-down">
+                      {errors.ticketTierId}
+                  </p>
+              )}
+          </div>
+      )}
+
+      {/* Account Section */}
+      <div className="bg-white dark:bg-gray-800 rounded-2xl p-6 sm:p-8 shadow-sm border border-gray-100 dark:border-gray-700">
+        <h3 className="text-xl font-bold text-gray-900 dark:text-white mb-6 flex items-center">
+            <span className="flex items-center justify-center w-8 h-8 rounded-full bg-primary/10 text-primary text-sm font-bold mr-3">{activeTicketTiers.length > 0 ? 2 : 1}</span>
+            Your Details
+        </h3>
         <div className="space-y-6">
           <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
             <TextInput
               label="First Name"
               name="firstName"
               value={formData.firstName}
-              onChange={onFormChange}
+              onChange={handleFormChangeInternal}
               onBlur={handleBlur}
               placeholder="e.g. Jane"
               required
-              error={errors.firstName}
+              error={touched.firstName ? errors.firstName : ''}
             />
             <TextInput
               label="Last Name"
               name="lastName"
               value={formData.lastName}
-              onChange={onFormChange}
+              onChange={handleFormChangeInternal}
               onBlur={handleBlur}
               placeholder="e.g. Doe"
               required
-              error={errors.lastName}
+              error={touched.lastName ? errors.lastName : ''}
             />
           </div>
            <TextInput
@@ -203,11 +296,11 @@ export const RegistrationForm: React.FC<RegistrationFormProps> = ({
               name="email"
               type="email"
               value={formData.email}
-              onChange={onFormChange}
+              onChange={handleFormChangeInternal}
               onBlur={handleBlur}
               placeholder="e.g. jane.doe@example.com"
               required
-              error={errors.email}
+              error={touched.email ? errors.email : ''}
             />
           <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
             <div>
@@ -220,7 +313,7 @@ export const RegistrationForm: React.FC<RegistrationFormProps> = ({
                 onBlur={handleBlur}
                 placeholder="••••••••"
                 required
-                error={errors.password}
+                error={touched.password ? errors.password : ''}
               />
               <PasswordStrengthIndicator strength={passwordStrength} />
             </div>
@@ -229,20 +322,23 @@ export const RegistrationForm: React.FC<RegistrationFormProps> = ({
               name="confirmPassword"
               type="password"
               value={confirmPassword}
-              onChange={(e) => setConfirmPassword(e.target.value)}
+              onChange={handleConfirmPasswordChange}
               onBlur={handleBlur}
               placeholder="••••••••"
               required
-              error={errors.confirmPassword}
+              error={touched.confirmPassword ? errors.confirmPassword : ''}
             />
           </div>
         </div>
-      </fieldset>
+      </div>
       
-      {/* Custom Fields */}
+      {/* Additional Info Section */}
       {enabledCustomFields.length > 0 && (
-        <fieldset className="pt-6 border-t border-gray-200 dark:border-gray-700">
-           <legend className="text-lg font-medium text-gray-900 dark:text-white mb-2">Additional Information</legend>
+        <div className="bg-white dark:bg-gray-800 rounded-2xl p-6 sm:p-8 shadow-sm border border-gray-100 dark:border-gray-700">
+           <h3 className="text-xl font-bold text-gray-900 dark:text-white mb-6 flex items-center">
+                <span className="flex items-center justify-center w-8 h-8 rounded-full bg-primary/10 text-primary text-sm font-bold mr-3">{activeTicketTiers.length > 0 ? 3 : 2}</span>
+                Additional Information
+           </h3>
           <div className="space-y-6">
             {enabledCustomFields.map(field => (
               <DynamicFormField
@@ -251,36 +347,36 @@ export const RegistrationForm: React.FC<RegistrationFormProps> = ({
                 value={formData[field.id]}
                 onChange={onFormChange}
                 onBlur={handleBlur}
-                error={errors[field.id]}
+                error={touched[field.id] ? errors[field.id] : ''}
               />
             ))}
           </div>
-        </fieldset>
+        </div>
       )}
 
       {/* Action Buttons */}
-      <div className="flex flex-col sm:flex-row gap-4 pt-4">
+      <div className="pt-4 flex flex-col items-center gap-4">
         <button
           type="submit"
           disabled={isLoading}
-          className="w-full flex justify-center items-center py-3 px-4 border border-transparent rounded-md shadow-sm text-sm font-medium text-white bg-primary hover:bg-primary/90 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-primary disabled:bg-primary/70 disabled:cursor-not-allowed transition-all duration-300 ease-in-out"
+          className="w-full sm:w-2/3 flex justify-center items-center py-4 px-6 border border-transparent rounded-xl shadow-lg text-lg font-bold text-white bg-gradient-to-r from-primary to-indigo-600 hover:from-primary/90 hover:to-indigo-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-primary disabled:opacity-70 disabled:cursor-not-allowed transform transition-all duration-200 hover:-translate-y-1"
         >
           {isLoading ? (
             <>
               <Spinner />
-              Processing...
+              <span className="ml-2">Processing Registration...</span>
             </>
           ) : (
-            'Register for Event'
+            'Complete Registration'
           )}
         </button>
         <button
           type="button"
           disabled={isLoading}
           onClick={handleResetClick}
-          className="w-full sm:w-auto flex justify-center items-center py-3 px-6 border border-gray-300 dark:border-gray-500 rounded-md shadow-sm text-sm font-medium text-gray-700 dark:text-gray-200 bg-white dark:bg-gray-700 hover:bg-gray-50 dark:hover:bg-gray-600 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-primary/80 disabled:opacity-50 disabled:cursor-not-allowed transition-all duration-300 ease-in-out"
+          className="text-sm font-medium text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200 underline transition-colors"
         >
-          Reset Form
+          Clear form and start over
         </button>
       </div>
     </form>

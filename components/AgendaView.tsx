@@ -1,5 +1,5 @@
 
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useEffect } from 'react';
 import { type Session, type Speaker } from '../types';
 import { addToAgenda, removeFromAgenda, submitSessionFeedback, downloadSessionIcs } from '../server/api';
 import { StarRating } from './StarRating';
@@ -86,7 +86,8 @@ const SessionCard: React.FC<{
   
   const handleDownloadIcs = (e: React.MouseEvent) => {
       e.stopPropagation();
-      downloadSessionIcs(session.id).catch(err => console.error("Calendar export failed", err));
+      // Pass the full session object to avoid ID lookup issues
+      downloadSessionIcs(session).catch(err => console.error("Calendar export failed", err));
   };
 
   return (
@@ -166,6 +167,10 @@ export const AgendaView: React.FC<AgendaViewProps> = ({ sessions, speakers, mySe
   const [qaSession, setQaSession] = useState<Session | null>(null);
   const [feedbackSuccess, setFeedbackSuccess] = useState(false);
 
+  useEffect(() => {
+      setLocalMySessionIds(new Set(mySessionIds));
+  }, [mySessionIds]);
+
   const handleToggle = async (sessionId: string) => {
     if (readOnly) return;
     const isAdded = localMySessionIds.has(sessionId);
@@ -178,17 +183,18 @@ export const AgendaView: React.FC<AgendaViewProps> = ({ sessions, speakers, mySe
     }
     setLocalMySessionIds(newSet);
 
-    if (onToggleSession) {
-        onToggleSession(sessionId, !isAdded);
-    } else if (delegateToken) {
+    // Call API directly for robustness, and also trigger parent callback to update portal state
+    if (delegateToken) {
         try {
             if (isAdded) {
                 await removeFromAgenda(delegateToken, sessionId);
             } else {
                 await addToAgenda(delegateToken, sessionId);
             }
+            if (onToggleSession) onToggleSession(sessionId, !isAdded);
         } catch (e) {
             console.error("Failed to update agenda", e);
+            // Revert on error
             setLocalMySessionIds(prev => {
                 const revertSet = new Set(prev);
                 if (isAdded) revertSet.add(sessionId);
