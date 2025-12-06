@@ -1,4 +1,3 @@
-
 import React, { useState, useEffect, useRef } from 'react';
 import { type EventConfig, type FormField } from '../types';
 import { getEventConfig, saveConfig, syncConfigFromGitHub, sendTestEmail, getSystemApiKey } from '../server/api';
@@ -17,6 +16,7 @@ interface SettingsFormProps {
 
 const FONT_OPTIONS = ['Inter', 'Roboto', 'Lato', 'Montserrat'];
 const EVENT_TYPES = ['Conference', 'Workshop', 'Webinar', 'Meetup', 'Other'];
+const VOICE_OPTIONS = ['Puck', 'Charon', 'Kore', 'Fenrir', 'Zephyr'];
 
 type Tab = 'general' | 'registration' | 'theme' | 'communications' | 'economy' | 'integrations';
 
@@ -128,7 +128,7 @@ export const SettingsForm: React.FC<SettingsFormProps> = ({ adminToken }) => {
       getSystemApiKey(adminToken).then(setApiKey).catch(() => {});
   }, [contextConfig, isContextLoading, adminToken]);
   
-  const handleInputChange = (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement>, section: 'event' | 'host' | 'theme' | 'smtp' | 'githubSync') => {
+  const handleInputChange = (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement>, section: 'event' | 'host' | 'theme' | 'smtp' | 'githubSync' | 'aiConcierge') => {
     if (!config) return;
 
     const { name, value, type } = e.target;
@@ -262,6 +262,16 @@ export const SettingsForm: React.FC<SettingsFormProps> = ({ adminToken }) => {
         return newConfig;
     });
   };
+
+  const handleAiConciergeToggle = (enabled: boolean) => {
+    if (!config) return;
+    setConfig(prevConfig => {
+        if (!prevConfig) return null;
+        const newConfig = JSON.parse(JSON.stringify(prevConfig));
+        newConfig.aiConcierge.enabled = enabled;
+        return newConfig;
+    });
+  };
   
   const handleSync = async () => {
     setIsSyncing(true);
@@ -381,7 +391,7 @@ export const SettingsForm: React.FC<SettingsFormProps> = ({ adminToken }) => {
       { id: 'general', label: 'General' },
       { id: 'registration', label: 'Registration' },
       { id: 'theme', label: 'Theme' },
-      { id: 'communications', label: 'Communications' },
+      { id: 'communications', label: 'Gateways' },
       { id: 'economy', label: 'Economy' },
       { id: 'integrations', label: 'Integrations' },
   ];
@@ -567,7 +577,7 @@ export const SettingsForm: React.FC<SettingsFormProps> = ({ adminToken }) => {
                             <div className="flex items-center gap-6 mb-6">
                                 <label className="flex items-center gap-2 cursor-pointer">
                                     <input type="radio" name="emailProvider" value="smtp" checked={config.emailProvider === 'smtp'} onChange={handleProviderChange} className="text-primary focus:ring-primary" />
-                                    <span className="text-sm font-medium">SMTP</span>
+                                    <span className="text-sm font-medium">Custom SMTP</span>
                                 </label>
                                 <label className="flex items-center gap-2 cursor-pointer">
                                     <input type="radio" name="emailProvider" value="google" checked={config.emailProvider === 'google'} onChange={handleProviderChange} className="text-primary focus:ring-primary" />
@@ -594,7 +604,7 @@ export const SettingsForm: React.FC<SettingsFormProps> = ({ adminToken }) => {
                                         </select>
                                     </div>
                                     <div>
-                                        <label className="block text-xs font-medium text-gray-500 mb-1">Username</label>
+                                        <label className="block text-xs font-medium text-gray-500 mb-1">Username (Optional)</label>
                                         <input type="text" name="username" value={config.smtp.username} onChange={(e) => handleInputChange(e, 'smtp')} className="block w-full rounded-md border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 shadow-sm sm:text-sm" />
                                     </div>
                                     <div>
@@ -650,6 +660,52 @@ export const SettingsForm: React.FC<SettingsFormProps> = ({ adminToken }) => {
                                 <TemplateEditor templateKey="passwordReset" label="Password Reset" config={config} onChange={handleTemplateChange} placeholders={['{{eventName}}', '{{resetLink}}']} />
                                 <TemplateEditor templateKey="delegateInvitation" label="Invitation" config={config} onChange={handleTemplateChange} placeholders={['{{eventName}}', '{{inviteLink}}']} />
                              </div>
+                        </section>
+
+                        {/* AI Concierge Configuration */}
+                        <section className="bg-gray-50 dark:bg-gray-700/30 p-6 rounded-xl border border-gray-200 dark:border-gray-600">
+                            <div className="flex justify-between items-center mb-4">
+                                <div className="flex items-center gap-3">
+                                    <div className="p-2 bg-indigo-100 dark:bg-indigo-900/50 rounded-lg">
+                                        <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6 text-indigo-600 dark:text-indigo-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 11a7 7 0 01-7 7m0 0a7 7 0 01-7-7m7 7v4m0 0H8m4 0h4m-4-8a3 3 0 01-3-3V5a3 3 0 116 0v6a3 3 0 01-3 3z" />
+                                        </svg>
+                                    </div>
+                                    <div>
+                                        <h4 className="font-bold text-gray-900 dark:text-white">AI Concierge</h4>
+                                        <p className="text-xs text-gray-500">Configure the voice assistant bot.</p>
+                                    </div>
+                                </div>
+                                <ToggleSwitch label="" name="aiConcierge" enabled={config.aiConcierge.enabled} onChange={handleAiConciergeToggle} />
+                            </div>
+                            
+                            <fieldset disabled={!config.aiConcierge.enabled} className="space-y-4 disabled:opacity-50">
+                                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                                    <div>
+                                        <label className="block text-xs font-medium text-gray-500 mb-1">Voice Personality</label>
+                                        <select 
+                                            name="voice" 
+                                            value={config.aiConcierge.voice} 
+                                            onChange={(e) => handleInputChange(e, 'aiConcierge')} 
+                                            className="w-full rounded border-gray-300 dark:border-gray-600 p-2 text-sm bg-white dark:bg-gray-800"
+                                        >
+                                            {VOICE_OPTIONS.map(v => <option key={v} value={v}>{v}</option>)}
+                                        </select>
+                                    </div>
+                                </div>
+                                <div>
+                                    <label className="block text-xs font-medium text-gray-500 mb-1">System Persona & Instructions</label>
+                                    <textarea 
+                                        name="persona" 
+                                        value={config.aiConcierge.persona} 
+                                        onChange={(e) => handleInputChange(e, 'aiConcierge')} 
+                                        rows={3} 
+                                        className="w-full rounded border-gray-300 dark:border-gray-600 p-2 text-sm bg-white dark:bg-gray-800" 
+                                        placeholder="e.g. You are a helpful and witty event assistant..."
+                                    />
+                                    <p className="text-[10px] text-gray-400 mt-1">This instruction is prepended to the dynamic event context (schedule, speakers, etc.) sent to the AI model.</p>
+                                </div>
+                            </fieldset>
                         </section>
 
                         {/* Other Channels */}

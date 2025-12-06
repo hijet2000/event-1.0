@@ -23,7 +23,7 @@ export const subscribe = (callback: Listener) => {
     return () => listeners.delete(callback);
 };
 
-const notifySubscribers = (table: string) => {
+export const notifySubscribers = (table: string) => {
     listeners.forEach(cb => cb(table));
 };
 

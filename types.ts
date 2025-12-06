@@ -35,6 +35,7 @@ export interface RegistrationData {
   ticketTierId?: string;
   createdAt: number;
   checkedIn?: boolean;
+  status?: 'confirmed' | 'waitlist' | 'cancelled';
   [key: string]: any;
 }
 
@@ -71,6 +72,12 @@ export interface Sponsor {
   websiteUrl: string;
   logoUrl: string;
   tier: SponsorshipTier;
+}
+
+export interface AiConciergeConfig {
+    enabled: boolean;
+    voice: 'Puck' | 'Charon' | 'Kore' | 'Fenrir' | 'Zephyr';
+    persona: string;
 }
 
 export interface EventConfig {
@@ -146,6 +153,7 @@ export interface EventConfig {
     authToken: string;
     fromNumber: string;
   };
+  aiConcierge: AiConciergeConfig;
 }
 
 export interface FormField {
@@ -353,6 +361,29 @@ export interface SessionQuestion {
     upvotes: number;
     timestamp: number;
     isAnswered: boolean;
+}
+
+export interface Poll {
+    id: string;
+    sessionId: string;
+    question: string;
+    options: string[];
+    status: 'draft' | 'active' | 'closed';
+    createdAt: number;
+}
+
+export interface PollVote {
+    id: string;
+    pollId: string;
+    userId: string;
+    optionIndex: number;
+    timestamp: number;
+}
+
+export interface PollWithResults extends Poll {
+    votes: number[]; // Array of vote counts per option index
+    totalVotes: number;
+    userVotedIndex?: number;
 }
 
 export interface TicketTier {

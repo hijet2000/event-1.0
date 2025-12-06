@@ -25,7 +25,9 @@ export const db: any = {
     venueMaps: [],
     settings: {},
     email_logs: [],
-    session_questions: []
+    session_questions: [],
+    polls: [],
+    poll_votes: []
 };
 
 export const initializeDb = async () => {

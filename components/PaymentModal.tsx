@@ -1,7 +1,7 @@
 
 import React, { useState, useEffect } from 'react';
 import { Spinner } from './Spinner';
-import { createPaymentIntent, purchaseEventCoins } from '../server/api';
+import { createPaymentIntent, purchaseEventCoins, createPublicPaymentIntent } from '../server/api';
 import { loadStripe } from '@stripe/stripe-js';
 import { Elements, CardElement, useStripe, useElements } from '@stripe/react-stripe-js';
 
@@ -11,8 +11,10 @@ const stripePromise = loadStripe('pk_test_51MOCK_KEY_REPLACE_THIS');
 interface PaymentModalProps {
     isOpen: boolean;
     onClose: () => void;
-    delegateToken: string;
+    delegateToken: string | null; // Allow null for public checkout
     onSuccess: () => void;
+    fixedAmount?: number; // Optional fixed amount for direct checkout (e.g. tickets)
+    description?: string; // Description for fixed checkout
 }
 
 const PACKAGES = [
@@ -24,9 +26,10 @@ const PACKAGES = [
 const CheckoutForm: React.FC<{ 
     amount: number, 
     coins: number, 
-    delegateToken: string, 
-    onSuccess: () => void 
-}> = ({ amount, coins, delegateToken, onSuccess }) => {
+    delegateToken: string | null, 
+    onSuccess: () => void,
+    isPublicCheckout?: boolean
+}> = ({ amount, coins, delegateToken, onSuccess, isPublicCheckout }) => {
     const stripe = useStripe();
     const elements = useElements();
     const [error, setError] = useState<string | null>(null);
@@ -42,7 +45,17 @@ const CheckoutForm: React.FC<{
 
         try {
             // 1. Create PaymentIntent on Server
-            const { clientSecret } = await createPaymentIntent(delegateToken, amount);
+            let clientSecret;
+            
+            if (isPublicCheckout) {
+                const res = await createPublicPaymentIntent(amount);
+                clientSecret = res.clientSecret;
+            } else if (delegateToken) {
+                const res = await createPaymentIntent(delegateToken, amount);
+                clientSecret = res.clientSecret;
+            } else {
+                throw new Error("Authentication required for wallet top-up.");
+            }
 
             // 2. Confirm Card Payment
             const result = await stripe.confirmCardPayment(clientSecret, {
@@ -54,12 +67,15 @@ const CheckoutForm: React.FC<{
             if (result.error) {
                 setError(result.error.message || "Payment failed");
             } else if (result.paymentIntent?.status === 'succeeded') {
-                // 3. Fulfill Order (In real app, webhook handles this securely. Here we simulate client-side completion for feedback)
-                await purchaseEventCoins(delegateToken, coins, amount);
+                // 3. Fulfill Order 
+                if (!isPublicCheckout && delegateToken) {
+                    await purchaseEventCoins(delegateToken, coins, amount);
+                }
+                // For public checkout, fulfillment happens in parent component via onSuccess
                 onSuccess();
             }
         } catch (e) {
-            setError("An error occurred during payment processing.");
+            setError(e instanceof Error ? e.message : "An error occurred during payment processing.");
         } finally {
             setProcessing(false);
         }
@@ -91,9 +107,17 @@ const CheckoutForm: React.FC<{
     );
 };
 
-export const PaymentModal: React.FC<PaymentModalProps> = ({ isOpen, onClose, delegateToken, onSuccess }) => {
+export const PaymentModal: React.FC<PaymentModalProps> = ({ isOpen, onClose, delegateToken, onSuccess, fixedAmount, description }) => {
     const [selectedPkg, setSelectedPkg] = useState(PACKAGES[1]);
-    const [step, setStep] = useState<'select' | 'pay' | 'success'>('select');
+    const [step, setStep] = useState<'select' | 'pay' | 'success'>(fixedAmount ? 'pay' : 'select');
+
+    useEffect(() => {
+        if (isOpen && fixedAmount) {
+            setStep('pay');
+        } else if (isOpen) {
+            setStep('select');
+        }
+    }, [isOpen, fixedAmount]);
 
     if (!isOpen) return null;
 
@@ -102,46 +126,70 @@ export const PaymentModal: React.FC<PaymentModalProps> = ({ isOpen, onClose, del
         setTimeout(() => {
             onSuccess();
             onClose();
-            setStep('select');
+            // Reset for next time if not fixedAmount
+            if (!fixedAmount) setStep('select');
         }, 2000);
     };
+
+    const isPublicCheckout = !!fixedAmount;
+    const finalAmount = fixedAmount || selectedPkg.price;
+    const finalCoins = fixedAmount ? 0 : selectedPkg.coins; // No coins for direct ticket purchase
 
     return (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm" onClick={onClose}>
             <div className="bg-white dark:bg-gray-900 rounded-xl shadow-2xl w-full max-w-4xl overflow-hidden flex flex-col md:flex-row h-[600px] md:h-[500px]" onClick={e => e.stopPropagation()}>
                 
-                {/* Left Side: Package Selection */}
+                {/* Left Side: Package Selection or Summary */}
                 <div className="md:w-1/2 bg-gray-50 dark:bg-gray-800 p-8 flex flex-col">
-                    <h3 className="text-2xl font-bold text-gray-900 dark:text-white mb-6">Top Up Wallet</h3>
-                    <div className="space-y-4 flex-1">
-                        {PACKAGES.map(pkg => (
-                            <div 
-                                key={pkg.id} 
-                                onClick={() => setSelectedPkg(pkg)}
-                                className={`relative p-4 rounded-lg border-2 cursor-pointer transition-all ${selectedPkg.id === pkg.id ? 'border-primary bg-primary/5 dark:bg-primary/10' : 'border-gray-200 dark:border-gray-700 hover:border-gray-300'}`}
-                            >
-                                <div className="flex justify-between items-center">
-                                    <div>
-                                        <p className="font-bold text-lg text-gray-900 dark:text-white">{pkg.coins} Coins</p>
-                                        {pkg.id === 'standard' && <span className="text-xs text-green-600 font-bold">Most Popular</span>}
-                                        {pkg.id === 'premium' && <span className="text-xs text-green-600 font-bold">Best Value</span>}
-                                    </div>
-                                    <p className="text-xl font-bold text-gray-900 dark:text-white">${pkg.price}</p>
-                                </div>
-                                {selectedPkg.id === pkg.id && (
-                                    <div className="absolute -right-2 -top-2 w-6 h-6 bg-primary rounded-full flex items-center justify-center text-white">
-                                        <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" viewBox="0 0 20 20" fill="currentColor"><path fillRule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clipRule="evenodd" /></svg>
-                                    </div>
-                                )}
+                    <h3 className="text-2xl font-bold text-gray-900 dark:text-white mb-6">
+                        {fixedAmount ? 'Order Summary' : 'Top Up Wallet'}
+                    </h3>
+                    
+                    {fixedAmount ? (
+                        <div className="flex-1 flex flex-col justify-center space-y-6">
+                            <div className="bg-white dark:bg-gray-700 p-6 rounded-xl border border-gray-200 dark:border-gray-600 shadow-sm">
+                                <p className="text-sm text-gray-500 dark:text-gray-400 uppercase font-bold tracking-wider mb-2">Item</p>
+                                <p className="text-xl font-bold text-gray-900 dark:text-white">{description || 'Event Purchase'}</p>
                             </div>
-                        ))}
-                    </div>
-                    <div className="mt-6 pt-6 border-t border-gray-200 dark:border-gray-700">
-                        <div className="flex justify-between text-sm">
-                            <span className="text-gray-500">Total due</span>
-                            <span className="font-bold text-lg text-gray-900 dark:text-white">${selectedPkg.price.toFixed(2)}</span>
+                            <div className="flex justify-between items-center text-lg">
+                                <span className="text-gray-600 dark:text-gray-300">Total</span>
+                                <span className="text-2xl font-bold text-primary">${fixedAmount.toFixed(2)}</span>
+                            </div>
                         </div>
-                    </div>
+                    ) : (
+                        <div className="space-y-4 flex-1 overflow-y-auto">
+                            {PACKAGES.map(pkg => (
+                                <div 
+                                    key={pkg.id} 
+                                    onClick={() => setSelectedPkg(pkg)}
+                                    className={`relative p-4 rounded-lg border-2 cursor-pointer transition-all ${selectedPkg.id === pkg.id ? 'border-primary bg-primary/5 dark:bg-primary/10' : 'border-gray-200 dark:border-gray-700 hover:border-gray-300'}`}
+                                >
+                                    <div className="flex justify-between items-center">
+                                        <div>
+                                            <p className="font-bold text-lg text-gray-900 dark:text-white">{pkg.coins} Coins</p>
+                                            {pkg.id === 'standard' && <span className="text-xs text-green-600 font-bold">Most Popular</span>}
+                                            {pkg.id === 'premium' && <span className="text-xs text-green-600 font-bold">Best Value</span>}
+                                        </div>
+                                        <p className="text-xl font-bold text-gray-900 dark:text-white">${pkg.price}</p>
+                                    </div>
+                                    {selectedPkg.id === pkg.id && (
+                                        <div className="absolute -right-2 -top-2 w-6 h-6 bg-primary rounded-full flex items-center justify-center text-white">
+                                            <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" viewBox="0 0 20 20" fill="currentColor"><path fillRule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clipRule="evenodd" /></svg>
+                                        </div>
+                                    )}
+                                </div>
+                            ))}
+                        </div>
+                    )}
+
+                    {!fixedAmount && (
+                        <div className="mt-6 pt-6 border-t border-gray-200 dark:border-gray-700">
+                            <div className="flex justify-between text-sm">
+                                <span className="text-gray-500">Total due</span>
+                                <span className="font-bold text-lg text-gray-900 dark:text-white">${selectedPkg.price.toFixed(2)}</span>
+                            </div>
+                        </div>
+                    )}
                 </div>
 
                 {/* Right Side: Payment Form */}
@@ -152,17 +200,20 @@ export const PaymentModal: React.FC<PaymentModalProps> = ({ isOpen, onClose, del
                                 <svg className="w-10 h-10 text-green-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7"></path></svg>
                             </div>
                             <h3 className="text-2xl font-bold text-gray-900 dark:text-white">Payment Successful!</h3>
-                            <p className="text-gray-500 mt-2">{selectedPkg.coins} coins have been added to your wallet.</p>
+                            <p className="text-gray-500 mt-2">
+                                {fixedAmount ? "Thank you for your purchase." : `${selectedPkg.coins} coins have been added to your wallet.`}
+                            </p>
                         </div>
                     ) : (
                         <div className="h-full flex flex-col">
                             <h3 className="text-xl font-bold mb-6 text-gray-900 dark:text-white">Secure Payment</h3>
                             <Elements stripe={stripePromise}>
                                 <CheckoutForm 
-                                    amount={selectedPkg.price} 
-                                    coins={selectedPkg.coins} 
+                                    amount={finalAmount} 
+                                    coins={finalCoins} 
                                     delegateToken={delegateToken} 
                                     onSuccess={handleSuccess} 
+                                    isPublicCheckout={isPublicCheckout}
                                 />
                             </Elements>
                             <button onClick={onClose} className="mt-auto py-3 border border-gray-300 dark:border-gray-600 rounded-lg text-sm font-medium hover:bg-gray-50 dark:hover:bg-gray-800">Cancel</button>

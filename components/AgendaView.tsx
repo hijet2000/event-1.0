@@ -6,6 +6,7 @@ import { StarRating } from './StarRating';
 import { Spinner } from './Spinner';
 import { Alert } from './Alert';
 import { SessionQAModal } from './SessionQAModal';
+import { SessionLivePollsModal } from './SessionLivePollsModal';
 
 interface AgendaViewProps {
   sessions: Session[];
@@ -72,8 +73,9 @@ const SessionCard: React.FC<{
     onToggle?: () => void,
     onRate?: () => void,
     onQA?: () => void,
+    onPolls?: () => void,
     readOnly?: boolean
-}> = ({ session, speakers, isAdded, onToggle, onRate, onQA, readOnly }) => {
+}> = ({ session, speakers, isAdded, onToggle, onRate, onQA, onPolls, readOnly }) => {
   const formatTime = (isoString: string) => new Date(isoString).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: true });
 
   const sessionSpeakers = useMemo(() => 
@@ -86,7 +88,6 @@ const SessionCard: React.FC<{
   
   const handleDownloadIcs = (e: React.MouseEvent) => {
       e.stopPropagation();
-      // Pass the full session object to avoid ID lookup issues
       downloadSessionIcs(session).catch(err => console.error("Calendar export failed", err));
   };
 
@@ -141,6 +142,15 @@ const SessionCard: React.FC<{
                          Q&A
                      </button>
                  )}
+                 {onPolls && (
+                     <button 
+                        onClick={onPolls}
+                        className="text-xs font-medium text-gray-500 hover:text-primary hover:underline flex items-center gap-1"
+                     >
+                         <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z" /></svg>
+                         Live Polls
+                     </button>
+                 )}
             </div>
         )}
 
@@ -165,6 +175,7 @@ export const AgendaView: React.FC<AgendaViewProps> = ({ sessions, speakers, mySe
   const [localMySessionIds, setLocalMySessionIds] = useState<Set<string>>(new Set(mySessionIds));
   const [feedbackSession, setFeedbackSession] = useState<Session | null>(null);
   const [qaSession, setQaSession] = useState<Session | null>(null);
+  const [pollSession, setPollSession] = useState<Session | null>(null);
   const [feedbackSuccess, setFeedbackSuccess] = useState(false);
 
   useEffect(() => {
@@ -183,7 +194,6 @@ export const AgendaView: React.FC<AgendaViewProps> = ({ sessions, speakers, mySe
     }
     setLocalMySessionIds(newSet);
 
-    // Call API directly for robustness, and also trigger parent callback to update portal state
     if (delegateToken) {
         try {
             if (isAdded) {
@@ -194,7 +204,6 @@ export const AgendaView: React.FC<AgendaViewProps> = ({ sessions, speakers, mySe
             if (onToggleSession) onToggleSession(sessionId, !isAdded);
         } catch (e) {
             console.error("Failed to update agenda", e);
-            // Revert on error
             setLocalMySessionIds(prev => {
                 const revertSet = new Set(prev);
                 if (isAdded) revertSet.add(sessionId);
@@ -275,6 +284,7 @@ export const AgendaView: React.FC<AgendaViewProps> = ({ sessions, speakers, mySe
                         onToggle={() => handleToggle(session.id)}
                         onRate={delegateToken && !readOnly ? () => setFeedbackSession(session) : undefined}
                         onQA={delegateToken && !readOnly ? () => setQaSession(session) : undefined}
+                        onPolls={delegateToken && !readOnly ? () => setPollSession(session) : undefined}
                         readOnly={readOnly}
                     />
                 ))}
@@ -303,6 +313,16 @@ export const AgendaView: React.FC<AgendaViewProps> = ({ sessions, speakers, mySe
             sessionId={qaSession.id} 
             sessionTitle={qaSession.title} 
             delegateToken={delegateToken} 
+          />
+      )}
+
+      {pollSession && delegateToken && (
+          <SessionLivePollsModal 
+            isOpen={!!pollSession}
+            onClose={() => setPollSession(null)}
+            sessionId={pollSession.id}
+            sessionTitle={pollSession.title}
+            delegateToken={delegateToken}
           />
       )}
     </div>

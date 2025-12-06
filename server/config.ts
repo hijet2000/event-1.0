@@ -1,7 +1,4 @@
 
-
-
-
 import { type EventConfig } from '../types';
 
 export const defaultConfig: EventConfig = {
@@ -120,5 +117,10 @@ export const defaultConfig: EventConfig = {
     accountSid: '',
     authToken: '',
     fromNumber: '',
+  },
+  aiConcierge: {
+    enabled: true,
+    voice: 'Kore',
+    persona: 'You are a friendly and helpful event concierge. You are knowledgeable about the schedule, speakers, and venue.',
   }
 };

@@ -2,7 +2,7 @@
 import React, { useState, useEffect, Suspense } from 'react';
 import ReactDOM from 'react-dom/client';
 import { type RegistrationData, type Permission, type Session, type Speaker, type Sponsor, type TicketTier } from './types';
-import { registerUser, loginDelegate, triggerRegistrationEmails, getInvitationDetails, getPublicEventData, initializeApi } from './server/api';
+import { registerUser, loginDelegate, triggerRegistrationEmails, getInvitationDetails, getPublicEventData, initializeApi, recordTicketSale } from './server/api';
 import { verifyToken } from './server/auth';
 import { RegistrationForm } from './components/RegistrationForm';
 import { Alert } from './components/Alert';
@@ -17,6 +17,9 @@ import { CountdownTimer } from './components/CountdownTimer';
 import { AgendaView } from './components/AgendaView';
 import { DirectoryView } from './components/DirectoryView';
 import { PublicHome } from './components/PublicHome';
+import { AccessibilityTools } from './components/AccessibilityTools';
+import { PaymentModal } from './components/PaymentModal';
+import { KioskView } from './components/KioskView';
 
 // Lazy load heavy portals to improve initial page load speed
 const AdminPortal = React.lazy(() => import('./components/AdminPortal').then(module => ({ default: module.AdminPortal })));
@@ -111,6 +114,13 @@ const EventPageContent: React.FC<EventPageContentProps> = ({ onAdminLogin, event
 
   const [isAdminModalOpen, setAdminModalOpen] = useState(false);
   const [isDelegateModalOpen, setDelegateModalOpen] = useState(false);
+  const [isPaymentModalOpen, setPaymentModalOpen] = useState(false);
+  
+  // Payment State
+  const [pendingRegistration, setPendingRegistration] = useState<RegistrationData | null>(null);
+  const [paymentAmount, setPaymentAmount] = useState(0);
+  const [paymentDesc, setPaymentDesc] = useState('');
+
   const [delegateToken, setDelegateToken] = useState<string | null>(() => {
     const token = localStorage.getItem('delegateToken');
     if (token) {
@@ -177,6 +187,20 @@ const EventPageContent: React.FC<EventPageContentProps> = ({ onAdminLogin, event
     setError('');
   };
 
+  const executeRegistration = async (submissionData: RegistrationData) => {
+      try {
+          const result = await registerUser(eventId, submissionData, inviteToken || undefined);
+          if (result.success) {
+              await triggerRegistrationEmails(eventId, submissionData);
+              setView('success');
+          } else {
+              setError(result.message);
+          }
+      } catch (err) {
+          setError(err instanceof Error ? err.message : 'An unexpected error occurred.');
+      }
+  };
+
   const handleSubmit = async () => {
     if (!config) {
       setError("Configuration not loaded, cannot submit.");
@@ -192,19 +216,33 @@ const EventPageContent: React.FC<EventPageContentProps> = ({ onAdminLogin, event
     delete (submissionData as any).firstName;
     delete (submissionData as any).lastName;
 
-    try {
-      const result = await registerUser(eventId, submissionData, inviteToken || undefined);
-      if (result.success) {
-        await triggerRegistrationEmails(eventId, submissionData);
-        setView('success');
-      } else {
-        setError(result.message);
-      }
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'An unexpected error occurred.');
+    // Check for ticket payment
+    if (formData.ticketTierId) {
+        const tier = ticketTiers.find(t => t.id === formData.ticketTierId);
+        if (tier && tier.price > 0) {
+            setPendingRegistration(submissionData);
+            setPaymentAmount(tier.price);
+            setPaymentDesc(`Ticket: ${tier.name} (${config.event.name})`);
+            setPaymentModalOpen(true);
+            return;
+        }
     }
+
+    // Proceed if free or no ticket
+    await executeRegistration(submissionData);
   };
   
+  const handlePaymentSuccess = async () => {
+      if (pendingRegistration) {
+          // Record sale (optional: use returned ID from reg, but for now mocked)
+          if (formData.ticketTierId) {
+              await recordTicketSale(eventId, formData.ticketTierId, paymentAmount);
+          }
+          await executeRegistration(pendingRegistration);
+          setPendingRegistration(null);
+      }
+  };
+
   const handleDelegateLogin = async (email: string, password_input: string): Promise<boolean> => {
     try {
       const result = await loginDelegate(eventId, email, password_input);
@@ -256,6 +294,7 @@ const EventPageContent: React.FC<EventPageContentProps> = ({ onAdminLogin, event
   if (delegateToken) {
     return (
         <Suspense fallback={<div className="min-h-screen flex items-center justify-center"><ContentLoader text="Loading portal..." /></div>}>
+            <AccessibilityTools />
             <DelegatePortal onLogout={handleDelegateLogout} delegateToken={delegateToken} />
         </Suspense>
     );
@@ -293,12 +332,15 @@ const EventPageContent: React.FC<EventPageContentProps> = ({ onAdminLogin, event
             onClose={() => setAdminModalOpen(false)}
             onLoginSuccess={handleAdminLoginSuccess}
         />
+        <AccessibilityTools />
       </div>
     );
   }
 
   return (
     <div className="bg-background-color min-h-screen font-sans text-gray-800 dark:text-gray-200 flex flex-col">
+        <a href="#main-content" className="skip-link">Skip to main content</a>
+        <AccessibilityTools />
         {/* Navbar */}
         <nav className="bg-white dark:bg-gray-800 shadow-sm sticky top-0 z-40">
             <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
@@ -332,7 +374,7 @@ const EventPageContent: React.FC<EventPageContentProps> = ({ onAdminLogin, event
             </div>
         </nav>
 
-      <div className="relative z-10 flex-grow container mx-auto px-4 sm:px-6 lg:px-8 py-8 sm:py-12">
+      <div id="main-content" className="relative z-10 flex-grow container mx-auto px-4 sm:px-6 lg:px-8 py-8 sm:py-12">
         <main className="max-w-5xl mx-auto">
             {publicTab === 'home' && config && (
                 <PublicHome 
@@ -426,6 +468,15 @@ const EventPageContent: React.FC<EventPageContentProps> = ({ onAdminLogin, event
                                 <div className="text-center p-12 bg-yellow-50 dark:bg-yellow-900/20 rounded-2xl border border-yellow-200 dark:border-yellow-800">
                                     <h2 className="text-2xl font-bold text-gray-800 dark:text-gray-200">Registration Closed</h2>
                                     <p className="mt-2 text-gray-600 dark:text-gray-400">We're sorry, but this event has reached its maximum capacity. Registration is no longer available.</p>
+                                    <button 
+                                        className="mt-6 px-6 py-2 bg-yellow-600 text-white rounded-full font-semibold hover:bg-yellow-700"
+                                        onClick={() => {
+                                            setFormData(prev => ({ ...prev, status: 'waitlist' }));
+                                            handleSubmit();
+                                        }}
+                                    >
+                                        Join Waitlist
+                                    </button>
                                 </div>
                             ) : (
                                 <RegistrationForm
@@ -459,6 +510,14 @@ const EventPageContent: React.FC<EventPageContentProps> = ({ onAdminLogin, event
         onClose={() => setDelegateModalOpen(false)}
         onLogin={handleDelegateLogin}
         eventId={eventId}
+      />
+      <PaymentModal 
+        isOpen={isPaymentModalOpen}
+        onClose={() => setPaymentModalOpen(false)}
+        delegateToken={null} // Public checkout has no token initially
+        onSuccess={handlePaymentSuccess}
+        fixedAmount={paymentAmount}
+        description={paymentDesc}
       />
     </div>
   );
@@ -539,8 +598,31 @@ function App() {
       );
   }
 
+  // Kiosk Mode Handler
+  if (currentPath === '/kiosk') {
+      if (adminSession) {
+          return <KioskView adminToken={adminSession.token} onExit={() => navigate('/')} />;
+      } else {
+          // If not logged in, show login modal then redirect to kiosk
+          return (
+              <div className="min-h-screen flex items-center justify-center bg-gray-900 text-white">
+                  <AdminLoginModal 
+                    isOpen={true} 
+                    onClose={() => navigate('/')} 
+                    onLoginSuccess={(token, user) => {
+                        handleAdminLogin(token, user);
+                        navigate('/kiosk');
+                    }} 
+                  />
+                  <p>Admin authentication required for Kiosk Mode.</p>
+              </div>
+          );
+      }
+  }
+
   return (
     <ErrorBoundary>
+      <AccessibilityTools />
       {adminSession ? (
         <Suspense fallback={<div className="min-h-screen flex items-center justify-center"><ContentLoader text="Loading dashboard..." /></div>}>
              {/* Wrap AdminPortal in ThemeProvider to ensure SettingsForm has context */}
@@ -555,14 +637,14 @@ function App() {
             'manifest.json', 'favicon.ico', 'robots.txt', 'sitemap.xml', 
             'index.js', 'main.js', 'index.css', 'App.tsx', 
             '@vite', '@fs', '@react-refresh', 
-            'admin' // Explicitly ignore 'admin'
+            'admin', 'kiosk'
           ];
 
           const pathParts = currentPath.split('/').filter(p => p && p !== 'index.html');
           const candidateId = pathParts[0];
           
           // Strict check: if path is 'admin' or starts with 'admin', do NOT treat as event ID
-          const isSystemPath = candidateId === 'admin' || candidateId === 'api';
+          const isSystemPath = candidateId === 'admin' || candidateId === 'api' || candidateId === 'kiosk';
           
           const eventId = (candidateId && !candidateId.includes('.') && !candidateId.startsWith('@') && !ignoredPaths.includes(candidateId) && !isSystemPath) ? candidateId : undefined;
 

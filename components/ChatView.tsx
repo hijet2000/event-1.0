@@ -1,9 +1,9 @@
-
 import React, { useState, useEffect, useRef } from 'react';
 import { ChatMessage, ChatConversation } from '../types';
 import { getConversations, getMessages, sendMessage } from '../server/api';
 import { ContentLoader } from './ContentLoader';
 import { useLiveQuery } from '../hooks/useLiveQuery';
+import { VideoCallModal } from './VideoCallModal';
 
 interface ChatViewProps {
     delegateToken: string;
@@ -13,6 +13,8 @@ interface ChatViewProps {
 export const ChatView: React.FC<ChatViewProps> = ({ delegateToken, initialChatUserId }) => {
     const [activeChatId, setActiveChatId] = useState<string | null>(initialChatUserId || null);
     const [messageInput, setMessageInput] = useState('');
+    const [isCallOpen, setIsCallOpen] = useState(false);
+    const [isCaller, setIsCaller] = useState(false); // Track if I initiated the call
     const scrollRef = useRef<HTMLDivElement>(null);
 
     // Live Query for Conversation List
@@ -53,6 +55,20 @@ export const ChatView: React.FC<ChatViewProps> = ({ delegateToken, initialChatUs
         }
     };
 
+    const handleStartCall = async () => {
+        if (!activeChatId) return;
+        setIsCaller(true);
+        setIsCallOpen(true);
+        // Send a system message to invite the other person
+        await sendMessage(delegateToken, activeChatId, "[VIDEO_CALL_INVITE]");
+        refreshMessages();
+    };
+
+    const handleJoinCall = () => {
+        setIsCaller(false);
+        setIsCallOpen(true);
+    };
+
     const activePartnerName = conversations?.find(c => c.withUserId === activeChatId)?.withUserName || "Chat";
 
     if (loadingConvos && !conversations) return <ContentLoader text="Loading chats..." />;
@@ -80,7 +96,7 @@ export const ChatView: React.FC<ChatViewProps> = ({ delegateToken, initialChatUs
                             </div>
                             <div className="flex justify-between items-center mt-1">
                                 <p className={`text-sm truncate w-40 ${conv.unreadCount > 0 ? 'font-bold text-gray-900 dark:text-white' : 'text-gray-500'}`}>
-                                    {conv.lastMessage}
+                                    {conv.lastMessage === '[VIDEO_CALL_INVITE]' ? '📞 Video Call Invite' : conv.lastMessage}
                                 </p>
                                 {conv.unreadCount > 0 && (
                                     <span className="bg-primary text-white text-xs font-bold px-2 py-0.5 rounded-full">{conv.unreadCount}</span>
@@ -100,32 +116,57 @@ export const ChatView: React.FC<ChatViewProps> = ({ delegateToken, initialChatUs
                 {activeChatId ? (
                     <>
                         {/* Chat Header */}
-                        <div className="p-4 border-b border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-900/50 flex items-center gap-3">
-                            <button onClick={() => setActiveChatId(null)} className="md:hidden text-gray-500">
-                                <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" /></svg>
-                            </button>
-                            <div className="h-8 w-8 rounded-full bg-gradient-to-br from-primary to-secondary flex items-center justify-center text-white font-bold text-sm">
-                                {activePartnerName.charAt(0)}
+                        <div className="p-4 border-b border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-900/50 flex items-center justify-between">
+                            <div className="flex items-center gap-3">
+                                <button onClick={() => setActiveChatId(null)} className="md:hidden text-gray-500">
+                                    <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" /></svg>
+                                </button>
+                                <div className="h-8 w-8 rounded-full bg-gradient-to-br from-primary to-secondary flex items-center justify-center text-white font-bold text-sm">
+                                    {activePartnerName.charAt(0)}
+                                </div>
+                                <h3 className="font-bold text-gray-900 dark:text-white">{activePartnerName}</h3>
                             </div>
-                            <h3 className="font-bold text-gray-900 dark:text-white">{activePartnerName}</h3>
+                            <button 
+                                onClick={handleStartCall}
+                                className="p-2 text-primary hover:bg-primary/10 rounded-full transition-colors"
+                                title="Video Call"
+                            >
+                                <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 10l4.553-2.276A1 1 0 0121 8.618v6.764a1 1 0 01-1.447.894L15 14M5 18h8a2 2 0 002-2V8a2 2 0 00-2-2H5a2 2 0 00-2 2v8a2 2 0 002 2z" />
+                                </svg>
+                            </button>
                         </div>
 
                         {/* Messages */}
                         <div className="flex-1 overflow-y-auto p-4 space-y-4 bg-gray-100 dark:bg-black/20" ref={scrollRef}>
                             {loadingMessages ? <ContentLoader /> : messages?.map(msg => {
                                 const isMe = msg.senderId !== activeChatId;
+                                const isInvite = msg.content === '[VIDEO_CALL_INVITE]';
+                                
                                 return (
                                     <div key={msg.id} className={`flex ${isMe ? 'justify-end' : 'justify-start'}`}>
-                                        <div className={`max-w-[75%] p-3 rounded-2xl text-sm shadow-sm ${
-                                            isMe 
-                                            ? 'bg-primary text-white rounded-br-none' 
-                                            : 'bg-white dark:bg-gray-700 text-gray-800 dark:text-gray-200 rounded-bl-none'
-                                        }`}>
-                                            {msg.content}
-                                            <div className={`text-[10px] mt-1 text-right ${isMe ? 'text-primary-100' : 'text-gray-400'}`}>
-                                                {new Date(msg.timestamp).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})}
+                                        {isInvite ? (
+                                            <div className={`max-w-[75%] p-4 rounded-xl shadow-sm border ${isMe ? 'bg-blue-50 border-blue-200' : 'bg-green-50 border-green-200'} flex flex-col items-center`}>
+                                                <p className="font-bold text-gray-700 mb-2">{isMe ? 'You started a video call' : 'Incoming Video Call'}</p>
+                                                {!isMe && (
+                                                    <button onClick={handleJoinCall} className="bg-green-600 hover:bg-green-700 text-white px-4 py-2 rounded-full font-bold shadow-md transition-transform hover:scale-105">
+                                                        Join Call
+                                                    </button>
+                                                )}
+                                                {isMe && <span className="text-xs text-gray-500">Waiting for answer...</span>}
                                             </div>
-                                        </div>
+                                        ) : (
+                                            <div className={`max-w-[75%] p-3 rounded-2xl text-sm shadow-sm ${
+                                                isMe 
+                                                ? 'bg-primary text-white rounded-br-none' 
+                                                : 'bg-white dark:bg-gray-700 text-gray-800 dark:text-gray-200 rounded-bl-none'
+                                            }`}>
+                                                {msg.content}
+                                                <div className={`text-[10px] mt-1 text-right ${isMe ? 'text-primary-100' : 'text-gray-400'}`}>
+                                                    {new Date(msg.timestamp).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})}
+                                                </div>
+                                            </div>
+                                        )}
                                     </div>
                                 )
                             })}
@@ -157,6 +198,17 @@ export const ChatView: React.FC<ChatViewProps> = ({ delegateToken, initialChatUs
                     </div>
                 )}
             </div>
+            
+            {activeChatId && (
+                <VideoCallModal 
+                    isOpen={isCallOpen} 
+                    onClose={() => setIsCallOpen(false)} 
+                    partnerName={activePartnerName}
+                    partnerId={activeChatId}
+                    isCaller={isCaller}
+                    delegateToken={delegateToken}
+                />
+            )}
         </div>
     );
 };

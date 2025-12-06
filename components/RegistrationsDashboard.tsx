@@ -1,7 +1,7 @@
 
 import React, { useState, useEffect, useMemo } from 'react';
 import { type RegistrationData, type EventConfig, Permission } from '../types';
-import { getRegistrations, getEventConfig, updateRegistrationStatus, deleteAdminRegistration, verifyTicketToken } from '../server/api';
+import { getRegistrations, getEventConfig, updateRegistrationStatus, deleteAdminRegistration, verifyTicketToken, promoteToConfirmed } from '../server/api';
 import { ContentLoader } from './ContentLoader';
 import { DelegateDetailView } from './DelegateDetailView';
 import { BulkImportModal } from './BulkImportModal';
@@ -58,6 +58,9 @@ export const RegistrationsDashboard: React.FC<RegistrationsDashboardProps> = ({ 
   const [filterDate, setFilterDate] = useState('');
   const [sortField, setSortField] = useState<SortField>('createdAt');
   const [sortDesc, setSortDesc] = useState(true);
+  
+  // Tab State for Waitlist
+  const [activeTab, setActiveTab] = useState<'confirmed' | 'waitlist' | 'cancelled'>('confirmed');
 
   const canManage = permissions.includes('manage_registrations');
   const canInvite = permissions.includes('send_invitations');
@@ -107,6 +110,16 @@ export const RegistrationsDashboard: React.FC<RegistrationsDashboardProps> = ({ 
           setIsDeleting(null);
       }
   };
+  
+  const handlePromote = async (id: string) => {
+      try {
+          await promoteToConfirmed(adminToken, id);
+          // Optimistic update or reload
+          setRegistrations(prev => prev.map(r => r.id === id ? { ...r, status: 'confirmed' } : r));
+      } catch (e) {
+          alert("Failed to promote user.");
+      }
+  };
 
   const handleScan = async (token: string) => {
     setIsScannerOpen(false);
@@ -129,11 +142,16 @@ export const RegistrationsDashboard: React.FC<RegistrationsDashboardProps> = ({ 
     
     setTimeout(() => setScanStatus(null), 4000);
   };
+  
+  const handleLaunchKiosk = () => {
+      // Open kiosk in current tab (App.tsx handles routing)
+      window.location.href = '/kiosk';
+  };
 
   const handleExportCSV = () => {
       if (registrations.length === 0) return;
       
-      const headers = ['ID', 'Name', 'Email', 'Created At', 'Checked In', 'Role', 'Company'];
+      const headers = ['ID', 'Name', 'Email', 'Created At', 'Checked In', 'Status', 'Role', 'Company'];
       const customHeaders = config?.formFields.filter(f => f.enabled).map(f => f.label) || [];
       const allHeaders = [...headers, ...customHeaders];
       
@@ -146,6 +164,7 @@ export const RegistrationsDashboard: React.FC<RegistrationsDashboardProps> = ({ 
                   reg.email,
                   new Date(reg.createdAt).toISOString(),
                   reg.checkedIn ? 'Yes' : 'No',
+                  reg.status || 'confirmed',
                   `"${reg.role || ''}"`,
                   `"${reg.company || ''}"`
               ];
@@ -189,9 +208,12 @@ export const RegistrationsDashboard: React.FC<RegistrationsDashboardProps> = ({ 
 
           let col = 0;
           let row = 0;
+          
+          // Filter out cancelled/waitlisted for badge printing usually
+          const badgeList = registrations.filter(r => r.status !== 'cancelled' && r.status !== 'waitlist');
 
-          for (let i = 0; i < registrations.length; i++) {
-              const reg = registrations[i];
+          for (let i = 0; i < badgeList.length; i++) {
+              const reg = badgeList[i];
               
               // Calculate Position
               const x = margin + col * (badgeWidth + gap);
@@ -308,7 +330,13 @@ export const RegistrationsDashboard: React.FC<RegistrationsDashboardProps> = ({ 
   const processedRegistrations = useMemo(() => {
     let result = [...registrations];
     
-    // 1. Filter
+    // 0. Filter by Tab Status (default to confirmed if status missing in legacy data)
+    result = result.filter(reg => {
+        const status = reg.status || 'confirmed';
+        return status === activeTab;
+    });
+
+    // 1. Filter Text & Date
     const lowerCaseFilter = filterText.toLowerCase();
     let filterStartTimestamp: number | null = null;
     if (filterDate) {
@@ -348,7 +376,7 @@ export const RegistrationsDashboard: React.FC<RegistrationsDashboardProps> = ({ 
     });
 
     return result;
-  }, [registrations, filterText, filterDate, sortField, sortDesc]);
+  }, [registrations, filterText, filterDate, sortField, sortDesc, activeTab]);
 
   const renderSortIcon = (field: SortField) => {
       if (sortField !== field) return <span className="ml-1 text-gray-400 text-[10px]">▲▼</span>;
@@ -408,6 +436,30 @@ export const RegistrationsDashboard: React.FC<RegistrationsDashboardProps> = ({ 
 
     return (
       <>
+        {/* Tabs */}
+        <div className="border-b border-gray-200 dark:border-gray-700 mb-4">
+            <nav className="-mb-px flex space-x-8">
+                <button
+                    onClick={() => setActiveTab('confirmed')}
+                    className={`whitespace-nowrap py-4 px-1 border-b-2 font-medium text-sm ${activeTab === 'confirmed' ? 'border-primary text-primary' : 'border-transparent text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-300'}`}
+                >
+                    Confirmed
+                </button>
+                <button
+                    onClick={() => setActiveTab('waitlist')}
+                    className={`whitespace-nowrap py-4 px-1 border-b-2 font-medium text-sm ${activeTab === 'waitlist' ? 'border-primary text-primary' : 'border-transparent text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-300'}`}
+                >
+                    Waitlist
+                </button>
+                <button
+                    onClick={() => setActiveTab('cancelled')}
+                    className={`whitespace-nowrap py-4 px-1 border-b-2 font-medium text-sm ${activeTab === 'cancelled' ? 'border-primary text-primary' : 'border-transparent text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-300'}`}
+                >
+                    Cancelled
+                </button>
+            </nav>
+        </div>
+
         {/* Filter controls */}
         <div className="mb-4 p-4 bg-gray-50 dark:bg-gray-700/50 rounded-lg">
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
@@ -461,7 +513,7 @@ export const RegistrationsDashboard: React.FC<RegistrationsDashboardProps> = ({ 
                             Registered On {renderSortIcon('createdAt')}
                         </th>
                         <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider cursor-pointer hover:bg-gray-100 dark:hover:bg-gray-600" onClick={() => handleSort('status')}>
-                            Status {renderSortIcon('status')}
+                            Check-in {renderSortIcon('status')}
                         </th>
                         <th className="px-6 py-3 text-right text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider">Actions</th>
                     </tr>
@@ -485,6 +537,9 @@ export const RegistrationsDashboard: React.FC<RegistrationsDashboardProps> = ({ 
                             </td>
                             <td className="px-6 py-4 whitespace-nowrap text-right text-sm font-medium">
                                 <div className="flex items-center justify-end space-x-3">
+                                    {activeTab === 'waitlist' && (
+                                        <button onClick={() => handlePromote(reg.id!)} className="text-green-600 hover:underline">Promote</button>
+                                    )}
                                     <button onClick={() => setSelectedDelegate(reg)} className="text-primary hover:underline">Edit</button>
                                     <button onClick={() => handleDelete(reg.id!)} disabled={isDeleting === reg.id} className="text-red-500 hover:underline disabled:opacity-50">
                                         {isDeleting === reg.id ? '...' : 'Delete'}
@@ -495,7 +550,7 @@ export const RegistrationsDashboard: React.FC<RegistrationsDashboardProps> = ({ 
                     )) : (
                         <tr>
                             <td colSpan={5} className="text-center py-10 text-gray-500 dark:text-gray-400">
-                                No registrations match your filters.
+                                No {activeTab} registrations match your filters.
                             </td>
                         </tr>
                     )}
@@ -527,12 +582,16 @@ export const RegistrationsDashboard: React.FC<RegistrationsDashboardProps> = ({ 
         <div className="flex gap-2 flex-wrap">
             {canInvite && (
                 <button onClick={() => setInviteModalOpen(true)} className="py-2 px-4 border border-transparent rounded-md shadow-sm text-sm font-medium text-white bg-secondary hover:bg-secondary/90 flex items-center gap-2">
-                    <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 8l7.89 5.26a2 2 0 002.22 0L21 8M5 19h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z" /></svg>
+                    <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 8l7.89 5.26a2 2 0 002.22 0L21 8M5 19h14a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z" /></svg>
                     Invite Delegate
                 </button>
             )}
             {canManage && (
               <>
+                <button onClick={handleLaunchKiosk} className="py-2 px-4 border border-transparent rounded-md shadow-sm text-sm font-medium text-white bg-purple-600 hover:bg-purple-700 flex items-center gap-2">
+                    <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9.75 17L9 20l-1 1h8l-1-1-.75-3M3 13h18M5 17h14a2 2 0 002-2V5a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z" /></svg>
+                    Launch Kiosk
+                </button>
                 <button onClick={() => setIsScannerOpen(true)} className="py-2 px-4 border border-transparent rounded-md shadow-sm text-sm font-medium text-white bg-primary hover:bg-primary/90 flex items-center gap-2">
                     <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v1m6 11h2m-6.5 6.5v-1m-6.5-5.5h-1M4 12V4a2 2 0 012-2h8a2 2 0 012 2v8a2 2 0 01-2 2H6a2 2 0 01-2-2z" /></svg>
                     Scan to Check-in

@@ -27,7 +27,8 @@ export const SessionEditorModal: React.FC<SessionEditorModalProps> = ({ isOpen, 
     const [selectedSpeakerIds, setSelectedSpeakerIds] = useState<Set<string>>(new Set());
     const [isSaving, setIsSaving] = useState(false);
     const [isGenerating, setIsGenerating] = useState(false);
-    const [conflictWarning, setConflictWarning] = useState<string | null>(null);
+    const [conflicts, setConflicts] = useState<string[]>([]);
+    const [forceSchedule, setForceSchedule] = useState(false);
     
     const isNew = !session;
 
@@ -45,14 +46,15 @@ export const SessionEditorModal: React.FC<SessionEditorModalProps> = ({ isOpen, 
             };
             setFormData(initialData);
             setSelectedSpeakerIds(new Set(initialData.speakerIds || []));
-            setConflictWarning(null);
+            setConflicts([]);
+            setForceSchedule(false);
         }
     }, [isOpen, session]);
 
-    // Conflict Detection Logic
+    // Enhanced Conflict Detection Logic
     useEffect(() => {
-        if (!formData.startTime || !formData.endTime || !formData.location) {
-            setConflictWarning(null);
+        if (!formData.startTime || !formData.endTime) {
+            setConflicts([]);
             return;
         }
         
@@ -61,24 +63,41 @@ export const SessionEditorModal: React.FC<SessionEditorModalProps> = ({ isOpen, 
         
         if (start >= end) return; // Invalid dates handled by validation later
 
-        const conflicts = existingSessions.filter(s => {
-            if (s.id === session?.id) return false; // Don't check against self
-            if (s.location.toLowerCase() !== formData.location?.toLowerCase()) return false;
+        const currentConflicts: string[] = [];
+
+        existingSessions.forEach(s => {
+            if (s.id === session?.id) return; // Don't check against self
             
             const sStart = new Date(s.startTime).getTime();
             const sEnd = new Date(s.endTime).getTime();
             
-            // Check overlap
-            return (start < sEnd && end > sStart);
+            // Check overlap: (StartA < EndB) and (EndA > StartB)
+            if (start < sEnd && end > sStart) {
+                
+                // 1. Check Location Conflict
+                if (formData.location && s.location && s.location.toLowerCase().trim() === formData.location.toLowerCase().trim()) {
+                    currentConflicts.push(`Room "${s.location}" is already booked by "${s.title}" (${new Date(s.startTime).toLocaleTimeString()} - ${new Date(s.endTime).toLocaleTimeString()}).`);
+                }
+
+                // 2. Check Speaker Conflict
+                if (s.speakerIds && s.speakerIds.length > 0) {
+                    const overlappingSpeakers = s.speakerIds.filter(id => selectedSpeakerIds.has(id));
+                    if (overlappingSpeakers.length > 0) {
+                        const names = overlappingSpeakers.map(id => speakers.find(spk => spk.id === id)?.name || 'Unknown').join(', ');
+                        currentConflicts.push(`Speaker(s) ${names} are already presenting at "${s.title}" during this time.`);
+                    }
+                }
+            }
         });
 
-        if (conflicts.length > 0) {
-            setConflictWarning(`Location "${formData.location}" is booked during this time by: ${conflicts.map(s => `"${s.title}"`).join(', ')}`);
-        } else {
-            setConflictWarning(null);
+        setConflicts(currentConflicts);
+        
+        // Reset force schedule if conflicts are resolved
+        if (currentConflicts.length === 0) {
+            setForceSchedule(false);
         }
 
-    }, [formData.startTime, formData.endTime, formData.location, existingSessions, session]);
+    }, [formData.startTime, formData.endTime, formData.location, selectedSpeakerIds, existingSessions, session, speakers]);
 
 
     if (!isOpen) return null;
@@ -128,6 +147,11 @@ export const SessionEditorModal: React.FC<SessionEditorModalProps> = ({ isOpen, 
             return;
         }
 
+        if (conflicts.length > 0 && !forceSchedule) {
+            alert("Please resolve scheduling conflicts or select 'Ignore Conflicts' to proceed.");
+            return;
+        }
+
         setIsSaving(true);
         const finalData = {
             ...formData,
@@ -154,7 +178,34 @@ export const SessionEditorModal: React.FC<SessionEditorModalProps> = ({ isOpen, 
                 <form onSubmit={handleSave}>
                     <h2 className="p-6 text-xl font-bold text-gray-900 dark:text-white border-b dark:border-gray-700">{isNew ? 'Add Session' : 'Edit Session'}</h2>
                     <div className="p-6 space-y-4 max-h-[70vh] overflow-y-auto">
-                        {conflictWarning && <Alert type="warning" message={conflictWarning} />}
+                        
+                        {/* Conflict Warning Area */}
+                        {conflicts.length > 0 && (
+                            <div className="p-4 rounded-md bg-red-50 dark:bg-red-900/30 border border-red-200 dark:border-red-800 animate-fade-in">
+                                <div className="flex items-start">
+                                    <svg className="w-5 h-5 text-red-600 dark:text-red-400 mt-0.5 mr-2" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
+                                    </svg>
+                                    <div className="flex-1">
+                                        <h3 className="text-sm font-medium text-red-800 dark:text-red-200">Scheduling Conflict Detected</h3>
+                                        <ul className="mt-2 text-sm text-red-700 dark:text-red-300 list-disc list-inside space-y-1">
+                                            {conflicts.map((c, i) => <li key={i}>{c}</li>)}
+                                        </ul>
+                                        <div className="mt-3">
+                                            <label className="flex items-center space-x-2 cursor-pointer">
+                                                <input 
+                                                    type="checkbox" 
+                                                    checked={forceSchedule} 
+                                                    onChange={e => setForceSchedule(e.target.checked)}
+                                                    className="rounded border-red-300 text-red-600 focus:ring-red-500" 
+                                                />
+                                                <span className="text-sm font-medium text-red-800 dark:text-red-200">Ignore conflicts and force schedule</span>
+                                            </label>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                        )}
                         
                         <InputField label="Session Title" id="title" name="title" type="text" value={formData.title || ''} onChange={handleChange} required />
                         
@@ -195,7 +246,11 @@ export const SessionEditorModal: React.FC<SessionEditorModalProps> = ({ isOpen, 
                     </div>
                     <div className="p-4 bg-gray-50 dark:bg-gray-900/50 flex justify-end gap-3 border-t dark:border-gray-700">
                         <button type="button" onClick={onClose} className="py-2 px-4 border border-gray-300 dark:border-gray-600 rounded-md shadow-sm text-sm font-medium text-gray-700 dark:text-gray-200 bg-white dark:bg-gray-700 hover:bg-gray-50 dark:hover:bg-gray-600">Cancel</button>
-                        <button type="submit" disabled={isSaving} className="py-2 px-4 border border-transparent rounded-md shadow-sm text-sm font-medium text-white bg-primary hover:bg-primary/90 flex items-center disabled:opacity-50 w-32 justify-center">
+                        <button 
+                            type="submit" 
+                            disabled={isSaving || (conflicts.length > 0 && !forceSchedule)} 
+                            className="py-2 px-4 border border-transparent rounded-md shadow-sm text-sm font-medium text-white bg-primary hover:bg-primary/90 flex items-center disabled:opacity-50 disabled:cursor-not-allowed w-32 justify-center transition-colors"
+                        >
                             {isSaving ? <><Spinner /> Saving...</> : 'Save Session'}
                         </button>
                     </div>
