@@ -1,3 +1,4 @@
+
 import React, { useRef, useEffect, useState } from 'react';
 import { processCheckIn } from '../server/api';
 import { Alert } from './Alert';
@@ -21,6 +22,14 @@ export const KioskView: React.FC<KioskViewProps> = ({ adminToken, onExit }) => {
 
         const startCamera = async () => {
             if (status !== 'scanning') return;
+
+            // Feature detection for BarcodeDetector API
+            if (!('BarcodeDetector' in window)) {
+                setErrorMsg("QR Scanning not supported in this browser. Please use Chrome/Edge on Android, macOS or Windows.");
+                setStatus('error');
+                // Do not auto-reset if API is missing
+                return;
+            }
 
             try {
                 stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'user' } });
@@ -48,8 +57,15 @@ export const KioskView: React.FC<KioskViewProps> = ({ adminToken, onExit }) => {
                 }
             } catch (err) {
                 console.error("Camera error", err);
-                setErrorMsg("Camera access denied or unavailable.");
+                let msg = "Camera access denied or unavailable.";
+                if (err instanceof Error) {
+                    if (err.name === 'NotAllowedError') msg = "Camera permission denied.";
+                    else if (err.name === 'NotFoundError') msg = "No camera found.";
+                    else msg = err.message;
+                }
+                setErrorMsg(msg);
                 setStatus('error');
+                // Do not auto-reset if camera is broken
             }
         };
 
@@ -165,9 +181,13 @@ export const KioskView: React.FC<KioskViewProps> = ({ adminToken, onExit }) => {
                         <div className="w-24 h-24 bg-white rounded-full flex items-center justify-center mb-6 shadow-lg">
                             <svg className="w-12 h-12 text-red-600" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={3} d="M6 18L18 6M6 6l12 12"/></svg>
                         </div>
-                        <h2 className="text-3xl font-bold mb-2">Check-in Failed</h2>
-                        <p className="text-xl opacity-90">{errorMsg || "Invalid Ticket"}</p>
+                        <h2 className="text-3xl font-bold mb-2">Check-in Error</h2>
+                        <p className="text-xl opacity-90">{errorMsg || "System Error"}</p>
                         <p className="mt-6 text-sm opacity-75">Please see the registration desk for assistance.</p>
+                        {/* Only show retry if it seems like a temporary error (message is short or network related) */}
+                        {errorMsg === "Network error." && (
+                             <button onClick={() => setStatus('scanning')} className="mt-4 px-4 py-2 border border-white rounded hover:bg-white/20">Retry</button>
+                        )}
                     </div>
                 )}
 

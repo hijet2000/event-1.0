@@ -28,6 +28,16 @@ const applyTheme = (cfg: EventConfig) => {
     if (!root.classList.contains('dark')) {
         root.style.setProperty('--color-background-color', cfg.theme.backgroundColor);
     }
+
+    if (cfg.theme.faviconUrl) {
+        let link = document.querySelector("link[rel~='icon']") as HTMLLinkElement;
+        if (!link) {
+            link = document.createElement('link');
+            link.rel = 'icon';
+            document.head.appendChild(link);
+        }
+        link.href = cfg.theme.faviconUrl;
+    }
 };
 
 interface ThemeProviderProps {

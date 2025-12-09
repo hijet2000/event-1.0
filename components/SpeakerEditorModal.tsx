@@ -2,7 +2,7 @@
 import React, { useState, useEffect } from 'react';
 import { type Speaker } from '../types';
 import { Spinner } from './Spinner';
-import { generateAiContent } from '../server/api';
+import { generateAiContent, researchEntity } from '../server/api';
 import { ImageUpload } from './ImageUpload';
 
 interface SpeakerEditorModalProps {
@@ -24,6 +24,7 @@ export const SpeakerEditorModal: React.FC<SpeakerEditorModalProps> = ({ isOpen, 
     const [formData, setFormData] = useState<Partial<Speaker>>({});
     const [isSaving, setIsSaving] = useState(false);
     const [isGenerating, setIsGenerating] = useState(false);
+    const [isResearching, setIsResearching] = useState(false);
     const isNew = !speaker;
 
     useEffect(() => {
@@ -63,6 +64,33 @@ export const SpeakerEditorModal: React.FC<SpeakerEditorModalProps> = ({ isOpen, 
             setIsGenerating(false);
         }
     };
+
+    const handleResearch = async () => {
+        if (!formData.name) {
+            alert("Please enter a name to research.");
+            return;
+        }
+        setIsResearching(true);
+        try {
+            const data = await researchEntity(adminToken, 'speaker', formData.name);
+            if (data) {
+                setFormData(prev => ({
+                    ...prev,
+                    title: data.title || prev.title,
+                    company: data.company || prev.company,
+                    bio: data.bio || prev.bio,
+                    linkedinUrl: data.linkedinUrl || prev.linkedinUrl,
+                    twitterUrl: data.twitterUrl || prev.twitterUrl
+                }));
+            } else {
+                alert("No information found.");
+            }
+        } catch (e) {
+            alert("Research failed. Ensure your API key supports Google Search.");
+        } finally {
+            setIsResearching(false);
+        }
+    };
     
     const handleSave = async (e: React.FormEvent) => {
         e.preventDefault();
@@ -85,7 +113,29 @@ export const SpeakerEditorModal: React.FC<SpeakerEditorModalProps> = ({ isOpen, 
                             </div>
                         </div>
                         <div className="md:col-span-2 space-y-4">
-                            <InputField label="Full Name" id="name" name="name" value={formData.name || ''} onChange={handleChange} required />
+                            <div>
+                                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Full Name</label>
+                                <div className="flex gap-2">
+                                    <input 
+                                        type="text" 
+                                        name="name" 
+                                        id="name"
+                                        value={formData.name || ''} 
+                                        onChange={handleChange} 
+                                        className="appearance-none block w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-md shadow-sm bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:ring-primary focus:border-primary"
+                                        required 
+                                    />
+                                    <button 
+                                        type="button" 
+                                        onClick={handleResearch} 
+                                        disabled={isResearching}
+                                        className="px-3 py-2 bg-gradient-to-r from-blue-500 to-indigo-600 text-white rounded-md text-xs font-bold shadow-sm whitespace-nowrap hover:from-blue-600 hover:to-indigo-700 disabled:opacity-50"
+                                        title="Auto-fill details from web"
+                                    >
+                                        {isResearching ? <Spinner /> : 'Auto-fill 🪄'}
+                                    </button>
+                                </div>
+                            </div>
                             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                                 <InputField label="Title" id="title" name="title" value={formData.title || ''} onChange={handleChange} placeholder="e.g. CEO" />
                                 <InputField label="Company" id="company" name="company" value={formData.company || ''} onChange={handleChange} placeholder="e.g. Tech Corp" />

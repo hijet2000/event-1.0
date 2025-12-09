@@ -96,39 +96,42 @@ export const VideoCallModal: React.FC<VideoCallModalProps> = ({ isOpen, onClose,
 
             startCall();
 
-            // Setup Socket Listener
+            // Setup Signal Listener
             const unsubscribe = subscribeToSignals(async (payload) => {
                 if (payload.senderId !== partnerId) return;
                 const pc = peerConnection.current;
                 if (!pc) return;
 
-                if (payload.type === 'offer') {
-                    if (!isCaller) {
-                        await pc.setRemoteDescription(new RTCSessionDescription(payload.data));
-                        const answer = await pc.createAnswer();
-                        await pc.setLocalDescription(answer);
-                        await sendSignal(delegateToken, partnerId, 'answer', answer);
-                    }
-                } else if (payload.type === 'answer') {
-                    if (isCaller) {
-                        await pc.setRemoteDescription(new RTCSessionDescription(payload.data));
-                    }
-                } else if (payload.type === 'candidate') {
-                    try {
+                try {
+                    if (payload.type === 'offer') {
+                        if (!isCaller) {
+                            await pc.setRemoteDescription(new RTCSessionDescription(payload.data));
+                            const answer = await pc.createAnswer();
+                            await pc.setLocalDescription(answer);
+                            await sendSignal(delegateToken, partnerId, 'answer', answer);
+                        }
+                    } else if (payload.type === 'answer') {
+                        if (isCaller) {
+                            await pc.setRemoteDescription(new RTCSessionDescription(payload.data));
+                        }
+                    } else if (payload.type === 'candidate') {
                         await pc.addIceCandidate(new RTCIceCandidate(payload.data));
-                    } catch (e) {
-                        console.error("Error adding ice candidate", e);
                     }
+                } catch (e) {
+                    console.error("Signaling Error", e);
                 }
             });
 
+            // Cleanup function for when modal closes
             return () => {
                 unsubscribe();
                 if (localStream.current) {
                     localStream.current.getTracks().forEach(t => t.stop());
+                    localStream.current = null;
                 }
                 if (peerConnection.current) {
                     peerConnection.current.close();
+                    peerConnection.current = null;
                 }
             };
         }

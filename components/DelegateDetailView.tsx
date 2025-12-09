@@ -4,6 +4,7 @@ import { type RegistrationData, type EventConfig } from '../types';
 import { Alert } from './Alert';
 import { Spinner } from './Spinner';
 import { sendUpdateEmailToDelegate, saveAdminRegistration } from '../server/api';
+import { ImageUpload } from './ImageUpload';
 
 interface DelegateDetailViewProps {
   delegate: RegistrationData;
@@ -48,7 +49,9 @@ export const DelegateDetailView: React.FC<DelegateDetailViewProps> = ({ delegate
             const updates = {
                 name: formData.name,
                 email: formData.email,
-                customFields: {} as any,
+                role: formData.role,
+                company: formData.company,
+                customFields: { photoUrl: formData.photoUrl } as any,
                 checkedIn: formData.checkedIn
             };
             // Extract custom fields
@@ -75,6 +78,10 @@ export const DelegateDetailView: React.FC<DelegateDetailViewProps> = ({ delegate
         setFormData(prev => ({ ...prev, checkedIn: !prev.checkedIn }));
     };
 
+    const handlePhotoChange = (url: string) => {
+        setFormData(prev => ({ ...prev, photoUrl: url }));
+    }
+
     return (
         <div className="animate-fade-in">
             <div className="mb-6 flex justify-between items-center">
@@ -98,34 +105,55 @@ export const DelegateDetailView: React.FC<DelegateDetailViewProps> = ({ delegate
             
             <div className="bg-white dark:bg-gray-800 shadow-md rounded-lg overflow-hidden">
                 <div className="p-6 border-b border-gray-200 dark:border-gray-700">
-                    <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
-                        {isEditing ? (
-                            <div className="w-full md:w-2/3 space-y-4">
-                                <input 
-                                    type="text" 
-                                    name="name" 
-                                    value={formData.name} 
-                                    onChange={handleInputChange}
-                                    className="block w-full text-xl font-bold border-b border-gray-300 dark:border-gray-600 bg-transparent focus:outline-none focus:border-primary dark:text-white"
-                                    placeholder="Delegate Name"
-                                />
-                                <input 
-                                    type="email" 
-                                    name="email" 
-                                    value={formData.email} 
-                                    onChange={handleInputChange}
-                                    className="block w-full text-sm text-gray-500 bg-transparent border-b border-gray-300 dark:border-gray-600 focus:outline-none focus:border-primary"
-                                    placeholder="Email Address"
-                                />
+                    <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-6">
+                        <div className="flex items-center gap-4 w-full md:w-auto">
+                            {/* Avatar Display/Edit */}
+                            <div className="relative group">
+                                {formData.photoUrl ? (
+                                    <img src={formData.photoUrl} alt={formData.name} className="w-20 h-20 rounded-full object-cover border-2 border-gray-200 dark:border-gray-600" />
+                                ) : (
+                                    <div className="w-20 h-20 rounded-full bg-gray-200 dark:bg-gray-700 flex items-center justify-center text-2xl font-bold text-gray-400">
+                                        {formData.name.charAt(0)}
+                                    </div>
+                                )}
+                                {isEditing && (
+                                    <div className="mt-2 w-48 absolute top-0 left-24 bg-white dark:bg-gray-800 p-2 rounded shadow-lg z-10 border dark:border-gray-600">
+                                        <label className="text-xs font-bold mb-1 block">Change Photo</label>
+                                        <ImageUpload label="" value={formData.photoUrl || ''} onChange={handlePhotoChange} />
+                                    </div>
+                                )}
                             </div>
-                        ) : (
-                            <div>
-                                <h2 className="text-2xl font-bold text-gray-900 dark:text-white">{formData.name}</h2>
-                                <p className="text-gray-500 dark:text-gray-400">{formData.email}</p>
+
+                            <div className="flex-1">
+                                {isEditing ? (
+                                    <div className="space-y-2">
+                                        <input 
+                                            type="text" 
+                                            name="name" 
+                                            value={formData.name} 
+                                            onChange={handleInputChange}
+                                            className="block w-full text-xl font-bold border-b border-gray-300 dark:border-gray-600 bg-transparent focus:outline-none focus:border-primary dark:text-white"
+                                            placeholder="Delegate Name"
+                                        />
+                                        <input 
+                                            type="email" 
+                                            name="email" 
+                                            value={formData.email} 
+                                            onChange={handleInputChange}
+                                            className="block w-full text-sm text-gray-500 bg-transparent border-b border-gray-300 dark:border-gray-600 focus:outline-none focus:border-primary"
+                                            placeholder="Email Address"
+                                        />
+                                    </div>
+                                ) : (
+                                    <div>
+                                        <h2 className="text-2xl font-bold text-gray-900 dark:text-white">{formData.name}</h2>
+                                        <p className="text-gray-500 dark:text-gray-400">{formData.email}</p>
+                                    </div>
+                                )}
                             </div>
-                        )}
+                        </div>
                         
-                        <div className="flex items-center gap-3">
+                        <div className="flex items-center gap-3 self-end md:self-center">
                              {isEditing ? (
                                  <label className="flex items-center cursor-pointer">
                                     <span className="mr-2 text-sm font-medium text-gray-700 dark:text-gray-300">Status:</span>
@@ -145,13 +173,24 @@ export const DelegateDetailView: React.FC<DelegateDetailViewProps> = ({ delegate
                              )}
                         </div>
                     </div>
-                    <p className="mt-2 text-sm text-gray-500 dark:text-gray-400">Registered on: {new Date(delegate.createdAt).toLocaleString()}</p>
+                    <p className="mt-2 text-sm text-gray-500 dark:text-gray-400 ml-24">Registered on: {new Date(delegate.createdAt).toLocaleString()}</p>
                 </div>
                 
                 <div className="p-6">
                     <h3 className="text-lg font-semibold mb-4">Registration Details</h3>
                     {isEditing ? (
                          <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                             {/* Standard Fields */}
+                             <div>
+                                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Company</label>
+                                <input type="text" name="company" value={formData.company || ''} onChange={handleInputChange} className="w-full rounded-md border-gray-300 dark:border-gray-600 shadow-sm bg-white dark:bg-gray-700 p-2" />
+                             </div>
+                             <div>
+                                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Role</label>
+                                <input type="text" name="role" value={formData.role || ''} onChange={handleInputChange} className="w-full rounded-md border-gray-300 dark:border-gray-600 shadow-sm bg-white dark:bg-gray-700 p-2" />
+                             </div>
+
+                             {/* Custom Fields */}
                              {config.formFields.filter(f => f.enabled).map(field => (
                                  <div key={field.id}>
                                      <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">{field.label}</label>
@@ -187,6 +226,14 @@ export const DelegateDetailView: React.FC<DelegateDetailViewProps> = ({ delegate
                          </div>
                     ) : (
                         <dl className="grid grid-cols-1 md:grid-cols-2 gap-x-6 gap-y-4">
+                            <div>
+                                <dt className="text-sm font-medium text-gray-500 dark:text-gray-400">Company</dt>
+                                <dd className="mt-1 text-gray-900 dark:text-white">{delegate.company || '-'}</dd>
+                            </div>
+                            <div>
+                                <dt className="text-sm font-medium text-gray-500 dark:text-gray-400">Role</dt>
+                                <dd className="mt-1 text-gray-900 dark:text-white">{delegate.role || '-'}</dd>
+                            </div>
                             {config.formFields.filter(f => f.enabled && delegate[f.id]).map(field => (
                                 <div key={field.id}>
                                     <dt className="text-sm font-medium text-gray-500 dark:text-gray-400">{field.label}</dt>

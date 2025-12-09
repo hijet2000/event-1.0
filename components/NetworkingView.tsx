@@ -107,20 +107,41 @@ const ProfileEditor: React.FC<{ profile: NetworkingProfile, onSave: (p: Partial<
     );
 };
 
+const UserAvatar: React.FC<{ name: string, photoUrl?: string, size?: 'sm' | 'md' | 'lg' }> = ({ name, photoUrl, size = 'md' }) => {
+    const sizeClasses = {
+        sm: 'w-8 h-8 text-xs',
+        md: 'w-12 h-12 text-lg',
+        lg: 'w-16 h-16 text-xl'
+    };
+
+    if (photoUrl) {
+        return <img src={photoUrl} alt={name} className={`${sizeClasses[size]} rounded-full object-cover border-2 border-gray-200 dark:border-gray-700 shadow-sm`} />;
+    }
+
+    return (
+        <div className={`${sizeClasses[size]} rounded-full bg-gradient-to-br from-primary/80 to-secondary/80 flex items-center justify-center font-bold text-white shadow-sm`}>
+            {name.charAt(0).toUpperCase()}
+        </div>
+    );
+};
+
 const MatchCard: React.FC<{ match: NetworkingMatch, onMessage: (id: string) => void }> = ({ match, onMessage }) => {
     let scoreColor = 'bg-gray-100 text-gray-800';
     if (match.score >= 80) scoreColor = 'bg-green-100 text-green-800';
     else if (match.score >= 50) scoreColor = 'bg-yellow-100 text-yellow-800';
 
     return (
-        <div className="bg-white dark:bg-gray-800 rounded-lg shadow-md overflow-hidden border border-gray-200 dark:border-gray-700 flex flex-col">
+        <div className="bg-white dark:bg-gray-800 rounded-lg shadow-md overflow-hidden border border-gray-200 dark:border-gray-700 flex flex-col hover:shadow-lg transition-shadow">
             <div className="p-4 flex items-start justify-between">
-                <div>
-                    <h4 className="font-bold text-lg">{match.name}</h4>
-                    <p className="text-sm text-gray-600 dark:text-gray-400">{match.jobTitle} @ {match.company}</p>
+                <div className="flex gap-3">
+                    <UserAvatar name={match.name} photoUrl={match.photoUrl} />
+                    <div>
+                        <h4 className="font-bold text-lg leading-tight">{match.name}</h4>
+                        <p className="text-sm text-gray-600 dark:text-gray-400">{match.jobTitle} @ {match.company}</p>
+                    </div>
                 </div>
                 <span className={`px-2 py-1 rounded-full text-xs font-bold ${scoreColor}`}>
-                    {match.score}% Match
+                    {match.score}%
                 </span>
             </div>
             <div className="px-4 pb-2 flex-1">
@@ -129,7 +150,7 @@ const MatchCard: React.FC<{ match: NetworkingMatch, onMessage: (id: string) => v
                         <span key={tag} className="text-xs bg-gray-100 dark:bg-gray-700 px-2 py-0.5 rounded">{tag}</span>
                     ))}
                 </div>
-                <p className="text-sm text-gray-700 dark:text-gray-300 bg-blue-50 dark:bg-blue-900/20 p-2 rounded italic mb-2">
+                <p className="text-sm text-gray-700 dark:text-gray-300 bg-blue-50 dark:bg-blue-900/20 p-2 rounded italic mb-2 border-l-2 border-blue-400">
                     "{match.reason}"
                 </p>
                 <p className="text-xs text-gray-500 dark:text-gray-400">
@@ -144,7 +165,7 @@ const MatchCard: React.FC<{ match: NetworkingMatch, onMessage: (id: string) => v
                  <button 
                     onClick={() => onMessage(match.userId)} 
                     className="px-4 py-1.5 bg-primary text-white text-sm font-medium rounded hover:bg-primary/90"
-                 >
+                >
                      Message
                  </button>
             </div>
@@ -277,15 +298,20 @@ export const NetworkingView: React.FC<NetworkingViewProps> = ({ delegateToken, o
                     </div>
                     <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
                         {filteredDirectory.map(c => (
-                            <div key={c.userId} className="bg-white dark:bg-gray-800 p-4 rounded-lg shadow border border-gray-200 dark:border-gray-700">
-                                <h4 className="font-bold">{(c as any).name}</h4>
-                                <p className="text-xs text-gray-500 mb-2">{c.jobTitle} @ {c.company}</p>
-                                <div className="flex flex-wrap gap-1 mb-3">
+                            <div key={c.userId} className="bg-white dark:bg-gray-800 p-4 rounded-lg shadow border border-gray-200 dark:border-gray-700 flex flex-col">
+                                <div className="flex items-center gap-3 mb-3">
+                                    <UserAvatar name={(c as any).name} photoUrl={(c as any).photoUrl} size="sm" />
+                                    <div>
+                                        <h4 className="font-bold text-sm truncate w-32">{(c as any).name}</h4>
+                                        <p className="text-xs text-gray-500 truncate w-32">{c.jobTitle}</p>
+                                    </div>
+                                </div>
+                                <div className="flex flex-wrap gap-1 mb-3 flex-1 content-start">
                                     {c.interests.slice(0, 3).map(tag => (
                                         <span key={tag} className="text-[10px] bg-gray-100 dark:bg-gray-700 px-1.5 py-0.5 rounded">{tag}</span>
                                     ))}
                                 </div>
-                                <div className="flex justify-between items-center mt-2">
+                                <div className="flex justify-between items-center mt-auto border-t dark:border-gray-700 pt-2">
                                     {c.linkedinUrl ? <a href={c.linkedinUrl} target="_blank" rel="noreferrer" className="text-xs text-blue-500 hover:underline">LinkedIn</a> : <span></span>}
                                     <button onClick={() => handleMessage(c.userId)} className="text-xs text-primary hover:underline font-bold">Message</button>
                                 </div>

@@ -2,6 +2,7 @@
 import React from 'react';
 import { EventConfig, Speaker, Sponsor, TicketTier } from '../types';
 import { CountdownTimer } from './CountdownTimer';
+import { useTranslation } from '../contexts/LanguageContext';
 
 interface PublicHomeProps {
   config: EventConfig;
@@ -14,6 +15,7 @@ interface PublicHomeProps {
 export const PublicHome: React.FC<PublicHomeProps> = ({ config, speakers, sponsors, ticketTiers, onRegister }) => {
     const featuredSpeakers = speakers.slice(0, 3);
     const activeTickets = ticketTiers?.filter(t => t.active) || [];
+    const { t } = useTranslation();
     
     return (
         <div className="space-y-20 pb-20">
@@ -45,14 +47,14 @@ export const PublicHome: React.FC<PublicHomeProps> = ({ config, speakers, sponso
                         onClick={onRegister}
                         className="px-10 py-5 bg-gradient-to-r from-primary to-indigo-600 hover:from-primary/90 hover:to-indigo-700 text-white text-xl font-bold rounded-full shadow-xl transform hover:scale-105 transition-all duration-300"
                     >
-                        Secure Your Spot
+                        {t('home.heroTitle')}
                     </button>
                 </div>
             </section>
 
             {/* About Section */}
             <section className="max-w-4xl mx-auto px-6 text-center">
-                <h2 className="text-4xl font-bold text-gray-900 dark:text-white mb-8">About the Event</h2>
+                <h2 className="text-4xl font-bold text-gray-900 dark:text-white mb-8">{t('home.aboutTitle')}</h2>
                 <div className="prose prose-lg dark:prose-invert mx-auto text-gray-600 dark:text-gray-300 leading-relaxed whitespace-pre-wrap">
                     {config.event.description || "Join us for an unforgettable experience. Connect with industry leaders, learn from experts, and explore new opportunities."}
                 </div>
@@ -99,7 +101,7 @@ export const PublicHome: React.FC<PublicHomeProps> = ({ config, speakers, sponso
                                         onClick={onRegister}
                                         className="w-full py-4 px-6 bg-gray-900 dark:bg-white text-white dark:text-gray-900 font-bold rounded-xl hover:bg-gray-800 dark:hover:bg-gray-100 transition-colors shadow-lg"
                                     >
-                                        Get Tickets
+                                        {t('home.getTickets')}
                                     </button>
                                 </div>
                             ))}
@@ -111,7 +113,7 @@ export const PublicHome: React.FC<PublicHomeProps> = ({ config, speakers, sponso
             {/* Featured Speakers */}
             {featuredSpeakers.length > 0 && (
                 <section className="max-w-7xl mx-auto px-6">
-                    <h2 className="text-3xl font-bold text-gray-900 dark:text-white text-center mb-12">Featured Speakers</h2>
+                    <h2 className="text-3xl font-bold text-gray-900 dark:text-white text-center mb-12">{t('home.featuredSpeakers')}</h2>
                     <div className="grid grid-cols-1 md:grid-cols-3 gap-10">
                         {featuredSpeakers.map(speaker => (
                             <div key={speaker.id} className="group text-center">
@@ -135,7 +137,7 @@ export const PublicHome: React.FC<PublicHomeProps> = ({ config, speakers, sponso
             {/* Sponsors */}
             {sponsors.length > 0 && (
                 <section className="max-w-7xl mx-auto px-6 text-center border-t border-gray-100 dark:border-gray-800 pt-16">
-                    <h2 className="text-lg font-semibold text-gray-400 uppercase tracking-widest mb-10">Trusted By Industry Leaders</h2>
+                    <h2 className="text-lg font-semibold text-gray-400 uppercase tracking-widest mb-10">{t('home.sponsorsTitle')}</h2>
                     <div className="flex flex-wrap justify-center items-center gap-12 md:gap-20 opacity-70 hover:opacity-100 transition-opacity duration-500">
                         {sponsors.map(sponsor => (
                              <a key={sponsor.id} href={sponsor.websiteUrl} target="_blank" rel="noreferrer" className="group">
@@ -153,16 +155,16 @@ export const PublicHome: React.FC<PublicHomeProps> = ({ config, speakers, sponso
             {/* Contact Section */}
             <section className="max-w-4xl mx-auto px-6">
                 <div className="bg-primary/5 dark:bg-primary/10 rounded-3xl p-12 text-center border border-primary/10">
-                    <h2 className="text-3xl font-bold text-gray-900 dark:text-white mb-4">Still have questions?</h2>
+                    <h2 className="text-3xl font-bold text-gray-900 dark:text-white mb-4">{t('home.questionsTitle')}</h2>
                     <p className="text-lg text-gray-600 dark:text-gray-300 mb-8 max-w-2xl mx-auto">
-                        We're here to help! Reach out to our team for any inquiries regarding registration, sponsorship, or event logistics.
+                        {t('home.questionsText')}
                     </p>
                     <a 
                         href={`mailto:${config.host.email}`} 
                         className="inline-flex items-center gap-3 text-primary bg-white dark:bg-gray-800 px-8 py-4 rounded-full font-bold text-lg shadow-md hover:shadow-lg transition-all hover:-translate-y-1"
                     >
                         <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 8l7.89 5.26a2 2 0 002.22 0L21 8M5 19h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z" />
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 8l7.89 5.26a2 2 0 002.22 0L21 8M5 19h14a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z" />
                         </svg>
                         {config.host.email}
                     </a>

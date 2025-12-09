@@ -12,6 +12,8 @@ import { AdminLoginModal } from './components/AdminLoginModal';
 import { PasswordResetForm } from './components/PasswordResetForm';
 import { DelegateLoginModal } from './components/DelegateLoginModal';
 import { ThemeProvider, useTheme } from './contexts/ThemeContext';
+import { LanguageProvider, useTranslation } from './contexts/LanguageContext';
+import { LanguageSelector } from './components/LanguageSelector';
 import { EventSelectionPage } from './components/EventSelectionPage';
 import { CountdownTimer } from './components/CountdownTimer';
 import { AgendaView } from './components/AgendaView';
@@ -20,6 +22,7 @@ import { PublicHome } from './components/PublicHome';
 import { AccessibilityTools } from './components/AccessibilityTools';
 import { PaymentModal } from './components/PaymentModal';
 import { KioskView } from './components/KioskView';
+import { ProjectorView } from './components/ProjectorView';
 
 // Lazy load heavy portals to improve initial page load speed
 const AdminPortal = React.lazy(() => import('./components/AdminPortal').then(module => ({ default: module.AdminPortal })));
@@ -96,6 +99,7 @@ interface EventPageContentProps {
 
 const EventPageContent: React.FC<EventPageContentProps> = ({ onAdminLogin, eventId, onNavigate }) => {
   const { config, registrationCount, isLoading: isThemeLoading, error: themeError } = useTheme();
+  const { t } = useTranslation();
   
   // Public Data State
   const [sessions, setSessions] = useState<Session[]>([]);
@@ -191,7 +195,9 @@ const EventPageContent: React.FC<EventPageContentProps> = ({ onAdminLogin, event
       try {
           const result = await registerUser(eventId, submissionData, inviteToken || undefined);
           if (result.success) {
-              await triggerRegistrationEmails(eventId, submissionData);
+              // Trigger email confirmation for the recently registered user
+              // This uses generateRegistrationEmails from geminiService via server/api.ts
+              await triggerRegistrationEmails(eventId, result.user || submissionData);
               setView('success');
           } else {
               setError(result.message);
@@ -274,10 +280,10 @@ const EventPageContent: React.FC<EventPageContentProps> = ({ onAdminLogin, event
   // Render Logic Helpers
   const renderFooter = () => (
     <footer className="mt-12 text-center text-sm text-gray-500 dark:text-gray-400 pb-8 border-t border-gray-200 dark:border-gray-700 pt-8">
-      <div className="flex items-center justify-center flex-wrap gap-x-4 gap-y-2">
-        <button type="button" onClick={() => setDelegateModalOpen(true)} className="hover:text-primary transition cursor-pointer">Delegate Portal</button>
+      <div className="flex items-center justify-center flex-wrap gap-x-4 gap-y-2 mb-4">
+        <button type="button" onClick={() => setDelegateModalOpen(true)} className="hover:text-primary transition cursor-pointer">{t('nav.delegate')}</button>
         <span className="hidden sm:inline">&bull;</span>
-        <button type="button" onClick={() => setAdminModalOpen(true)} className="hover:text-primary transition cursor-pointer">Admin Login</button>
+        <button type="button" onClick={() => setAdminModalOpen(true)} className="hover:text-primary transition cursor-pointer">{t('nav.login')}</button>
         {config?.theme.websiteUrl && (
             <>
               <span className="hidden sm:inline">&bull;</span>
@@ -285,9 +291,14 @@ const EventPageContent: React.FC<EventPageContentProps> = ({ onAdminLogin, event
             </>
         )}
           <span className="hidden sm:inline">&bull;</span>
-          <button type="button" onClick={() => onNavigate('/')} className="hover:text-primary transition cursor-pointer">All Events</button>
+          <button type="button" onClick={() => onNavigate('/')} className="hover:text-primary transition cursor-pointer">{t('nav.allEvents')}</button>
       </div>
-      <p className="mt-4">&copy; {new Date().getFullYear()} {config?.host.name || 'Event Platform'}. All rights reserved.</p>
+      
+      <div className="flex justify-center mb-4">
+          <LanguageSelector />
+      </div>
+
+      <p>&copy; {new Date().getFullYear()} {config?.host.name || 'Event Platform'}. All rights reserved.</p>
     </footer>
   );
 
@@ -354,20 +365,24 @@ const EventPageContent: React.FC<EventPageContentProps> = ({ onAdminLogin, event
                         <span className="font-bold text-xl text-gray-900 dark:text-white hidden sm:block truncate max-w-xs">{config?.event.name}</span>
                     </div>
                     <div className="flex items-center space-x-1 sm:space-x-4">
-                         {['Home', 'Agenda', 'Speakers'].map(tab => (
+                         {[
+                             { id: 'home', label: t('nav.home') },
+                             { id: 'agenda', label: t('nav.agenda') },
+                             { id: 'speakers', label: t('nav.speakers') }
+                         ].map(tab => (
                              <button 
-                                key={tab}
-                                onClick={() => setPublicTab(tab.toLowerCase() as PublicTab)}
-                                className={`px-3 py-2 rounded-md text-sm font-medium transition-colors ${publicTab === tab.toLowerCase() ? 'text-primary bg-primary/10' : 'text-gray-500 hover:text-gray-900 dark:hover:text-gray-200 hover:bg-gray-100 dark:hover:bg-gray-700'}`}
+                                key={tab.id}
+                                onClick={() => setPublicTab(tab.id as PublicTab)}
+                                className={`px-3 py-2 rounded-md text-sm font-medium transition-colors ${publicTab === tab.id ? 'text-primary bg-primary/10' : 'text-gray-500 hover:text-gray-900 dark:hover:text-gray-200 hover:bg-gray-100 dark:hover:bg-gray-700'}`}
                              >
-                                 {tab}
+                                 {tab.label}
                              </button>
                          ))}
                          <button 
                              onClick={() => setPublicTab('register')}
                              className={`ml-2 px-4 py-2 rounded-full text-sm font-bold transition-all ${publicTab === 'register' ? 'bg-primary text-white shadow-md' : 'bg-gray-100 dark:bg-gray-700 text-gray-900 dark:text-white hover:bg-gray-200 dark:hover:bg-gray-600'}`}
                          >
-                             Register
+                             {t('nav.register')}
                          </button>
                     </div>
                 </div>
@@ -525,7 +540,9 @@ const EventPageContent: React.FC<EventPageContentProps> = ({ onAdminLogin, event
 
 const EventPage: React.FC<EventPageContentProps> = (props) => (
     <ThemeProvider eventId={props.eventId}>
-        <EventPageContent {...props} />
+        <LanguageProvider>
+            <EventPageContent {...props} />
+        </LanguageProvider>
     </ThemeProvider>
 );
 
@@ -620,6 +637,14 @@ function App() {
       }
   }
 
+  // Projector Mode Handler
+  if (currentPath.startsWith('/projector/')) {
+      const sessionId = currentPath.split('/').pop();
+      if (sessionId) {
+          return <ProjectorView sessionId={sessionId} onExit={() => navigate('/')} />;
+      }
+  }
+
   return (
     <ErrorBoundary>
       <AccessibilityTools />
@@ -627,7 +652,9 @@ function App() {
         <Suspense fallback={<div className="min-h-screen flex items-center justify-center"><ContentLoader text="Loading dashboard..." /></div>}>
              {/* Wrap AdminPortal in ThemeProvider to ensure SettingsForm has context */}
              <ThemeProvider eventId="main-event">
-                <AdminPortal onLogout={handleAdminLogout} adminToken={adminSession.token} user={adminSession.user} />
+                <LanguageProvider>
+                    <AdminPortal onLogout={handleAdminLogout} adminToken={adminSession.token} user={adminSession.user} />
+                </LanguageProvider>
              </ThemeProvider>
         </Suspense>
       ) : (
@@ -637,14 +664,14 @@ function App() {
             'manifest.json', 'favicon.ico', 'robots.txt', 'sitemap.xml', 
             'index.js', 'main.js', 'index.css', 'App.tsx', 
             '@vite', '@fs', '@react-refresh', 
-            'admin', 'kiosk'
+            'admin', 'kiosk', 'projector'
           ];
 
           const pathParts = currentPath.split('/').filter(p => p && p !== 'index.html');
           const candidateId = pathParts[0];
           
           // Strict check: if path is 'admin' or starts with 'admin', do NOT treat as event ID
-          const isSystemPath = candidateId === 'admin' || candidateId === 'api' || candidateId === 'kiosk';
+          const isSystemPath = candidateId === 'admin' || candidateId === 'api' || candidateId === 'kiosk' || candidateId === 'projector';
           
           const eventId = (candidateId && !candidateId.includes('.') && !candidateId.startsWith('@') && !ignoredPaths.includes(candidateId) && !isSystemPath) ? candidateId : undefined;
 

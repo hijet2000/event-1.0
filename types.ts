@@ -36,6 +36,7 @@ export interface RegistrationData {
   createdAt: number;
   checkedIn?: boolean;
   status?: 'confirmed' | 'waitlist' | 'cancelled';
+  photoUrl?: string;
   [key: string]: any;
 }
 
@@ -103,6 +104,7 @@ export interface EventConfig {
     pageImageUrl: string;
     websiteUrl: string;
     badgeImageUrl: string;
+    faviconUrl?: string;
   };
   formFields: FormField[];
   emailTemplates: {
@@ -145,6 +147,10 @@ export interface EventConfig {
     enabled: boolean;
     accessToken: string;
     phoneNumberId: string;
+  };
+  telegram: {
+    enabled: boolean;
+    botToken: string;
   };
   sms: {
     enabled: boolean;
@@ -418,6 +424,7 @@ export interface NetworkingMatch {
     reason: string;
     icebreaker: string;
     profile: NetworkingProfile;
+    photoUrl?: string;
 }
 
 export interface ScavengerHuntItem {

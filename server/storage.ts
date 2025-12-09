@@ -3,13 +3,55 @@ import { insert } from './db';
 import { MediaItem } from '../types';
 
 /**
- * Simulates uploading a file to cloud storage.
- * In this prototype, it converts the file to a Base64 string and stores it in the DB.
+ * Uploads a file.
+ * Tries to upload to the backend server first.
+ * If offline or fails, falls back to local Base64 storage in the browser DB.
  */
 export const uploadFileToStorage = async (file: File): Promise<MediaItem> => {
+    // 1. Try uploading to backend
+    try {
+        const formData = new FormData();
+        formData.append('file', file);
+        
+        // Get token for auth
+        const adminToken = localStorage.getItem('adminToken');
+        const delegateToken = localStorage.getItem('delegateToken');
+        const token = adminToken || delegateToken;
+        const headers: HeadersInit = token ? { 'Authorization': `Bearer ${token}` } : {};
+
+        // We assume /api is proxied to the backend
+        const response = await fetch('/api/upload', {
+            method: 'POST',
+            headers: headers,
+            body: formData,
+        });
+
+        if (response.ok) {
+            const data = await response.json();
+            
+            // Create a media item record for the local UI to track
+            // Even if the file lives on the server, we track the reference locally for the UI
+            const newItem: MediaItem = {
+                id: data.id || `file_${Date.now()}`,
+                name: file.name,
+                type: file.type,
+                size: file.size,
+                url: data.url, // URL provided by backend
+                uploadedAt: Date.now()
+            };
+            
+            // Insert reference into local store to keep UI in sync instantly
+            await insert('media', newItem);
+            return newItem;
+        }
+    } catch (e) {
+        console.warn("Backend upload failed, falling back to local storage:", e);
+    }
+
+    // 2. Fallback: Local Base64 Storage
     return new Promise((resolve, reject) => {
         if (typeof FileReader === 'undefined') {
-            reject(new Error("File upload is not supported in this environment (FileReader missing)."));
+            reject(new Error("File upload is not supported in this environment."));
             return;
         }
 
@@ -19,14 +61,14 @@ export const uploadFileToStorage = async (file: File): Promise<MediaItem> => {
             const base64String = reader.result as string;
             
             // Simulate network delay
-            await new Promise(r => setTimeout(r, 1000));
+            await new Promise(r => setTimeout(r, 500));
 
             const newItem: MediaItem = {
                 id: `file_${Date.now()}_${Math.random().toString(36).substr(2, 5)}`,
                 name: file.name,
                 type: file.type,
                 size: file.size,
-                url: base64String,
+                url: base64String, // Base64 data URI
                 uploadedAt: Date.now()
             };
 

@@ -1,3 +1,4 @@
+
 import { type EmailPayload, type EventConfig } from '../types';
 
 /**
@@ -21,7 +22,17 @@ export const sendEmail = async (payload: EmailPayload, config: EventConfig): Pro
       console.error(errorMessage);
       throw new Error(errorMessage);
     }
-    console.log(`Authenticating with provided Google Service Account Key...`);
+    try {
+        const json = JSON.parse(config.googleConfig.serviceAccountKeyJson);
+        if (!json.project_id || !json.client_email) {
+             throw new Error("Service Account JSON missing required fields (project_id, client_email).");
+        }
+        console.log(`Authenticating with Google Service Account (Project: ${json.project_id})...`);
+    } catch (e) {
+        const errorMessage = `ERROR: Invalid Service Account JSON. ${(e as Error).message}`;
+        console.error(errorMessage);
+        throw new Error(errorMessage);
+    }
   } else {
     // Default to SMTP
     const smtpConfig = config.smtp;
@@ -29,7 +40,7 @@ export const sendEmail = async (payload: EmailPayload, config: EventConfig): Pro
     ================================================
     SIMULATED SMTP SERVICE: Sending email...
     ------------------------------------------------`);
-    if (!smtpConfig.host || !smtpConfig.port || !smtpConfig.username) {
+    if (!smtpConfig || !smtpConfig.host || !smtpConfig.port || !smtpConfig.username) {
         const errorMessage = `ERROR: SMTP provider selected but required settings are missing (host, port, or username). Email sending failed.`;
         console.error(errorMessage);
         throw new Error(errorMessage);

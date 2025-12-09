@@ -38,8 +38,9 @@ const CheckoutForm: React.FC<{
     const handleSubmit = async (event: React.FormEvent) => {
         event.preventDefault();
 
-        if (!stripe || !elements) return;
-
+        // Allow bypassing Stripe elements check if we are in a purely mock environment where stripe failed to load
+        // But ideally, we need stripe loaded.
+        
         setProcessing(true);
         setError(null);
 
@@ -57,7 +58,25 @@ const CheckoutForm: React.FC<{
                 throw new Error("Authentication required for wallet top-up.");
             }
 
-            // 2. Confirm Card Payment
+            // 2. Check for Mock Environment
+            // If the backend returns a mock secret (starts with 'mock_'), skip Stripe confirmation
+            if (clientSecret && clientSecret.startsWith('mock_')) {
+                // Simulate network delay
+                await new Promise(resolve => setTimeout(resolve, 1500));
+                
+                // Direct Success
+                if (!isPublicCheckout && delegateToken) {
+                    await purchaseEventCoins(delegateToken, coins, amount);
+                }
+                onSuccess();
+                return; 
+            }
+
+            // Real Stripe Flow
+            if (!stripe || !elements) {
+                throw new Error("Stripe not initialized. Check your connection.");
+            }
+
             const result = await stripe.confirmCardPayment(clientSecret, {
                 payment_method: {
                     card: elements.getElement(CardElement)!,
@@ -98,7 +117,7 @@ const CheckoutForm: React.FC<{
             {error && <div className="text-sm text-red-500">{error}</div>}
             <button 
                 type="submit" 
-                disabled={!stripe || processing}
+                disabled={processing}
                 className="w-full py-3 bg-primary text-white rounded-lg text-sm font-medium hover:bg-primary/90 flex items-center justify-center disabled:opacity-70"
             >
                 {processing ? <Spinner /> : `Pay $${amount.toFixed(2)}`}

@@ -22,11 +22,10 @@ export const db: any = {
     networking_profiles: [],
     agenda_entries: [],
     ticket_tiers: [],
-    venueMaps: [],
-    settings: {},
+    venue_maps: [],
     email_logs: [],
     session_questions: [],
-    polls: [],
+    session_feedback: [],
     poll_votes: []
 };
 
@@ -68,17 +67,49 @@ export const initializeDb = async () => {
             createdAt: Date.now()
         });
         
-        // Ensure default event exists
+        // Ensure default event exists with COMPLETE config
         if (!db.events || db.events.length === 0) {
              db.events.push({
                  id: 'main-event',
                  name: 'Tech Summit 2025',
                  eventType: 'Conference',
                  created_at: Date.now(),
-                 // Minimal config to prevent crashes if loaded before full config save
                  config: {
-                    event: { name: 'Tech Summit 2025', date: 'October 26, 2025', location: 'Convention Center' },
-                    theme: { colorPrimary: '#4f46e5', colorSecondary: '#ec4899', backgroundColor: '#f9fafb', fontFamily: 'Inter', logoUrl: '', pageImageUrl: '' }
+                    event: { 
+                        name: 'Tech Summit 2025', 
+                        date: 'October 26, 2025', 
+                        location: 'Convention Center',
+                        description: 'Join us for the premier technology event of the year.',
+                        maxAttendees: 500,
+                        eventType: 'Conference',
+                        publicUrl: 'http://localhost:3000'
+                    },
+                    host: { 
+                        name: 'Event Organizers', 
+                        email: 'contact@example.com' 
+                    },
+                    theme: { 
+                        colorPrimary: '#4f46e5', 
+                        colorSecondary: '#ec4899', 
+                        backgroundColor: '#f9fafb', 
+                        fontFamily: 'Inter', 
+                        logoUrl: '', 
+                        pageImageUrl: 'https://images.unsplash.com/photo-1511578314322-379afb476865?q=80&w=2070',
+                        websiteUrl: '',
+                        badgeImageUrl: ''
+                    },
+                    formFields: [],
+                    emailTemplates: {}, // Will be merged with defaults
+                    emailProvider: 'smtp',
+                    smtp: { host: '', port: 587, username: '', password: '', encryption: 'tls' },
+                    googleConfig: { serviceAccountKeyJson: '' },
+                    badgeConfig: { showName: true, showEmail: false, showCompany: true, showRole: true },
+                    eventCoin: { enabled: true, name: 'EventCoin', startingBalance: 100, exchangeRate: 1, peggedCurrency: 'USD' },
+                    githubSync: { enabled: false, configUrl: '' },
+                    whatsapp: { enabled: false, accessToken: '', phoneNumberId: '' },
+                    telegram: { enabled: false, botToken: '' },
+                    sms: { enabled: false, provider: 'twilio', accountSid: '', authToken: '', fromNumber: '' },
+                    aiConcierge: { enabled: true, voice: 'Kore', persona: 'You are a helpful assistant.' }
                  }
              });
         }

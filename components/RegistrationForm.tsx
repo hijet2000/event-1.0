@@ -7,6 +7,7 @@ import { Spinner } from './Spinner';
 import { DynamicFormField } from './DynamicFormField';
 import { checkPasswordStrength, type PasswordStrengthResult } from '../utils/passwordStrength';
 import { PasswordStrengthIndicator } from './PasswordStrengthIndicator';
+import { useTranslation } from '../contexts/LanguageContext';
 
 interface RegistrationFormProps {
   formData: RegistrationFormState;
@@ -29,6 +30,7 @@ export const RegistrationForm: React.FC<RegistrationFormProps> = ({
   config,
   ticketTiers = []
 }) => {
+  const { t } = useTranslation();
   const [errors, setErrors] = useState<FormErrors>({});
   const [confirmPassword, setConfirmPassword] = useState('');
   const [passwordStrength, setPasswordStrength] = useState<PasswordStrengthResult>({ score: 0, label: '' });
@@ -92,15 +94,15 @@ export const RegistrationForm: React.FC<RegistrationFormProps> = ({
   const validateField = (name: string, value: string | undefined, currentData: RegistrationFormState, currentConfirmPassword: string) => {
     switch (name) {
       case 'firstName':
-        return !value?.trim() ? 'First Name is required.' : '';
+        return !value?.trim() ? `${t('form.firstName')} ${t('form.required').toLowerCase()}.` : '';
       case 'lastName':
-        return !value?.trim() ? 'Last Name is required.' : '';
+        return !value?.trim() ? `${t('form.lastName')} ${t('form.required').toLowerCase()}.` : '';
       case 'email':
-        if (!value?.trim()) return 'Email Address is required.';
+        if (!value?.trim()) return `${t('form.email')} ${t('form.required').toLowerCase()}.`;
         if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value)) return 'Please enter a valid email address.';
         return '';
       case 'password':
-        if (!value) return 'Password is required.';
+        if (!value) return `${t('form.password')} ${t('form.required').toLowerCase()}.`;
         if (value.length < 8) return 'Password must be at least 8 characters long.';
         return '';
       case 'confirmPassword':
@@ -110,7 +112,7 @@ export const RegistrationForm: React.FC<RegistrationFormProps> = ({
       default:
         const fieldConfig = config.find(field => field.id === name);
         if (fieldConfig?.enabled && fieldConfig?.required && !String(value || '').trim()) {
-            return `${fieldConfig.label} is required.`;
+            return `${fieldConfig.label} ${t('form.required').toLowerCase()}.`;
         }
         return '';
     }
@@ -203,7 +205,7 @@ export const RegistrationForm: React.FC<RegistrationFormProps> = ({
           <div id="ticket-section" className="bg-white dark:bg-gray-800 rounded-2xl p-6 sm:p-8 shadow-sm border border-gray-100 dark:border-gray-700">
               <h3 className="text-xl font-bold text-gray-900 dark:text-white mb-6 flex items-center">
                   <span className="flex items-center justify-center w-8 h-8 rounded-full bg-primary/10 text-primary text-sm font-bold mr-3">1</span>
-                  Select Ticket
+                  {t('form.selectTicket')}
               </h3>
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                   {activeTicketTiers.map(tier => {
@@ -242,7 +244,7 @@ export const RegistrationForm: React.FC<RegistrationFormProps> = ({
                               )}
                               {isSoldOut && (
                                   <div className="absolute inset-0 bg-white/50 dark:bg-black/50 flex items-center justify-center rounded-xl">
-                                      <span className="bg-red-100 text-red-800 text-xs font-bold px-3 py-1 rounded-full uppercase tracking-wider transform -rotate-12">Sold Out</span>
+                                      <span className="bg-red-100 text-red-800 text-xs font-bold px-3 py-1 rounded-full uppercase tracking-wider transform -rotate-12">{t('form.soldOut')}</span>
                                   </div>
                               )}
                               {isSelected && (
@@ -266,12 +268,12 @@ export const RegistrationForm: React.FC<RegistrationFormProps> = ({
       <div className="bg-white dark:bg-gray-800 rounded-2xl p-6 sm:p-8 shadow-sm border border-gray-100 dark:border-gray-700">
         <h3 className="text-xl font-bold text-gray-900 dark:text-white mb-6 flex items-center">
             <span className="flex items-center justify-center w-8 h-8 rounded-full bg-primary/10 text-primary text-sm font-bold mr-3">{activeTicketTiers.length > 0 ? 2 : 1}</span>
-            Your Details
+            {t('form.yourDetails')}
         </h3>
         <div className="space-y-6">
           <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
             <TextInput
-              label="First Name"
+              label={t('form.firstName')}
               name="firstName"
               value={formData.firstName}
               onChange={handleFormChangeInternal}
@@ -281,7 +283,7 @@ export const RegistrationForm: React.FC<RegistrationFormProps> = ({
               error={touched.firstName ? errors.firstName : ''}
             />
             <TextInput
-              label="Last Name"
+              label={t('form.lastName')}
               name="lastName"
               value={formData.lastName}
               onChange={handleFormChangeInternal}
@@ -292,7 +294,7 @@ export const RegistrationForm: React.FC<RegistrationFormProps> = ({
             />
           </div>
            <TextInput
-              label="Email Address"
+              label={t('form.email')}
               name="email"
               type="email"
               value={formData.email}
@@ -305,7 +307,7 @@ export const RegistrationForm: React.FC<RegistrationFormProps> = ({
           <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
             <div>
               <TextInput
-                label="Password"
+                label={t('form.password')}
                 name="password"
                 type="password"
                 value={formData.password || ''}
@@ -318,7 +320,7 @@ export const RegistrationForm: React.FC<RegistrationFormProps> = ({
               <PasswordStrengthIndicator strength={passwordStrength} />
             </div>
             <TextInput
-              label="Confirm Password"
+              label={t('form.confirmPassword')}
               name="confirmPassword"
               type="password"
               value={confirmPassword}
@@ -337,7 +339,7 @@ export const RegistrationForm: React.FC<RegistrationFormProps> = ({
         <div className="bg-white dark:bg-gray-800 rounded-2xl p-6 sm:p-8 shadow-sm border border-gray-100 dark:border-gray-700">
            <h3 className="text-xl font-bold text-gray-900 dark:text-white mb-6 flex items-center">
                 <span className="flex items-center justify-center w-8 h-8 rounded-full bg-primary/10 text-primary text-sm font-bold mr-3">{activeTicketTiers.length > 0 ? 3 : 2}</span>
-                Additional Information
+                {t('form.additionalInfo')}
            </h3>
           <div className="space-y-6">
             {enabledCustomFields.map(field => (
@@ -364,10 +366,10 @@ export const RegistrationForm: React.FC<RegistrationFormProps> = ({
           {isLoading ? (
             <>
               <Spinner />
-              <span className="ml-2">Processing Registration...</span>
+              <span className="ml-2">{t('form.processing')}</span>
             </>
           ) : (
-            'Complete Registration'
+            t('form.completeRegistration')
           )}
         </button>
         <button
@@ -376,7 +378,7 @@ export const RegistrationForm: React.FC<RegistrationFormProps> = ({
           onClick={handleResetClick}
           className="text-sm font-medium text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200 underline transition-colors"
         >
-          Clear form and start over
+          {t('form.clear')}
         </button>
       </div>
     </form>

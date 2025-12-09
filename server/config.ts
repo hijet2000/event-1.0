@@ -23,7 +23,8 @@ export const defaultConfig: EventConfig = {
     logoUrl: "",
     pageImageUrl: "https://images.unsplash.com/photo-1511578314322-379afb476865?q=80&w=2070",
     websiteUrl: "https://example.com",
-    badgeImageUrl: "https://images.unsplash.com/photo-1620932934088-fb1023940157?q=80&w=1887"
+    badgeImageUrl: "https://images.unsplash.com/photo-1620932934088-fb1023940157?q=80&w=1887",
+    faviconUrl: ""
   },
   formFields: [
     {
@@ -39,6 +40,14 @@ export const defaultConfig: EventConfig = {
       label: "Job Title",
       type: "text",
       placeholder: "e.g., Software Engineer",
+      required: false,
+      enabled: true,
+    },
+    {
+      id: "phone",
+      label: "Phone Number",
+      type: "text",
+      placeholder: "+1 (555) 000-0000",
       required: false,
       enabled: true,
     },
@@ -110,6 +119,10 @@ export const defaultConfig: EventConfig = {
     enabled: false,
     accessToken: '',
     phoneNumberId: '',
+  },
+  telegram: {
+    enabled: false,
+    botToken: '',
   },
   sms: {
     enabled: false,

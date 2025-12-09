@@ -79,6 +79,10 @@ export const SessionLivePollsModal: React.FC<SessionLivePollsModalProps> = ({ is
         setNewOptions(updated);
     };
 
+    const openProjector = () => {
+        window.open(`/projector/${sessionId}`, '_blank');
+    };
+
     return (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm" onClick={onClose}>
             <div className="bg-white dark:bg-gray-800 rounded-xl shadow-xl w-full max-w-lg flex flex-col h-[700px] max-h-[90vh]" onClick={e => e.stopPropagation()}>
@@ -87,9 +91,21 @@ export const SessionLivePollsModal: React.FC<SessionLivePollsModalProps> = ({ is
                         <h3 className="font-bold text-lg text-gray-900 dark:text-white">Live Polls</h3>
                         <p className="text-xs text-gray-500 dark:text-gray-400 truncate max-w-[250px]">{sessionTitle}</p>
                     </div>
-                    <button onClick={onClose} className="text-gray-500 hover:text-gray-700 dark:hover:text-gray-300">
-                        <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" /></svg>
-                    </button>
+                    <div className="flex gap-2">
+                        {isAdmin && (
+                            <button 
+                                onClick={openProjector}
+                                className="text-xs bg-purple-600 hover:bg-purple-700 text-white px-3 py-1.5 rounded font-medium flex items-center gap-1"
+                                title="Open Projector View"
+                            >
+                                <svg xmlns="http://www.w3.org/2000/svg" className="h-3 w-3" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 10l4.553-2.276A1 1 0 0121 8.618v6.764a1 1 0 01-1.447.894L15 14M5 18h8a2 2 0 002-2V8a2 2 0 00-2-2H5a2 2 0 00-2 2v8a2 2 0 002 2z" /></svg>
+                                Projector
+                            </button>
+                        )}
+                        <button onClick={onClose} className="text-gray-500 hover:text-gray-700 dark:hover:text-gray-300">
+                            <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" /></svg>
+                        </button>
+                    </div>
                 </div>
 
                 <div className="flex-1 overflow-y-auto p-4 space-y-6 bg-gray-100 dark:bg-black/20">

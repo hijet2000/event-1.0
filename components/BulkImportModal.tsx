@@ -1,4 +1,5 @@
-import React, { useState } from 'react';
+
+import React, { useState, useRef } from 'react';
 import { bulkImportRegistrations } from '../server/api';
 import { Spinner } from './Spinner';
 import { Alert } from './Alert';
@@ -16,6 +17,8 @@ export const BulkImportModal: React.FC<BulkImportModalProps> = ({ isOpen, onClos
   const [result, setResult] = useState<{ successCount: number; errorCount: number; errors: string[] } | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [showConfirm, setShowConfirm] = useState(false);
+  
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
   const handleClose = () => {
     setCsvData('');
@@ -28,11 +31,32 @@ export const BulkImportModal: React.FC<BulkImportModalProps> = ({ isOpen, onClos
   
   const handleAttemptImport = () => {
     if (!csvData.trim()) {
-      setError("Please paste CSV data to import.");
+      setError("Please paste CSV data or upload a file.");
       return;
     }
     setError(null);
     setShowConfirm(true);
+  };
+
+  const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    const reader = new FileReader();
+    reader.onload = (event) => {
+      const text = event.target?.result as string;
+      if (text) {
+          setCsvData(text);
+          setError(null);
+      }
+    };
+    reader.onerror = () => {
+        setError("Failed to read file.");
+    };
+    reader.readAsText(file);
+    
+    // Reset input so same file can be selected again
+    if (fileInputRef.current) fileInputRef.current.value = '';
   };
 
   const executeImport = async () => {
@@ -109,16 +133,36 @@ export const BulkImportModal: React.FC<BulkImportModalProps> = ({ isOpen, onClos
           <div>
             <h2 id="import-title" className="text-xl font-bold text-gray-900 dark:text-white">Bulk Import Registrations</h2>
             <div className="mt-4">
-              <p className="text-sm text-gray-600 dark:text-gray-400">
-                Paste your CSV data below. The format should be two columns: `name,email`. The first row will be treated as a header and skipped.
+              <p className="text-sm text-gray-600 dark:text-gray-400 mb-2">
+                Upload a CSV file or paste data below. The format should be two columns: `name, email`.
               </p>
+              
+              <div className="flex gap-2 mb-4">
+                  <input 
+                    type="file" 
+                    accept=".csv,.txt" 
+                    ref={fileInputRef} 
+                    onChange={handleFileUpload} 
+                    className="hidden" 
+                  />
+                  <button 
+                    type="button" 
+                    onClick={() => fileInputRef.current?.click()}
+                    className="px-4 py-2 bg-white dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded-md text-sm font-medium text-gray-700 dark:text-gray-200 hover:bg-gray-50 dark:hover:bg-gray-600 flex items-center gap-2"
+                  >
+                      <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4 4m0 0l-4-4m4 4V4" /></svg>
+                      Upload CSV File
+                  </button>
+              </div>
+
               <div className="mt-2 p-2 rounded-md bg-gray-100 dark:bg-gray-700/50 text-gray-600 dark:text-gray-300 text-sm">
-                  <strong>Example:</strong><br />
-                  <pre className="mt-1 font-mono"><code>
+                  <strong>Expected Format:</strong><br />
+                  <pre className="mt-1 font-mono text-xs overflow-x-auto"><code>
                       name,email<br/>
                       John Doe,john.doe@example.com<br/>
                       Jane Smith,jane.smith@example.com
                   </code></pre>
+                  <p className="mt-1 text-xs italic text-gray-500">Supports comma (CSV) or tab (Excel copy-paste) separation.</p>
               </div>
             </div>
             <div className="mt-4">
@@ -126,7 +170,7 @@ export const BulkImportModal: React.FC<BulkImportModalProps> = ({ isOpen, onClos
                 rows={8}
                 value={csvData}
                 onChange={(e) => setCsvData(e.target.value)}
-                placeholder="name,email..."
+                placeholder="Paste data here..."
                 className="w-full rounded-md border-gray-300 dark:border-gray-600 shadow-sm sm:text-sm bg-white dark:bg-gray-700 text-gray-900 dark:text-white font-mono text-sm"
               />
             </div>
@@ -169,7 +213,7 @@ export const BulkImportModal: React.FC<BulkImportModalProps> = ({ isOpen, onClos
                 onClick={handleAttemptImport}
                 className="py-2 px-4 border border-transparent rounded-md shadow-sm text-sm font-medium text-white bg-primary hover:bg-primary/90 flex items-center justify-center"
               >
-                Import Data
+                Next Step
               </button>
             </>
           )}

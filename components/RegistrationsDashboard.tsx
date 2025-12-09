@@ -144,8 +144,8 @@ export const RegistrationsDashboard: React.FC<RegistrationsDashboardProps> = ({ 
   };
   
   const handleLaunchKiosk = () => {
-      // Open kiosk in current tab (App.tsx handles routing)
-      window.location.href = '/kiosk';
+      // Open kiosk in a new tab/window for dedicated mode
+      window.open('/kiosk', '_blank');
   };
 
   const handleExportCSV = () => {
@@ -239,7 +239,7 @@ export const RegistrationsDashboard: React.FC<RegistrationsDashboardProps> = ({ 
                       const logoSize = 12;
                       // Draw slightly overlapping header for style
                       doc.addImage(logoBase64, 'PNG', x + 5, y + 8, logoSize, logoSize);
-                  } catch (e) { /* Ignore logo errors */ }
+                  } catch (e) { /* Ignore logo errors if CORS fails */ }
               }
 
               // Content Container
@@ -275,8 +275,12 @@ export const RegistrationsDashboard: React.FC<RegistrationsDashboardProps> = ({ 
               const qrUrl = `https://api.qrserver.com/v1/create-qr-code/?size=150x150&data=${reg.id}`;
               const qrBase64 = await getBase64ImageFromUrl(qrUrl);
               if (qrBase64) {
-                  const qrSize = 20;
-                  doc.addImage(qrBase64, 'PNG', contentCenter - (qrSize/2), y + badgeHeight - 25, qrSize, qrSize);
+                  try {
+                    const qrSize = 20;
+                    doc.addImage(qrBase64, 'PNG', contentCenter - (qrSize/2), y + badgeHeight - 25, qrSize, qrSize);
+                  } catch (e) {
+                      // ignore QR errors
+                  }
               }
               
               doc.setFontSize(8);
@@ -298,7 +302,7 @@ export const RegistrationsDashboard: React.FC<RegistrationsDashboardProps> = ({ 
                   row++;
                   if (row >= rows) {
                       // New Page
-                      if (i < registrations.length - 1) {
+                      if (i < badgeList.length - 1) {
                           doc.addPage();
                           col = 0;
                           row = 0;
@@ -311,7 +315,7 @@ export const RegistrationsDashboard: React.FC<RegistrationsDashboardProps> = ({ 
 
       } catch (e) {
           console.error(e);
-          alert("Failed to generate badges PDF.");
+          alert("Failed to generate badges PDF. Check browser console.");
       } finally {
           setIsExporting(false);
       }

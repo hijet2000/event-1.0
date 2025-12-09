@@ -1,14 +1,15 @@
+
 import { GoogleGenAI, Type } from "@google/genai";
 import { type RegistrationData, type EventConfig, type EmailContent, type NetworkingProfile } from '../types';
-import { getEnv } from './env';
 
 // Helper to initialize the client lazily.
+// We strictly use process.env.API_KEY as per coding guidelines.
 const getAiClient = () => {
-  const apiKey = getEnv('API_KEY');
+  const apiKey = process.env.API_KEY;
   if (!apiKey) {
       console.warn("Gemini API Key is missing. AI features will not work.");
   }
-  return new GoogleGenAI({ apiKey });
+  return new GoogleGenAI({ apiKey: apiKey || '' });
 };
 
 const registrationResponseSchema = {
@@ -245,6 +246,41 @@ export const generateDelegateUpdateEmail = async (
     }
 };
 
+export const generateWaitlistPromotionEmail = async (
+    config: EventConfig,
+    delegate: RegistrationData
+): Promise<EmailContent> => {
+    const ai = getAiClient();
+    const { name } = delegate;
+    const { event, host } = config;
+
+    const prompt = `
+        Write an exciting and professional email to "${name}" informing them that a spot has opened up for "${event.name}" and they have been moved from the waitlist to confirmed status.
+        Signed by "The ${host.name} Team".
+        
+        Include details:
+        - Event Date: ${event.date}
+        - Location: ${event.location}
+        
+        The subject should be catchy like "You're in! Your spot at ${event.name} is confirmed".
+    `;
+    
+    try {
+        const response = await ai.models.generateContent({
+            model: "gemini-2.5-flash",
+            contents: prompt,
+            config: {
+                responseMimeType: "application/json",
+                responseSchema: singleEmailResponseSchema,
+            },
+        });
+        return JSON.parse(response.text || '{}');
+    } catch (error) {
+        console.error("Error generating waitlist promotion email:", error);
+        throw new Error("Failed to generate promotion email.");
+    }
+};
+
 export const generateAiContent = async (
     type: 'hotel' | 'room' | 'menu' | 'meal_plan' | 'session' | 'speaker_bio' | 'sponsor_description',
     context: Record<string, string>
@@ -286,6 +322,32 @@ export const generateAiContent = async (
     } catch(e) {
         console.error("Error generating content:", e);
         return "Failed to generate content.";
+    }
+};
+
+export const generateChatReply = async (
+    message: string,
+    context: string
+): Promise<string> => {
+    const ai = getAiClient();
+    const prompt = `
+        You are an intelligent event concierge bot.
+        Context about the event: ${context}
+        
+        User Message: "${message}"
+        
+        Respond briefly, helpfully, and professionally. If you don't know the answer based on the context, politely say so and suggest contacting the organizer.
+    `;
+    
+    try {
+        const response = await ai.models.generateContent({
+            model: 'gemini-2.5-flash',
+            contents: prompt,
+        });
+        return response.text || "I'm sorry, I couldn't process that.";
+    } catch (e) {
+        console.error("Chat reply generation failed", e);
+        return "I'm currently having trouble connecting to the event services. Please try again later.";
     }
 };
 
@@ -354,7 +416,7 @@ export const generateMarketingVideo = async (prompt: string, imageBase64?: strin
         throw new Error("Video generation completed but no URI returned.");
     }
 
-    const apiKey = getEnv('API_KEY');
+    const apiKey = process.env.API_KEY;
     const response = await fetch(`${downloadLink}&key=${apiKey}`);
     if (!response.ok) {
         throw new Error("Failed to download generated video.");
@@ -430,5 +492,37 @@ export const summarizeSessionFeedback = async (
     } catch (e) {
         console.error("Feedback summary failed:", e);
         return "Error generating summary.";
+    }
+};
+
+export const researchEntity = async (type: 'speaker' | 'sponsor', name: string) => {
+    const ai = getAiClient();
+    const prompt = type === 'speaker'
+        ? `Research "${name}" (Speaker). Find their Title, Company, Bio (max 3 sentences), LinkedIn URL, and Twitter/X URL. Format output as a JSON block with keys: title, company, bio, linkedinUrl, twitterUrl.`
+        : `Research "${name}" (Company). Find their Description (max 3 sentences) and Website URL. Format output as a JSON block with keys: description, websiteUrl.`;
+
+    try {
+        const response = await ai.models.generateContent({
+            model: 'gemini-2.5-flash',
+            contents: prompt,
+            config: {
+                tools: [{ googleSearch: {} }]
+            }
+        });
+
+        const text = response.text || '';
+        // Parse JSON from Markdown block if present
+        const match = text.match(/```json\n([\s\S]*?)\n```/) || text.match(/```\n([\s\S]*?)\n```/);
+        const jsonStr = match ? match[1] : text;
+        
+        try {
+            return JSON.parse(jsonStr);
+        } catch (e) {
+            console.warn("Failed to parse JSON from research result", text);
+            return null;
+        }
+    } catch (e) {
+        console.error("Research failed:", e);
+        throw new Error("Failed to research entity.");
     }
 };
