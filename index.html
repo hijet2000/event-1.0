@@ -1,10 +1,13 @@
-
 <!DOCTYPE html>
 <html lang="en">
 <head>
     <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+    <meta name="theme-color" content="#4f46e5" />
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
     <title>Event Registration Platform</title>
+    <link rel="manifest" href="/manifest.json">
     
     <!-- Tailwind CSS -->
     <script src="https://cdn.tailwindcss.com"></script>
@@ -60,6 +63,11 @@
         --color-secondary: #ec4899;
         --color-background-color: #f9fafb;
         --font-family: 'Inter', sans-serif;
+        /* Safe area insets for notched devices */
+        --sat: env(safe-area-inset-top);
+        --sab: env(safe-area-inset-bottom);
+        --sal: env(safe-area-inset-left);
+        --sar: env(safe-area-inset-right);
       }
       html.dark {
         --color-background-color: #111827;
@@ -67,6 +75,12 @@
       body {
         font-family: var(--font-family);
         background-color: var(--color-background-color);
+        /* Ensure safe areas are respected */
+        padding-top: var(--sat);
+        padding-bottom: var(--sab);
+        padding-left: var(--sal);
+        padding-right: var(--sar);
+        overscroll-behavior-y: none; /* Prevent pull-to-refresh on mobile app feel */
       }
       @keyframes fadeInDown {
         from {
@@ -173,14 +187,14 @@
     
     <!-- Helper Scripts -->
     <script>
-      // Handle dark mode persistence to avoid a "flash of incorrect theme"
+      // Handle dark mode persistence
       if (localStorage.getItem('adminDarkMode') === 'true' || (!('adminDarkMode' in localStorage) && window.matchMedia('(prefers-color-scheme: dark)').matches)) {
         document.documentElement.classList.add('dark');
       } else {
         document.documentElement.classList.remove('dark');
       }
 
-      // Configure Tailwind to use our CSS variables for the primary color
+      // Configure Tailwind
       tailwind.config = {
         darkMode: 'class',
         theme: {

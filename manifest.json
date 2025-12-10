@@ -1,0 +1,21 @@
+{
+  "short_name": "EventApp",
+  "name": "Event Registration Platform",
+  "icons": [
+    {
+      "src": "https://images.unsplash.com/photo-1620932934088-fb1023940157?q=80&w=192&auto=format&fit=crop",
+      "sizes": "192x192",
+      "type": "image/png"
+    },
+    {
+      "src": "https://images.unsplash.com/photo-1620932934088-fb1023940157?q=80&w=512&auto=format&fit=crop",
+      "sizes": "512x512",
+      "type": "image/png"
+    }
+  ],
+  "start_url": "/",
+  "display": "standalone",
+  "theme_color": "#4f46e5",
+  "background_color": "#ffffff",
+  "orientation": "portrait"
+}

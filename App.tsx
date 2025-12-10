@@ -23,6 +23,7 @@ import { AccessibilityTools } from './components/AccessibilityTools';
 import { PaymentModal } from './components/PaymentModal';
 import { KioskView } from './components/KioskView';
 import { ProjectorView } from './components/ProjectorView';
+import { configureBackgroundFetch } from './services/native';
 
 // Lazy load heavy portals to improve initial page load speed
 const AdminPortal = React.lazy(() => import('./components/AdminPortal').then(module => ({ default: module.AdminPortal })));
@@ -140,6 +141,23 @@ const EventPageContent: React.FC<EventPageContentProps> = ({ onAdminLogin, event
   const initialFormData: RegistrationFormState = { firstName: '', lastName: '', email: '', password: '', ticketTierId: '' };
   const [formData, setFormData] = useState<RegistrationFormState>(initialFormData);
 
+  // Initialize form data with custom fields when config loads
+  useEffect(() => {
+    if (config?.formFields) {
+      setFormData(prev => {
+        const next = { ...prev };
+        let hasChanges = false;
+        config.formFields.forEach(field => {
+          if (field.enabled && next[field.id] === undefined) {
+            next[field.id] = ''; // Initialize with empty string to ensure controlled input
+            hasChanges = true;
+          }
+        });
+        return hasChanges ? next : prev;
+      });
+    }
+  }, [config]);
+
   // Load Public Data (Sessions, Speakers)
   useEffect(() => {
       if (eventId) {
@@ -195,9 +213,11 @@ const EventPageContent: React.FC<EventPageContentProps> = ({ onAdminLogin, event
       try {
           const result = await registerUser(eventId, submissionData, inviteToken || undefined);
           if (result.success) {
-              // Trigger email confirmation for the recently registered user
-              // This uses generateRegistrationEmails from geminiService via server/api.ts
-              await triggerRegistrationEmails(eventId, result.user || submissionData);
+              // Trigger email confirmation.
+              // Crucial: Use result.user if available as it contains the unique ID required for the QR Code.
+              // Fallback to submissionData only if user object is missing, though registerUser should return it.
+              const userForEmail = result.user || { ...submissionData, id: 'temp-id' };
+              await triggerRegistrationEmails(eventId, userForEmail);
               setView('success');
           } else {
               setError(result.message);
@@ -214,6 +234,7 @@ const EventPageContent: React.FC<EventPageContentProps> = ({ onAdminLogin, event
     }
     setError('');
     
+    // Spread formData to capture standard AND custom fields
     const submissionData: RegistrationData = {
       ...formData,
       name: `${formData.firstName} ${formData.lastName}`.trim(),
@@ -467,7 +488,7 @@ const EventPageContent: React.FC<EventPageContentProps> = ({ onAdminLogin, event
                                 </div>
                                 <h3 className="text-3xl font-bold text-gray-900 dark:text-white mb-3">You're All Set!</h3>
                                 <p className="text-lg text-gray-600 dark:text-gray-300 mb-10 max-w-md mx-auto">
-                                    Registration confirmed. Check your email for your ticket and event details.
+                                    Registration confirmed. Check your email for your ticket and unique QR code.
                                 </p>
                                 <button
                                     onClick={() => {
@@ -571,6 +592,11 @@ function App() {
       // Check for backend status before rendering main app
       initializeApi().then(() => {
           setAppReady(true);
+      });
+      // Initialize native features like background fetch if supported
+      configureBackgroundFetch(async () => {
+          console.log("Running background fetch task...");
+          // Could sync data here
       });
   }, []);
 

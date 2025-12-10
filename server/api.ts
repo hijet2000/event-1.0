@@ -380,11 +380,15 @@ export const triggerRegistrationEmails = async (eventId: string, user: Registrat
     console.log("Offline: Simulating email trigger.");
     try {
         const config = await getEventConfig(eventId);
-        const qrCodeUrl = `https://api.qrserver.com/v1/create-qr-code/?size=250x250&data=${encodeURIComponent(user.id || 'ticket')}`;
-        const verificationLink = `${window.location.origin}/verify/${user.id}`; // Mock verification link
+        
+        // Ensure user.id is available, fallback to a unique string if missing (should not happen if flow is correct)
+        const uniqueId = user.id || `ticket_${Date.now()}_${Math.random().toString(36).substr(2, 5)}`;
+        
+        const qrCodeUrl = `https://api.qrserver.com/v1/create-qr-code/?size=250x250&data=${encodeURIComponent(uniqueId)}`;
+        const verificationLink = `${window.location.origin}/verify/${uniqueId}`; // Mock verification link
 
         // Generate email content using Gemini
-        console.log("Generating registration emails with AI...");
+        console.log(`Generating registration emails with AI for ${user.email}. QR Data: ${uniqueId}`);
         const emails = await geminiService.generateRegistrationEmails(user, config, verificationLink, qrCodeUrl);
         
         // Send User Email

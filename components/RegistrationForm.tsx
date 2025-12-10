@@ -346,7 +346,7 @@ export const RegistrationForm: React.FC<RegistrationFormProps> = ({
               <DynamicFormField
                 key={field.id}
                 field={field}
-                value={formData[field.id]}
+                value={formData[field.id] || ''}
                 onChange={onFormChange}
                 onBlur={handleBlur}
                 error={touched[field.id] ? errors[field.id] : ''}
