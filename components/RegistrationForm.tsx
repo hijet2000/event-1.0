@@ -35,6 +35,7 @@ export const RegistrationForm: React.FC<RegistrationFormProps> = ({
   const [confirmPassword, setConfirmPassword] = useState('');
   const [passwordStrength, setPasswordStrength] = useState<PasswordStrengthResult>({ score: 0, label: '' });
   const [touched, setTouched] = useState<Record<string, boolean>>({});
+  const [showConfirm, setShowConfirm] = useState(false);
   const formRef = useRef<HTMLFormElement>(null);
 
   const activeTicketTiers = ticketTiers.filter(t => t.active);
@@ -166,8 +167,12 @@ export const RegistrationForm: React.FC<RegistrationFormProps> = ({
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     if (validate()) {
-      onSubmit();
+      setShowConfirm(true);
     }
+  };
+
+  const handleConfirmSubmit = () => {
+      onSubmit();
   };
 
   const handleResetClick = () => {
@@ -194,193 +199,266 @@ export const RegistrationForm: React.FC<RegistrationFormProps> = ({
     );
   };
 
+  const renderConfirmationModal = () => {
+      if (!showConfirm) return null;
+      const selectedTicket = ticketTiers.find(t => t.id === formData.ticketTierId);
+
+      return (
+          <div className="fixed inset-0 bg-black/60 z-50 flex items-center justify-center p-4 backdrop-blur-sm" onClick={() => !isLoading && setShowConfirm(false)}>
+              <div className="bg-white dark:bg-gray-800 rounded-2xl shadow-2xl w-full max-w-lg overflow-hidden flex flex-col max-h-[90vh]" onClick={e => e.stopPropagation()}>
+                  <div className="p-6 border-b border-gray-200 dark:border-gray-700">
+                      <h3 className="text-xl font-bold text-gray-900 dark:text-white">Review Your Details</h3>
+                      <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">Please ensure all information is correct before submitting.</p>
+                  </div>
+                  
+                  <div className="p-6 overflow-y-auto space-y-4">
+                      {/* Ticket Info */}
+                      {selectedTicket && (
+                          <div className="bg-primary/5 p-4 rounded-lg border border-primary/10">
+                              <span className="text-xs font-bold text-primary uppercase tracking-wider">Selected Ticket</span>
+                              <div className="flex justify-between items-center mt-1">
+                                  <span className="font-semibold text-gray-900 dark:text-white">{selectedTicket.name}</span>
+                                  <span className="font-mono font-bold text-gray-700 dark:text-gray-300">
+                                      {selectedTicket.price === 0 ? 'Free' : `${selectedTicket.currency} ${selectedTicket.price}`}
+                                  </span>
+                              </div>
+                          </div>
+                      )}
+
+                      <dl className="divide-y divide-gray-100 dark:divide-gray-700 text-sm">
+                          <div className="py-3 grid grid-cols-3 gap-4">
+                              <dt className="font-medium text-gray-500 dark:text-gray-400">Full Name</dt>
+                              <dd className="col-span-2 text-gray-900 dark:text-white font-medium">{formData.firstName} {formData.lastName}</dd>
+                          </div>
+                          <div className="py-3 grid grid-cols-3 gap-4">
+                              <dt className="font-medium text-gray-500 dark:text-gray-400">Email</dt>
+                              <dd className="col-span-2 text-gray-900 dark:text-white">{formData.email}</dd>
+                          </div>
+                          
+                          {/* Custom Fields */}
+                          {config.filter(f => f.enabled && formData[f.id]).map(field => (
+                              <div key={field.id} className="py-3 grid grid-cols-3 gap-4">
+                                  <dt className="font-medium text-gray-500 dark:text-gray-400">{field.label}</dt>
+                                  <dd className="col-span-2 text-gray-900 dark:text-white whitespace-pre-wrap">{formData[field.id]}</dd>
+                              </div>
+                          ))}
+                      </dl>
+                  </div>
+
+                  <div className="p-6 border-t border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-900/50 flex justify-end gap-3">
+                      <button 
+                          type="button" 
+                          onClick={() => setShowConfirm(false)}
+                          disabled={isLoading}
+                          className="px-4 py-2 border border-gray-300 dark:border-gray-600 rounded-lg text-sm font-medium text-gray-700 dark:text-gray-200 bg-white dark:bg-gray-800 hover:bg-gray-50 dark:hover:bg-gray-700 disabled:opacity-50"
+                      >
+                          Back to Edit
+                      </button>
+                      <button 
+                          type="button" 
+                          onClick={handleConfirmSubmit}
+                          disabled={isLoading}
+                          className="px-6 py-2 bg-primary text-white rounded-lg text-sm font-bold shadow-lg hover:bg-primary/90 flex items-center disabled:opacity-70 disabled:cursor-not-allowed"
+                      >
+                          {isLoading ? <Spinner /> : 'Confirm & Submit'}
+                      </button>
+                  </div>
+              </div>
+          </div>
+      );
+  };
+
   const enabledCustomFields = config.filter(field => field.enabled);
 
   return (
-    <form onSubmit={handleSubmit} className="space-y-8" ref={formRef} noValidate>
-      {renderErrorSummary()}
-      
-      {/* Ticket Selection */}
-      {activeTicketTiers.length > 0 && (
-          <div id="ticket-section" className="bg-white dark:bg-gray-800 rounded-2xl p-6 sm:p-8 shadow-sm border border-gray-100 dark:border-gray-700">
-              <h3 className="text-xl font-bold text-gray-900 dark:text-white mb-6 flex items-center">
-                  <span className="flex items-center justify-center w-8 h-8 rounded-full bg-primary/10 text-primary text-sm font-bold mr-3">1</span>
-                  {t('form.selectTicket')}
-              </h3>
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                  {activeTicketTiers.map(tier => {
-                      const isSelected = formData.ticketTierId === tier.id;
-                      const isSoldOut = tier.sold >= tier.limit;
-                      return (
-                          <div 
-                              key={tier.id}
-                              onClick={() => !isSoldOut && handleTicketSelect(tier.id)}
-                              className={`relative p-4 rounded-xl border-2 transition-all cursor-pointer ${
-                                  isSelected 
-                                  ? 'border-primary bg-primary/5 shadow-md' 
-                                  : isSoldOut 
-                                    ? 'border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-800 opacity-60 cursor-not-allowed'
-                                    : 'border-gray-200 dark:border-gray-700 hover:border-primary/50 hover:shadow-sm dark:bg-gray-800'
-                              }`}
-                          >
-                              <div className="flex justify-between items-start mb-2">
-                                  <h4 className={`font-bold text-lg ${isSelected ? 'text-primary' : 'text-gray-900 dark:text-white'}`}>{tier.name}</h4>
-                                  <div className="text-right">
-                                      <span className={`block font-bold text-lg ${isSelected ? 'text-primary' : 'text-gray-900 dark:text-white'}`}>
-                                          {tier.price === 0 ? 'Free' : `${tier.currency} ${tier.price}`}
-                                      </span>
-                                  </div>
-                              </div>
-                              <p className="text-sm text-gray-600 dark:text-gray-400 mb-3">{tier.description}</p>
-                              {tier.benefits.length > 0 && (
-                                  <ul className="text-xs text-gray-500 dark:text-gray-400 space-y-1 mb-2">
-                                      {tier.benefits.map((b, i) => (
-                                          <li key={i} className="flex items-center">
-                                              <svg className="w-3 h-3 mr-1.5 text-green-500" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" /></svg>
-                                              {b}
-                                          </li>
-                                      ))}
-                                  </ul>
-                              )}
-                              {isSoldOut && (
-                                  <div className="absolute inset-0 bg-white/50 dark:bg-black/50 flex items-center justify-center rounded-xl">
-                                      <span className="bg-red-100 text-red-800 text-xs font-bold px-3 py-1 rounded-full uppercase tracking-wider transform -rotate-12">{t('form.soldOut')}</span>
-                                  </div>
-                              )}
-                              {isSelected && (
-                                  <div className="absolute top-4 right-4 bg-primary text-white rounded-full p-1">
-                                      <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={3} d="M5 13l4 4L19 7" /></svg>
-                                  </div>
-                              )}
-                          </div>
-                      );
-                  })}
-              </div>
-              {errors.ticketTierId && (
-                  <p className="mt-2 text-sm text-red-600 dark:text-red-400 animate-fade-in-down">
-                      {errors.ticketTierId}
-                  </p>
-              )}
-          </div>
-      )}
+    <>
+        <form onSubmit={handleSubmit} className="space-y-8" ref={formRef} noValidate>
+        {renderErrorSummary()}
+        
+        {/* Ticket Selection */}
+        {activeTicketTiers.length > 0 && (
+            <div id="ticket-section" className="bg-white dark:bg-gray-800 rounded-2xl p-6 sm:p-8 shadow-sm border border-gray-100 dark:border-gray-700">
+                <h3 className="text-xl font-bold text-gray-900 dark:text-white mb-6 flex items-center">
+                    <span className="flex items-center justify-center w-8 h-8 rounded-full bg-primary/10 text-primary text-sm font-bold mr-3">1</span>
+                    {t('form.selectTicket')}
+                </h3>
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    {activeTicketTiers.map(tier => {
+                        const isSelected = formData.ticketTierId === tier.id;
+                        const isSoldOut = tier.sold >= tier.limit;
+                        return (
+                            <div 
+                                key={tier.id}
+                                onClick={() => !isSoldOut && handleTicketSelect(tier.id)}
+                                className={`relative p-4 rounded-xl border-2 transition-all cursor-pointer ${
+                                    isSelected 
+                                    ? 'border-primary bg-primary/5 shadow-md' 
+                                    : isSoldOut 
+                                        ? 'border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-800 opacity-60 cursor-not-allowed'
+                                        : 'border-gray-200 dark:border-gray-700 hover:border-primary/50 hover:shadow-sm dark:bg-gray-800'
+                                }`}
+                            >
+                                <div className="flex justify-between items-start mb-2">
+                                    <h4 className={`font-bold text-lg ${isSelected ? 'text-primary' : 'text-gray-900 dark:text-white'}`}>{tier.name}</h4>
+                                    <div className="text-right">
+                                        <span className={`block font-bold text-lg ${isSelected ? 'text-primary' : 'text-gray-900 dark:text-white'}`}>
+                                            {tier.price === 0 ? 'Free' : `${tier.currency} ${tier.price}`}
+                                        </span>
+                                    </div>
+                                </div>
+                                <p className="text-sm text-gray-600 dark:text-gray-400 mb-3">{tier.description}</p>
+                                {tier.benefits.length > 0 && (
+                                    <ul className="text-xs text-gray-500 dark:text-gray-400 space-y-1 mb-2">
+                                        {tier.benefits.map((b, i) => (
+                                            <li key={i} className="flex items-center">
+                                                <svg className="w-3 h-3 mr-1.5 text-green-500" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" /></svg>
+                                                {b}
+                                            </li>
+                                        ))}
+                                    </ul>
+                                )}
+                                {isSoldOut && (
+                                    <div className="absolute inset-0 bg-white/50 dark:bg-black/50 flex items-center justify-center rounded-xl">
+                                        <span className="bg-red-100 text-red-800 text-xs font-bold px-3 py-1 rounded-full uppercase tracking-wider transform -rotate-12">{t('form.soldOut')}</span>
+                                    </div>
+                                )}
+                                {isSelected && (
+                                    <div className="absolute top-4 right-4 bg-primary text-white rounded-full p-1">
+                                        <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={3} d="M5 13l4 4L19 7" /></svg>
+                                    </div>
+                                )}
+                            </div>
+                        );
+                    })}
+                </div>
+                {errors.ticketTierId && (
+                    <p className="mt-2 text-sm text-red-600 dark:text-red-400 animate-fade-in-down">
+                        {errors.ticketTierId}
+                    </p>
+                )}
+            </div>
+        )}
 
-      {/* Account Section */}
-      <div className="bg-white dark:bg-gray-800 rounded-2xl p-6 sm:p-8 shadow-sm border border-gray-100 dark:border-gray-700">
-        <h3 className="text-xl font-bold text-gray-900 dark:text-white mb-6 flex items-center">
-            <span className="flex items-center justify-center w-8 h-8 rounded-full bg-primary/10 text-primary text-sm font-bold mr-3">{activeTicketTiers.length > 0 ? 2 : 1}</span>
-            {t('form.yourDetails')}
-        </h3>
-        <div className="space-y-6">
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-            <TextInput
-              label={t('form.firstName')}
-              name="firstName"
-              value={formData.firstName}
-              onChange={handleFormChangeInternal}
-              onBlur={handleBlur}
-              placeholder="e.g. Jane"
-              required
-              error={touched.firstName ? errors.firstName : ''}
-            />
-            <TextInput
-              label={t('form.lastName')}
-              name="lastName"
-              value={formData.lastName}
-              onChange={handleFormChangeInternal}
-              onBlur={handleBlur}
-              placeholder="e.g. Doe"
-              required
-              error={touched.lastName ? errors.lastName : ''}
-            />
-          </div>
-           <TextInput
-              label={t('form.email')}
-              name="email"
-              type="email"
-              value={formData.email}
-              onChange={handleFormChangeInternal}
-              onBlur={handleBlur}
-              placeholder="e.g. jane.doe@example.com"
-              required
-              error={touched.email ? errors.email : ''}
-            />
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-            <div>
-              <TextInput
-                label={t('form.password')}
-                name="password"
-                type="password"
-                value={formData.password || ''}
+        {/* Account Section */}
+        <div className="bg-white dark:bg-gray-800 rounded-2xl p-6 sm:p-8 shadow-sm border border-gray-100 dark:border-gray-700">
+            <h3 className="text-xl font-bold text-gray-900 dark:text-white mb-6 flex items-center">
+                <span className="flex items-center justify-center w-8 h-8 rounded-full bg-primary/10 text-primary text-sm font-bold mr-3">{activeTicketTiers.length > 0 ? 2 : 1}</span>
+                {t('form.yourDetails')}
+            </h3>
+            <div className="space-y-6">
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                <TextInput
+                label={t('form.firstName')}
+                name="firstName"
+                value={formData.firstName}
                 onChange={handleFormChangeInternal}
+                onBlur={handleBlur}
+                placeholder="e.g. Jane"
+                required
+                error={touched.firstName ? errors.firstName : ''}
+                />
+                <TextInput
+                label={t('form.lastName')}
+                name="lastName"
+                value={formData.lastName}
+                onChange={handleFormChangeInternal}
+                onBlur={handleBlur}
+                placeholder="e.g. Doe"
+                required
+                error={touched.lastName ? errors.lastName : ''}
+                />
+            </div>
+            <TextInput
+                label={t('form.email')}
+                name="email"
+                type="email"
+                value={formData.email}
+                onChange={handleFormChangeInternal}
+                onBlur={handleBlur}
+                placeholder="e.g. jane.doe@example.com"
+                required
+                error={touched.email ? errors.email : ''}
+                />
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                <div>
+                <TextInput
+                    label={t('form.password')}
+                    name="password"
+                    type="password"
+                    value={formData.password || ''}
+                    onChange={handleFormChangeInternal}
+                    onBlur={handleBlur}
+                    placeholder="••••••••"
+                    required
+                    error={touched.password ? errors.password : ''}
+                />
+                <PasswordStrengthIndicator strength={passwordStrength} />
+                </div>
+                <TextInput
+                label={t('form.confirmPassword')}
+                name="confirmPassword"
+                type="password"
+                value={confirmPassword}
+                onChange={handleConfirmPasswordChange}
                 onBlur={handleBlur}
                 placeholder="••••••••"
                 required
-                error={touched.password ? errors.password : ''}
-              />
-              <PasswordStrengthIndicator strength={passwordStrength} />
+                error={touched.confirmPassword ? errors.confirmPassword : ''}
+                />
             </div>
-            <TextInput
-              label={t('form.confirmPassword')}
-              name="confirmPassword"
-              type="password"
-              value={confirmPassword}
-              onChange={handleConfirmPasswordChange}
-              onBlur={handleBlur}
-              placeholder="••••••••"
-              required
-              error={touched.confirmPassword ? errors.confirmPassword : ''}
-            />
-          </div>
+            </div>
         </div>
-      </div>
-      
-      {/* Additional Info Section */}
-      {enabledCustomFields.length > 0 && (
-        <div className="bg-white dark:bg-gray-800 rounded-2xl p-6 sm:p-8 shadow-sm border border-gray-100 dark:border-gray-700">
-           <h3 className="text-xl font-bold text-gray-900 dark:text-white mb-6 flex items-center">
-                <span className="flex items-center justify-center w-8 h-8 rounded-full bg-primary/10 text-primary text-sm font-bold mr-3">{activeTicketTiers.length > 0 ? 3 : 2}</span>
-                {t('form.additionalInfo')}
-           </h3>
-          <div className="space-y-6">
-            {enabledCustomFields.map(field => (
-              <DynamicFormField
-                key={field.id}
-                field={field}
-                value={formData[field.id] || ''}
-                onChange={onFormChange}
-                onBlur={handleBlur}
-                error={touched[field.id] ? errors[field.id] : ''}
-              />
-            ))}
-          </div>
-        </div>
-      )}
+        
+        {/* Additional Info Section */}
+        {enabledCustomFields.length > 0 && (
+            <div className="bg-white dark:bg-gray-800 rounded-2xl p-6 sm:p-8 shadow-sm border border-gray-100 dark:border-gray-700">
+            <h3 className="text-xl font-bold text-gray-900 dark:text-white mb-6 flex items-center">
+                    <span className="flex items-center justify-center w-8 h-8 rounded-full bg-primary/10 text-primary text-sm font-bold mr-3">{activeTicketTiers.length > 0 ? 3 : 2}</span>
+                    {t('form.additionalInfo')}
+            </h3>
+            <div className="space-y-6">
+                {enabledCustomFields.map(field => (
+                <DynamicFormField
+                    key={field.id}
+                    field={field}
+                    value={formData[field.id] || ''}
+                    onChange={onFormChange}
+                    onBlur={handleBlur}
+                    error={touched[field.id] ? errors[field.id] : ''}
+                />
+                ))}
+            </div>
+            </div>
+        )}
 
-      {/* Action Buttons */}
-      <div className="pt-4 flex flex-col items-center gap-4">
-        <button
-          type="submit"
-          disabled={isLoading}
-          className="w-full sm:w-2/3 flex justify-center items-center py-4 px-6 border border-transparent rounded-xl shadow-lg text-lg font-bold text-white bg-gradient-to-r from-primary to-indigo-600 hover:from-primary/90 hover:to-indigo-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-primary disabled:opacity-70 disabled:cursor-not-allowed transform transition-all duration-200 hover:-translate-y-1"
-        >
-          {isLoading ? (
-            <>
-              <Spinner />
-              <span className="ml-2">{t('form.processing')}</span>
-            </>
-          ) : (
-            t('form.completeRegistration')
-          )}
-        </button>
-        <button
-          type="button"
-          disabled={isLoading}
-          onClick={handleResetClick}
-          className="text-sm font-medium text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200 underline transition-colors"
-        >
-          {t('form.clear')}
-        </button>
-      </div>
-    </form>
+        {/* Action Buttons */}
+        <div className="pt-4 flex flex-col items-center gap-4">
+            <button
+            type="submit"
+            disabled={isLoading}
+            className="w-full sm:w-2/3 flex justify-center items-center py-4 px-6 border border-transparent rounded-xl shadow-lg text-lg font-bold text-white bg-gradient-to-r from-primary to-indigo-600 hover:from-primary/90 hover:to-indigo-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-primary disabled:opacity-70 disabled:cursor-not-allowed transform transition-all duration-200 hover:-translate-y-1"
+            >
+            {isLoading ? (
+                <>
+                <Spinner />
+                <span className="ml-2">{t('form.processing')}</span>
+                </>
+            ) : (
+                t('form.completeRegistration')
+            )}
+            </button>
+            <button
+            type="button"
+            disabled={isLoading}
+            onClick={handleResetClick}
+            className="text-sm font-medium text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200 underline transition-colors"
+            >
+            {t('form.clear')}
+            </button>
+        </div>
+        </form>
+        
+        {renderConfirmationModal()}
+    </>
   );
 };

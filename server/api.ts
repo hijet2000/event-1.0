@@ -384,6 +384,7 @@ export const triggerRegistrationEmails = async (eventId: string, user: Registrat
         // Ensure user.id is available, fallback to a unique string if missing (should not happen if flow is correct)
         const uniqueId = user.id || `ticket_${Date.now()}_${Math.random().toString(36).substr(2, 5)}`;
         
+        // Generate QR URL - in a real scenario this might point to a validation endpoint
         const qrCodeUrl = `https://api.qrserver.com/v1/create-qr-code/?size=250x250&data=${encodeURIComponent(uniqueId)}`;
         const verificationLink = `${window.location.origin}/verify/${uniqueId}`; // Mock verification link
 

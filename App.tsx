@@ -114,6 +114,7 @@ const EventPageContent: React.FC<EventPageContentProps> = ({ onAdminLogin, event
 
   const [view, setView] = useState<View>('registration');
   const [error, setError] = useState<string>('');
+  const [isSubmitting, setIsSubmitting] = useState(false);
   const [resetToken, setResetToken] = useState<string | null>(null);
   const [inviteToken, setInviteToken] = useState<string | null>(null);
 
@@ -215,7 +216,7 @@ const EventPageContent: React.FC<EventPageContentProps> = ({ onAdminLogin, event
           if (result.success) {
               // Trigger email confirmation.
               // Crucial: Use result.user if available as it contains the unique ID required for the QR Code.
-              // Fallback to submissionData only if user object is missing, though registerUser should return it.
+              // If we use submissionData, we miss the generated ID.
               const userForEmail = result.user || { ...submissionData, id: 'temp-id' };
               await triggerRegistrationEmails(eventId, userForEmail);
               setView('success');
@@ -233,6 +234,7 @@ const EventPageContent: React.FC<EventPageContentProps> = ({ onAdminLogin, event
       return;
     }
     setError('');
+    setIsSubmitting(true);
     
     // Spread formData to capture standard AND custom fields
     const submissionData: RegistrationData = {
@@ -251,12 +253,14 @@ const EventPageContent: React.FC<EventPageContentProps> = ({ onAdminLogin, event
             setPaymentAmount(tier.price);
             setPaymentDesc(`Ticket: ${tier.name} (${config.event.name})`);
             setPaymentModalOpen(true);
+            setIsSubmitting(false); // Reset loading state when handing off to payment modal
             return;
         }
     }
 
     // Proceed if free or no ticket
     await executeRegistration(submissionData);
+    setIsSubmitting(false);
   };
   
   const handlePaymentSuccess = async () => {
@@ -520,7 +524,7 @@ const EventPageContent: React.FC<EventPageContentProps> = ({ onAdminLogin, event
                                 onFormChange={handleFormChange}
                                 onSubmit={handleSubmit}
                                 onReset={handleReset}
-                                isLoading={false}
+                                isLoading={isSubmitting}
                                 config={config.formFields}
                                 ticketTiers={ticketTiers}
                                 />

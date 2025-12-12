@@ -5,11 +5,7 @@ import { type RegistrationData, type EventConfig, type EmailContent, type Networ
 // Helper to initialize the client lazily.
 // We strictly use process.env.API_KEY as per coding guidelines.
 const getAiClient = () => {
-  const apiKey = process.env.API_KEY;
-  if (!apiKey) {
-      console.warn("Gemini API Key is missing. AI features will not work.");
-  }
-  return new GoogleGenAI({ apiKey: apiKey || '' });
+  return new GoogleGenAI({ apiKey: process.env.API_KEY });
 };
 
 const registrationResponseSchema = {
