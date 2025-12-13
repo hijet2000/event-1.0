@@ -1,15 +1,20 @@
 
+import { Capacitor } from '@capacitor/core';
+import { Haptics, ImpactStyle } from '@capacitor/haptics';
+import { Contacts } from '@capacitor-community/contacts';
+import { BackgroundFetch } from '@transistorsoft/capacitor-background-fetch';
+
 /**
  * Native Service Abstraction
  * Wraps CapacitorJS plugins for safe usage in both Web and Native environments.
  */
 
 export const isNative = (): boolean => {
-    return (window as any).Capacitor?.isNativePlatform() || false;
+    return Capacitor.isNativePlatform();
 };
 
 export const getPlatform = (): string => {
-    return (window as any).Capacitor?.getPlatform() || 'web';
+    return Capacitor.getPlatform();
 };
 
 /**
@@ -18,28 +23,39 @@ export const getPlatform = (): string => {
  */
 export const pickContact = async (): Promise<{ name?: string, email?: string } | null> => {
     if (!isNative()) {
-        console.warn("Contact picker not available on web.");
-        return null;
-    }
-    
-    // In a real Capacitor project, you would import:
-    // import { Contacts } from '@capacitor-community/contacts';
-    
-    try {
-        // Simulation of native plugin call
-        console.log("[Native] Opening Contact Picker...");
-        
-        // Mock async delay for native interaction
+        console.warn("Contact picker not available on web. Using mock data.");
+        // Mock async delay for web testing
         return new Promise((resolve) => {
             setTimeout(() => {
-                // Return mock data for demonstration if actual plugin isn't present in this web container
-                resolve({ name: "Native Contact", email: "mobile@example.com" });
-            }, 1000);
+                resolve({ name: "Web Mock Contact", email: "mock@example.com" });
+            }, 500);
         });
+    }
+    
+    try {
+        const permission = await Contacts.requestPermissions();
+        if (!permission.contacts) {
+            console.warn("Contact permission denied");
+            return null;
+        }
+
+        const result = await Contacts.pickContact({
+            projection: {
+                name: true,
+                phones: true,
+                emails: true
+            }
+        });
+
+        if (result && result.contact) {
+            const name = result.contact.name?.display || result.contact.name?.given;
+            const email = result.contact.emails?.[0]?.address;
+            return { name, email };
+        }
     } catch (e) {
         console.error("Failed to pick contact:", e);
-        return null;
     }
+    return null;
 };
 
 /**
@@ -54,13 +70,30 @@ export const configureBackgroundFetch = async (onFetch: () => Promise<void>) => 
 
     try {
         console.log("[Native] Configuring Background Fetch...");
-        // const status = await BackgroundFetch.configure({
-        //   minimumFetchInterval: 15
-        // }, async (taskId) => {
-        //   console.log("[BackgroundFetch] Task received: ", taskId);
-        //   await onFetch();
-        //   BackgroundFetch.finish(taskId);
-        // });
+        const status = await BackgroundFetch.configure({
+            minimumFetchInterval: 15, // minutes
+            stopOnTerminate: false,
+            startOnBoot: true,
+            enableHeadless: true,
+            forceAlarmManager: false, // Android specific
+            requiredNetworkType: BackgroundFetch.NETWORK_TYPE_ANY
+        }, async (taskId) => {
+            console.log("[BackgroundFetch] Task received: ", taskId);
+            
+            try {
+                await onFetch();
+            } catch (error) {
+                console.error("[BackgroundFetch] Task error: ", error);
+            }
+            
+            // Required: Signal completion of your task to OS
+            BackgroundFetch.finish(taskId);
+        }, (taskId) => {
+            console.log("[BackgroundFetch] TIMEOUT: ", taskId);
+            BackgroundFetch.finish(taskId);
+        });
+
+        console.log("[BackgroundFetch] Status: ", status);
     } catch (e) {
         console.error("Background Fetch Error:", e);
     }
@@ -72,6 +105,10 @@ export const configureBackgroundFetch = async (onFetch: () => Promise<void>) => 
  */
 export const hapticImpact = async () => {
     if (isNative()) {
-        // await Haptics.impact({ style: ImpactStyle.Medium });
+        try {
+            await Haptics.impact({ style: ImpactStyle.Medium });
+        } catch (e) {
+            console.warn("Haptics failed", e);
+        }
     }
 };

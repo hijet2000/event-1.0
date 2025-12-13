@@ -1,7 +1,10 @@
 
+
+
+// ... existing imports ...
 import React, { useState, useEffect } from 'react';
 import { type EventConfig, type FormField } from '../types';
-import { getEventConfig, saveConfig, syncConfigFromGitHub, sendTestEmail, getSystemApiKey, sendTestMessage } from '../server/api';
+import { getEventConfig, saveConfig, syncConfigFromGitHub, pushConfigToGitHub, sendTestEmail, getSystemApiKey, sendTestMessage } from '../server/api';
 import { ContentLoader } from './ContentLoader';
 import { Spinner } from './Spinner';
 import { Alert } from './Alert';
@@ -19,8 +22,9 @@ const FONT_OPTIONS = ['Inter', 'Roboto', 'Lato', 'Montserrat'];
 const EVENT_TYPES = ['Conference', 'Workshop', 'Webinar', 'Meetup', 'Other'];
 const VOICE_OPTIONS = ['Puck', 'Charon', 'Kore', 'Fenrir', 'Zephyr'];
 
-type Tab = 'general' | 'registration' | 'theme' | 'communications' | 'economy' | 'integrations';
+type Tab = 'general' | 'registration' | 'theme' | 'communications' | 'economy' | 'integrations' | 'printing';
 
+// ... existing TemplateEditor component ...
 const TemplateEditor: React.FC<{
     templateKey: keyof EventConfig['emailTemplates'],
     label: string;
@@ -78,12 +82,14 @@ const TemplateEditor: React.FC<{
 };
 
 export const SettingsForm: React.FC<SettingsFormProps> = ({ adminToken }) => {
+  // ... existing hook logic ...
   const { config: contextConfig, updateConfig, isLoading: isContextLoading } = useTheme();
   
   const [config, setConfig] = useState<EventConfig | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [isSaving, setIsSaving] = useState(false);
   const [isSyncing, setIsSyncing] = useState(false);
+  const [isPushing, setIsPushing] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
   const [activeTab, setActiveTab] = useState<Tab>('general');
@@ -107,6 +113,7 @@ export const SettingsForm: React.FC<SettingsFormProps> = ({ adminToken }) => {
   const [editingField, setEditingField] = useState<FormField | null>(null);
   const [editingFieldIndex, setEditingFieldIndex] = useState<number | null>(null);
 
+  // ... existing useEffects ...
   useEffect(() => {
       const timer = setTimeout(() => {
           if (isLoading) {
@@ -135,8 +142,10 @@ export const SettingsForm: React.FC<SettingsFormProps> = ({ adminToken }) => {
       
       getSystemApiKey(adminToken).then(setApiKey).catch(() => {});
   }, [contextConfig, isContextLoading, adminToken]);
+
+  // ... existing handlers (handleInputChange, handleTemplateChange, etc.) ...
   
-  const handleInputChange = (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement>, section: 'event' | 'host' | 'theme' | 'smtp' | 'githubSync' | 'aiConcierge') => {
+  const handleInputChange = (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement>, section: 'event' | 'host' | 'theme' | 'smtp' | 'githubSync' | 'aiConcierge' | 'printConfig') => {
     if (!config) return;
 
     const { name, value, type } = e.target;
@@ -147,7 +156,7 @@ export const SettingsForm: React.FC<SettingsFormProps> = ({ adminToken }) => {
       const newConfig = JSON.parse(JSON.stringify(prevConfig));
       if (!newConfig[section]) newConfig[section] = {};
       
-      const finalValue = type === 'number' ? parseInt(value, 10) || 0 : value;
+      const finalValue = type === 'number' ? parseFloat(value) || 0 : value;
       newConfig[section][name] = finalValue;
       return newConfig;
     });
@@ -319,7 +328,6 @@ export const SettingsForm: React.FC<SettingsFormProps> = ({ adminToken }) => {
     e.preventDefault();
     if (!config) return;
 
-    // Client-side Validation for Google Service Account JSON
     if (config.emailProvider === 'google' && config.googleConfig?.serviceAccountKeyJson) {
         if (!validateServiceAccountJson()) {
             setError("Please fix Google Service Account JSON errors before saving.");
@@ -356,6 +364,21 @@ export const SettingsForm: React.FC<SettingsFormProps> = ({ adminToken }) => {
       } finally {
           setIsSyncing(false);
           setTimeout(() => setSuccessMessage(null), 3000);
+      }
+  };
+
+  const handlePush = async () => {
+      setIsPushing(true);
+      setError(null);
+      setSuccessMessage(null);
+      try {
+          const result = await pushConfigToGitHub(adminToken);
+          setSuccessMessage(`Configuration pushed to GitHub successfully! (Commit: ${result.commit.substring(0, 7)})`);
+      } catch (e) {
+          setError(e instanceof Error ? e.message : "Push failed.");
+      } finally {
+          setIsPushing(false);
+          setTimeout(() => setSuccessMessage(null), 5000);
       }
   };
 
@@ -425,7 +448,7 @@ export const SettingsForm: React.FC<SettingsFormProps> = ({ adminToken }) => {
   if (error && !config) return <Alert type="error" message={error} />;
   if (!config) return <Alert type="error" message="No configuration loaded." />;
 
-  // Ensure robust defaults for potential missing nested objects in older configs
+  // Ensure robust defaults
   const safeTelegram = config.telegram || { enabled: false, botToken: '' };
   const safeWhatsapp = config.whatsapp || { enabled: false, accessToken: '', phoneNumberId: '' };
   const safeSms = config.sms || { enabled: false, provider: 'twilio', accountSid: '', authToken: '', fromNumber: '' };
@@ -435,7 +458,8 @@ export const SettingsForm: React.FC<SettingsFormProps> = ({ adminToken }) => {
   const safeSmtp = config.smtp || { host: '', port: 587, username: '', password: '', encryption: 'tls' };
   const safeGoogle = config.googleConfig || { serviceAccountKeyJson: '' };
   const safeEventCoin = config.eventCoin || { enabled: true, name: 'EventCoin', startingBalance: 100, exchangeRate: 1, peggedCurrency: 'USD' };
-  const safeSync = config.githubSync || { enabled: false, configUrl: '' };
+  const safeSync = config.githubSync || { enabled: false, configUrl: '', owner: '', repo: '', path: 'config.json', token: '' };
+  const safePrintConfig = config.printConfig || { enabled: true, width: 4, height: 3, orientation: 'landscape', autoPrintOnKiosk: false };
 
   return (
     <div className="max-w-4xl mx-auto">
@@ -443,14 +467,6 @@ export const SettingsForm: React.FC<SettingsFormProps> = ({ adminToken }) => {
         <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center mb-6 gap-4">
             <h2 className="text-2xl font-bold text-gray-900 dark:text-white">Event Settings</h2>
             <div className="flex gap-3">
-                <button
-                    type="button"
-                    onClick={handleSync}
-                    disabled={isSyncing}
-                    className="py-2 px-4 border border-gray-300 dark:border-gray-600 rounded-md shadow-sm text-sm font-medium bg-white dark:bg-gray-700 text-gray-700 dark:text-gray-200 hover:bg-gray-50 dark:hover:bg-gray-600 disabled:opacity-50"
-                >
-                    {isSyncing ? <><Spinner /> Syncing...</> : 'Sync from GitHub'}
-                </button>
                 <button
                     onClick={handleSave}
                     disabled={isSaving}
@@ -467,7 +483,7 @@ export const SettingsForm: React.FC<SettingsFormProps> = ({ adminToken }) => {
         {/* Tabs */}
         <div className="border-b border-gray-200 dark:border-gray-700 mb-6 overflow-x-auto">
             <nav className="-mb-px flex space-x-8">
-                {['general', 'registration', 'theme', 'communications', 'economy', 'integrations'].map((tab) => (
+                {['general', 'registration', 'theme', 'communications', 'printing', 'economy', 'integrations'].map((tab) => (
                     <button
                         key={tab}
                         onClick={() => setActiveTab(tab as Tab)}
@@ -604,6 +620,7 @@ export const SettingsForm: React.FC<SettingsFormProps> = ({ adminToken }) => {
 
             {activeTab === 'communications' && (
                 <div className="space-y-6">
+                    {/* ... existing communications tab content ... */}
                     <div className="bg-white dark:bg-gray-800 shadow rounded-lg p-6">
                         <h3 className="text-lg font-medium text-gray-900 dark:text-white mb-4">Email Configuration</h3>
                         <div className="space-y-4">
@@ -788,6 +805,79 @@ export const SettingsForm: React.FC<SettingsFormProps> = ({ adminToken }) => {
                 </div>
             )}
 
+            {activeTab === 'printing' && (
+                <div className="bg-white dark:bg-gray-800 shadow rounded-lg p-6">
+                    <h3 className="text-lg font-medium text-gray-900 dark:text-white mb-4">Badge Printing</h3>
+                    <p className="text-sm text-gray-500 mb-6">Configure settings for thermal label printers used at check-in kiosks.</p>
+                    
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                        <div className="space-y-4">
+                            <ToggleSwitch 
+                                label="Enable Badge Printing" 
+                                name="enabled" 
+                                enabled={safePrintConfig.enabled} 
+                                onChange={(val) => handleInputChange({ target: { name: 'enabled', value: val, type: 'checkbox', checked: val } } as any, 'printConfig')} 
+                            />
+                            
+                            {safePrintConfig.enabled && (
+                                <>
+                                    <div className="grid grid-cols-2 gap-4">
+                                        <TextInput 
+                                            label="Width (Inches)" 
+                                            name="width" 
+                                            type="number" 
+                                            value={safePrintConfig.width.toString()} 
+                                            onChange={(e) => handleInputChange(e, 'printConfig')} 
+                                        />
+                                        <TextInput 
+                                            label="Height (Inches)" 
+                                            name="height" 
+                                            type="number" 
+                                            value={safePrintConfig.height.toString()} 
+                                            onChange={(e) => handleInputChange(e, 'printConfig')} 
+                                        />
+                                    </div>
+                                    
+                                    <div>
+                                        <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Orientation</label>
+                                        <select 
+                                            name="orientation" 
+                                            value={safePrintConfig.orientation} 
+                                            onChange={(e) => handleInputChange(e, 'printConfig')} 
+                                            className="block w-full rounded-md border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 shadow-sm sm:text-sm"
+                                        >
+                                            <option value="landscape">Landscape</option>
+                                            <option value="portrait">Portrait</option>
+                                        </select>
+                                    </div>
+
+                                    <ToggleSwitch 
+                                        label="Auto-print on Kiosk Check-in" 
+                                        name="autoPrintOnKiosk" 
+                                        enabled={safePrintConfig.autoPrintOnKiosk} 
+                                        onChange={(val) => handleInputChange({ target: { name: 'autoPrintOnKiosk', value: val, type: 'checkbox', checked: val } } as any, 'printConfig')} 
+                                    />
+                                </>
+                            )}
+                        </div>
+                        
+                        <div className="bg-gray-100 dark:bg-gray-900 rounded-lg p-4 flex items-center justify-center border border-gray-200 dark:border-gray-700">
+                            {/* Preview representation */}
+                            <div 
+                                className="bg-white shadow-md flex items-center justify-center text-gray-400 text-xs border border-gray-300"
+                                style={{
+                                    width: `${safePrintConfig.width * 40}px`,
+                                    height: `${safePrintConfig.height * 40}px`,
+                                    transition: 'all 0.3s'
+                                }}
+                            >
+                                Preview ({safePrintConfig.width}" x {safePrintConfig.height}")
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            )}
+
             {activeTab === 'economy' && (
                 <div className="bg-white dark:bg-gray-800 shadow rounded-lg p-6">
                     <h3 className="text-lg font-medium text-gray-900 dark:text-white mb-4">EventCoin Economy</h3>
@@ -807,11 +897,46 @@ export const SettingsForm: React.FC<SettingsFormProps> = ({ adminToken }) => {
             {activeTab === 'integrations' && (
                 <div className="space-y-6">
                     <div className="bg-white dark:bg-gray-800 shadow rounded-lg p-6">
-                        <h3 className="text-lg font-medium text-gray-900 dark:text-white mb-4">GitHub Sync (GitOps)</h3>
-                        <ToggleSwitch label="Enable GitHub Sync" name="enabled" enabled={safeSync.enabled} onChange={handleGithubSyncToggle} />
+                        <div className="flex justify-between items-center mb-4">
+                            <div>
+                                <h3 className="text-lg font-medium text-gray-900 dark:text-white">GitHub Sync (GitOps)</h3>
+                                <p className="text-sm text-gray-500">Manage your configuration as code.</p>
+                            </div>
+                            <ToggleSwitch label="Enabled" name="enabled" enabled={safeSync.enabled} onChange={handleGithubSyncToggle} />
+                        </div>
+                        
                         {safeSync.enabled && (
-                            <div className="mt-4">
-                                <TextInput label="Config JSON URL (Raw)" name="configUrl" value={safeSync.configUrl} onChange={(e) => handleInputChange(e, 'githubSync')} placeholder="https://raw.githubusercontent.com/user/repo/main/config.json" />
+                            <div className="mt-4 space-y-4 animate-fade-in">
+                                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                                    <TextInput label="Repository Owner" name="owner" value={safeSync.owner || ''} onChange={(e) => handleInputChange(e, 'githubSync')} placeholder="e.g. facebook" />
+                                    <TextInput label="Repository Name" name="repo" value={safeSync.repo || ''} onChange={(e) => handleInputChange(e, 'githubSync')} placeholder="e.g. react" />
+                                </div>
+                                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                                    <TextInput label="File Path" name="path" value={safeSync.path || 'config.json'} onChange={(e) => handleInputChange(e, 'githubSync')} placeholder="path/to/config.json" />
+                                    <TextInput label="Personal Access Token (PAT)" name="token" type="password" value={safeSync.token || ''} onChange={(e) => handleInputChange(e, 'githubSync')} placeholder="ghp_..." />
+                                </div>
+                                
+                                <div className="flex gap-3 pt-2">
+                                    <button 
+                                        type="button" 
+                                        onClick={handleSync}
+                                        disabled={isSyncing}
+                                        className="px-4 py-2 border border-gray-300 dark:border-gray-600 rounded-md text-sm font-medium hover:bg-gray-50 dark:hover:bg-gray-700 flex items-center gap-2"
+                                    >
+                                        {isSyncing ? <Spinner /> : <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" /></svg>}
+                                        Pull (Sync)
+                                    </button>
+                                    <button 
+                                        type="button" 
+                                        onClick={handlePush}
+                                        disabled={isPushing}
+                                        className="px-4 py-2 bg-gray-800 text-white dark:bg-gray-700 rounded-md text-sm font-medium hover:bg-gray-900 dark:hover:bg-gray-600 flex items-center gap-2"
+                                    >
+                                        {isPushing ? <Spinner /> : <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12" /></svg>}
+                                        Push (Commit)
+                                    </button>
+                                </div>
+
                                 {safeSync.lastSyncTimestamp && (
                                     <p className="text-xs text-gray-500 mt-2">
                                         Last sync: {new Date(safeSync.lastSyncTimestamp).toLocaleString()} 

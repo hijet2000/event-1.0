@@ -10,6 +10,7 @@ import { QRCodeScannerModal } from './QRCodeScannerModal';
 import { InviteDelegateModal } from './InviteDelegateModal';
 import { jsPDF } from 'jspdf';
 import { Spinner } from './Spinner';
+import { BadgePrintLayout } from './BadgePrintLayout';
 
 interface RegistrationsDashboardProps {
   adminToken: string;
@@ -39,6 +40,9 @@ export const RegistrationsDashboard: React.FC<RegistrationsDashboardProps> = ({ 
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [selectedDelegate, setSelectedDelegate] = useState<RegistrationData | null>(null);
+  
+  // Print State
+  const [userForPrint, setUserForPrint] = useState<RegistrationData | null>(null);
   
   // Modal states
   const [isImportModalOpen, setIsImportModalOpen] = useState(false);
@@ -85,6 +89,19 @@ export const RegistrationsDashboard: React.FC<RegistrationsDashboardProps> = ({ 
   useEffect(() => {
     loadData();
   }, [adminToken]);
+
+  // Effect to handle printing
+  useEffect(() => {
+      if (userForPrint && config) {
+          // Allow DOM to update then print
+          setTimeout(() => {
+              window.print();
+              // Clear print user after print dialog closes (or immediately, browser specific)
+              // Setting to null too fast might clear before print preview renders in some browsers
+              // But we keep it in DOM via CSS media queries, so state clearing isn't strictly destructive if layout component handles it
+          }, 100);
+      }
+  }, [userForPrint, config]);
 
   const handleImportSuccess = () => {
       setIsImportModalOpen(false);
@@ -146,6 +163,10 @@ export const RegistrationsDashboard: React.FC<RegistrationsDashboardProps> = ({ 
   const handleLaunchKiosk = () => {
       // Open kiosk in a new tab/window for dedicated mode
       window.open('/kiosk', '_blank');
+  };
+
+  const handlePrintBadge = (user: RegistrationData) => {
+      setUserForPrint(user);
   };
 
   const handleExportCSV = () => {
@@ -440,6 +461,11 @@ export const RegistrationsDashboard: React.FC<RegistrationsDashboardProps> = ({ 
 
     return (
       <>
+        {/* Hidden Print Layout */}
+        {config && userForPrint && (
+            <BadgePrintLayout user={userForPrint} config={config} />
+        )}
+
         {/* Tabs */}
         <div className="border-b border-gray-200 dark:border-gray-700 mb-4">
             <nav className="-mb-px flex space-x-8">
@@ -541,6 +567,15 @@ export const RegistrationsDashboard: React.FC<RegistrationsDashboardProps> = ({ 
                             </td>
                             <td className="px-6 py-4 whitespace-nowrap text-right text-sm font-medium">
                                 <div className="flex items-center justify-end space-x-3">
+                                    <button 
+                                        onClick={() => handlePrintBadge(reg)} 
+                                        className="text-gray-500 hover:text-gray-700 dark:hover:text-gray-300"
+                                        title="Print Badge"
+                                    >
+                                        <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 17h2a2 2 0 002-2v-4a2 2 0 00-2-2H5a2 2 0 00-2 2v4a2 2 0 002 2h2m2 4h6a2 2 0 002-2v-4a2 2 0 00-2-2H9a2 2 0 00-2 2v4a2 2 0 002 2zm8-12V5a2 2 0 00-2-2H9a2 2 0 00-2 2v4h10z" />
+                                        </svg>
+                                    </button>
                                     {activeTab === 'waitlist' && (
                                         <button onClick={() => handlePromote(reg.id!)} className="text-green-600 hover:underline">Promote</button>
                                     )}

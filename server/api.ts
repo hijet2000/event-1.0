@@ -1,4 +1,6 @@
 
+
+
 import * as db from './db';
 import * as auth from './auth';
 import * as emailService from './email';
@@ -60,6 +62,15 @@ const initializeSocket = () => {
     socket.on('connect', () => {
         console.log('Socket connected:', socket?.id);
         socket?.emit('join', 'main-event');
+        
+        // Register user ID with socket for direct signaling
+        const token = localStorage.getItem('delegateToken') || localStorage.getItem('adminToken');
+        if (token) {
+            const payload = auth.verifyToken(token);
+            if (payload && payload.id) {
+                socket.emit('auth:register', { userId: payload.id });
+            }
+        }
     });
 
     // Bridge Socket Events to Local State
@@ -266,6 +277,22 @@ export const syncConfigFromGitHub = async (token: string) => {
              }
              throw e;
         }
+    }
+};
+
+export const pushConfigToGitHub = async (token: string) => {
+    if (IS_ONLINE) {
+        const res = await fetch('/api/admin/config/push', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` }
+        });
+        if (!res.ok) {
+            const err = await res.json();
+            throw new Error(err.error || "Push failed");
+        }
+        return await res.json();
+    } else {
+        throw new Error("Git Push requires active backend server (Live Mode).");
     }
 };
 
@@ -810,8 +837,33 @@ export const purchaseEventCoins = async (token: string, coins: number, cost: num
     }
 };
 
-export const createPaymentIntent = async (token: string, amt: number) => ({ clientSecret: 'mock_secret' });
-export const createPublicPaymentIntent = async (amt: number) => ({ clientSecret: 'mock_secret' });
+export const createPaymentIntent = async (token: string, amt: number) => {
+    if (IS_ONLINE) {
+        const res = await fetch('/api/payments/create-intent', {
+            method: 'POST',
+            headers: { 
+                'Content-Type': 'application/json', 
+                'Authorization': `Bearer ${token}` 
+            },
+            body: JSON.stringify({ amount: amt })
+        });
+        if (res.ok) return await res.json();
+    }
+    return { clientSecret: `mock_secret_${Date.now()}` };
+};
+
+export const createPublicPaymentIntent = async (amt: number) => {
+    if (IS_ONLINE) {
+        const res = await fetch('/api/public/payments/create-intent', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ amount: amt })
+        });
+        if (res.ok) return await res.json();
+    }
+    return { clientSecret: `mock_secret_${Date.now()}` };
+};
+
 export const getEventCoinStats = async (token: string) => ({ totalCirculation: 1000, totalTransactions: 10, activeWallets: 5, eventCoinName: 'EventCoin' });
 export const getAllTransactions = async (token: string) => db.findAll('transactions');
 export const issueEventCoins = async (token: string, email: string, amt: number, msg: string) => { await db.insert('transactions', {id: `tx_${Date.now()}`, fromId: 'admin', amount: amt, message: msg, timestamp: Date.now()}); };
@@ -1027,6 +1079,7 @@ export const sendMessage = async (token: string, toUserId: string, content: stri
 // --- Video ---
 export const sendSignal = async (token: string, toUserId: string, type: string, data: any) => {
     const payload = requireAuth(token, 'delegate');
+    // Ensure we send the correct senderId (the user's ID) so the backend or peer can verify
     if (socket) {
         socket.emit('signal', { to: toUserId, type, data, senderId: payload.id });
     }

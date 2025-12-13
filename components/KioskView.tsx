@@ -1,8 +1,10 @@
 
 import React, { useRef, useEffect, useState } from 'react';
-import { processCheckIn } from '../server/api';
+import { processCheckIn, getEventConfig } from '../server/api';
 import { Alert } from './Alert';
 import { Spinner } from './Spinner';
+import { BadgePrintLayout } from './BadgePrintLayout';
+import { EventConfig } from '../types';
 
 interface KioskViewProps {
     adminToken: string;
@@ -14,7 +16,24 @@ export const KioskView: React.FC<KioskViewProps> = ({ adminToken, onExit }) => {
     const [status, setStatus] = useState<'scanning' | 'processing' | 'success' | 'error'>('scanning');
     const [scannedUser, setScannedUser] = useState<any>(null);
     const [errorMsg, setErrorMsg] = useState<string | null>(null);
+    const [config, setConfig] = useState<EventConfig | null>(null);
     
+    // Load config for print settings
+    useEffect(() => {
+        getEventConfig().then(setConfig).catch(console.error);
+    }, []);
+
+    // Auto-Print Logic
+    useEffect(() => {
+        if (status === 'success' && scannedUser && config?.printConfig?.autoPrintOnKiosk) {
+            // Wait a moment for state to settle and DOM to render, then print
+            const timer = setTimeout(() => {
+                window.print();
+            }, 500);
+            return () => clearTimeout(timer);
+        }
+    }, [status, scannedUser, config]);
+
     // Scanner Logic
     useEffect(() => {
         let stream: MediaStream | null = null;
@@ -27,7 +46,6 @@ export const KioskView: React.FC<KioskViewProps> = ({ adminToken, onExit }) => {
             if (!('BarcodeDetector' in window)) {
                 setErrorMsg("QR Scanning not supported in this browser. Please use Chrome/Edge on Android, macOS or Windows.");
                 setStatus('error');
-                // Do not auto-reset if API is missing
                 return;
             }
 
@@ -65,7 +83,6 @@ export const KioskView: React.FC<KioskViewProps> = ({ adminToken, onExit }) => {
                 }
                 setErrorMsg(msg);
                 setStatus('error');
-                // Do not auto-reset if camera is broken
             }
         };
 
@@ -90,11 +107,10 @@ export const KioskView: React.FC<KioskViewProps> = ({ adminToken, onExit }) => {
                 setTimeout(() => {
                     setScannedUser(null);
                     setStatus('scanning');
-                }, 4000);
+                }, 5000); // 5s delay to allow printing/viewing
             } else {
                 setErrorMsg(result.message);
                 setStatus('error');
-                // Auto reset after error
                 setTimeout(() => {
                     setErrorMsg(null);
                     setStatus('scanning');
@@ -112,6 +128,11 @@ export const KioskView: React.FC<KioskViewProps> = ({ adminToken, onExit }) => {
 
     return (
         <div className="min-h-screen bg-gray-900 flex flex-col items-center justify-center relative overflow-hidden">
+            {/* Hidden Print Layout */}
+            {config && scannedUser && (
+                <BadgePrintLayout user={scannedUser} config={config} />
+            )}
+
             {/* Header */}
             <div className="absolute top-0 w-full p-6 flex justify-between items-center z-20">
                 <div className="text-white">
@@ -171,7 +192,9 @@ export const KioskView: React.FC<KioskViewProps> = ({ adminToken, onExit }) => {
                         <p className="text-xl opacity-90">{scannedUser.company || scannedUser.role}</p>
                         <div className="mt-8 flex items-center gap-3 bg-green-700/50 px-6 py-3 rounded-full">
                             <div className="animate-bounce">🖨️</div>
-                            <span className="font-mono text-sm uppercase tracking-widest">Printing Badge...</span>
+                            <span className="font-mono text-sm uppercase tracking-widest">
+                                {config?.printConfig?.autoPrintOnKiosk ? "Printing Badge..." : "Check-in Complete"}
+                            </span>
                         </div>
                     </div>
                 )}
@@ -184,7 +207,6 @@ export const KioskView: React.FC<KioskViewProps> = ({ adminToken, onExit }) => {
                         <h2 className="text-3xl font-bold mb-2">Check-in Error</h2>
                         <p className="text-xl opacity-90">{errorMsg || "System Error"}</p>
                         <p className="mt-6 text-sm opacity-75">Please see the registration desk for assistance.</p>
-                        {/* Only show retry if it seems like a temporary error (message is short or network related) */}
                         {errorMsg === "Network error." && (
                              <button onClick={() => setStatus('scanning')} className="mt-4 px-4 py-2 border border-white rounded hover:bg-white/20">Retry</button>
                         )}

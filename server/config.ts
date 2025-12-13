@@ -1,4 +1,7 @@
 
+
+
+
 import { type EventConfig } from '../types';
 
 export const defaultConfig: EventConfig = {
@@ -104,6 +107,13 @@ export const defaultConfig: EventConfig = {
     showCompany: true,
     showRole: true,
   },
+  printConfig: {
+    enabled: true,
+    width: 4,
+    height: 3,
+    orientation: 'landscape',
+    autoPrintOnKiosk: false
+  },
   eventCoin: {
     enabled: true,
     name: "EventCoin",
@@ -114,6 +124,10 @@ export const defaultConfig: EventConfig = {
   githubSync: {
     enabled: false,
     configUrl: '',
+    owner: '',
+    repo: '',
+    path: 'config.json',
+    token: ''
   },
   whatsapp: {
     enabled: false,

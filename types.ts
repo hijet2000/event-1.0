@@ -1,4 +1,5 @@
 
+
 export type Permission = 
   | 'view_dashboard' 
   | 'manage_registrations' 
@@ -81,6 +82,14 @@ export interface AiConciergeConfig {
     persona: string;
 }
 
+export interface PrintConfig {
+    enabled: boolean;
+    width: number;
+    height: number;
+    orientation: 'portrait' | 'landscape';
+    autoPrintOnKiosk: boolean;
+}
+
 export interface EventConfig {
   event: {
     name: string;
@@ -130,6 +139,7 @@ export interface EventConfig {
     showCompany: boolean;
     showRole: boolean;
   };
+  printConfig: PrintConfig;
   eventCoin: {
     enabled: boolean;
     name: string;
@@ -139,7 +149,11 @@ export interface EventConfig {
   };
   githubSync: {
     enabled: boolean;
-    configUrl: string;
+    configUrl: string; // Deprecated in favor of repo details, kept for backward compat
+    owner?: string;
+    repo?: string;
+    path?: string;
+    token?: string;
     lastSyncTimestamp?: number;
     lastSyncStatus?: 'success' | 'failed';
   };
