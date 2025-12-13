@@ -1,6 +1,3 @@
-
-
-
 import express, { Request as ExpressRequest, Response, NextFunction } from 'express';
 import { createServer } from 'http';
 import { Server } from 'socket.io';
@@ -13,7 +10,7 @@ import { Pool } from 'pg';
 import dotenv from 'dotenv';
 import helmet from 'helmet';
 import rateLimit from 'express-rate-limit';
-import { researchEntity } from './geminiService';
+import { researchEntity, generateRegistrationEmails } from './geminiService';
 import { Buffer } from 'buffer';
 import nodemailer from 'nodemailer';
 import bcrypt from 'bcrypt';
@@ -69,15 +66,13 @@ if (!fs.existsSync(UPLOADS_DIR)) {
 }
 
 // Security Middleware
+// Note: We adjust contentSecurityPolicy to allow images from blob: and data: for previews
 app.use(helmet({
-    crossOriginResourcePolicy: { policy: "cross-origin" } // Allow loading images from uploads
+    crossOriginResourcePolicy: { policy: "cross-origin" },
+    contentSecurityPolicy: false, 
 }));
 app.use(cors());
 app.use(bodyParser.json({ limit: '50mb' }));
-
-// Serve Uploads
-app.use('/uploads', express.static(UPLOADS_DIR));
-app.use(express.static(path.join(__dirname, 'public')));
 
 // Rate Limiting
 const apiLimiter = rateLimit({
@@ -120,6 +115,7 @@ class DatabaseService {
                 .then(() => {
                     console.log('🐘 Connected to PostgreSQL');
                     this.usePostgres = true;
+                    this.ensureTables(); // Auto-migrate basic tables
                 })
                 .catch(err => {
                     console.error('⚠️ PostgreSQL connection failed, falling back to file storage.', err.message);
@@ -127,6 +123,19 @@ class DatabaseService {
                 });
         } else {
             console.log('📂 No DATABASE_URL found, using file storage.');
+        }
+    }
+
+    private async ensureTables() {
+        if (!this.pool) return;
+        // Basic JSONB storage strategy for flexibility
+        for (const table of ALLOWED_TABLES) {
+            await this.pool.query(`
+                CREATE TABLE IF NOT EXISTS ${table} (
+                    id TEXT PRIMARY KEY,
+                    data JSONB
+                );
+            `);
         }
     }
 
@@ -155,13 +164,8 @@ class DatabaseService {
         if (this.usePostgres && this.pool) {
             try {
                 if (!ALLOWED_TABLES.includes(table)) throw new Error("Invalid table");
-                const res = await this.pool.query(`SELECT * FROM ${table}`);
-                const items = res.rows.map(row => {
-                    if (row.data && typeof row.data === 'object') {
-                        return { ...row.data, ...row, data: undefined }; 
-                    }
-                    return row;
-                });
+                const res = await this.pool.query(`SELECT data FROM ${table}`);
+                const items = res.rows.map(row => row.data);
                 if (predicate) return items.filter(predicate);
                 return items;
             } catch (e) {
@@ -184,15 +188,7 @@ class DatabaseService {
 
         if (this.usePostgres && this.pool) {
             try {
-                const keys = Object.keys(item);
-                const cols = keys.join(', ');
-                const vals = keys.map((_, i) => `$${i + 1}`).join(', ');
-                const values = keys.map(k => {
-                    const val = item[k];
-                    return (typeof val === 'object') ? JSON.stringify(val) : val;
-                });
-
-                await this.pool.query(`INSERT INTO ${table} (${cols}) VALUES (${vals})`, values);
+                await this.pool.query(`INSERT INTO ${table} (id, data) VALUES ($1, $2)`, [item.id, item]);
                 return item;
             } catch (e) {
                 console.warn(`[PG] Insert failed for ${table}, using memory.`, (e as Error).message);
@@ -210,18 +206,15 @@ class DatabaseService {
 
         if (this.usePostgres && this.pool) {
             try {
-                const keys = Object.keys(updates).filter(k => k !== 'id');
-                if (keys.length === 0) return null;
-
-                const setClause = keys.map((k, i) => `${k} = $${i + 2}`).join(', ');
-                const values = keys.map(k => {
-                     const val = updates[k];
-                     return (typeof val === 'object') ? JSON.stringify(val) : val;
-                });
+                // Fetch existing to merge
+                const existingRes = await this.pool.query(`SELECT data FROM ${table} WHERE id = $1`, [id]);
+                if (existingRes.rows.length === 0) return null;
                 
-                await this.pool.query(`UPDATE ${table} SET ${setClause} WHERE id = $1`, [id, ...values]);
-                const res = await this.pool.query(`SELECT * FROM ${table} WHERE id = $1`, [id]);
-                return res.rows[0];
+                const current = existingRes.rows[0].data;
+                const newItem = { ...current, ...updates };
+                
+                await this.pool.query(`UPDATE ${table} SET data = $1 WHERE id = $2`, [newItem, id]);
+                return newItem;
             } catch (e) {
                 console.warn(`[PG] Update failed for ${table}, using memory.`, (e as Error).message);
             }
@@ -320,6 +313,92 @@ const calculateBalance = async (userId: string) => {
     return balance;
 };
 
+// --- Email Sending Logic ---
+
+const createTransporter = (config: any) => {
+    if (config.emailProvider === 'google') {
+        if (!config.googleConfig?.serviceAccountKeyJson) {
+            throw new Error("Google Service Account Key not configured.");
+        }
+        
+        let serviceAccount;
+        try {
+            serviceAccount = JSON.parse(config.googleConfig.serviceAccountKeyJson);
+        } catch (e) {
+            throw new Error("Invalid Google Service Account JSON.");
+        }
+
+        if (!serviceAccount.project_id || !serviceAccount.private_key || !serviceAccount.client_email) {
+             throw new Error("Google Service Account JSON missing required fields.");
+        }
+
+        // Use standard nodemailer transport with service account credentials
+        return nodemailer.createTransport({
+            service: 'gmail',
+            auth: {
+                type: 'OAuth2',
+                user: serviceAccount.client_email, 
+                serviceClient: serviceAccount.client_id,
+                privateKey: serviceAccount.private_key,
+            }
+        });
+    } else {
+        // SMTP
+        return nodemailer.createTransport({
+            host: config.smtp.host,
+            port: config.smtp.port,
+            secure: config.smtp.port === 465, // true for 465, false for other ports
+            auth: {
+                user: config.smtp.username,
+                pass: config.smtp.password
+            },
+            tls: {
+                rejectUnauthorized: false // Often needed for shared hosting / self-signed
+            }
+        });
+    }
+};
+
+const sendEmail = async (config: any, to: string, subject: string, html: string) => {
+    try {
+        const transporter = createTransporter(config);
+        console.log(`[Email] Sending to ${to} via ${config.emailProvider}`);
+
+        await transporter.sendMail({
+            from: `"${config.event.name}" <${config.host.email}>`,
+            to,
+            subject,
+            html,
+            text: html.replace(/<[^>]*>?/gm, '') // Simple fallback
+        });
+        
+        // Log success
+        await db.insert('email_logs', {
+            id: `log_${Date.now()}`,
+            to,
+            subject,
+            body: html,
+            status: 'sent',
+            timestamp: Date.now()
+        });
+        
+        return true;
+    } catch (e) {
+        console.error("Email Sending Error:", e);
+        // Log failure
+        await db.insert('email_logs', {
+            id: `log_${Date.now()}`,
+            to,
+            subject,
+            body: html,
+            status: 'failed',
+            error: (e as Error).message,
+            timestamp: Date.now()
+        });
+        throw e;
+    }
+};
+
 // --- Auth Middleware ---
 
 const authenticateToken = (req: AuthRequest, res: Response, next: NextFunction) => {
@@ -362,7 +441,6 @@ io.on('connection', (socket) => {
       const { userId } = data;
       if (userId) {
           connectedUsers.set(userId, socket.id);
-          console.log(`🔌 Socket mapped: User ${userId} -> Socket ${socket.id}`);
       }
   });
 
@@ -416,7 +494,6 @@ io.on('connection', (socket) => {
 
 // --- API Routes ---
 
-// Health Check
 app.get('/api/health', (req, res) => {
     res.json({ status: 'ok', timestamp: Date.now() });
 });
@@ -489,9 +566,48 @@ app.post('/api/events/:eventId/register', async (req, res) => {
         };
         
         await db.insert('registrations', newUser);
+
+        const events = await db.findAll('events');
+        const event = events.find(e => e.id === eventId) || events[0];
+        const config = getSafeConfig(event?.config);
+        
+        const qrCodeUrl = `https://api.qrserver.com/v1/create-qr-code/?size=250x250&data=${encodeURIComponent(newUser.id)}`;
+        const verificationLink = `${req.protocol}://${req.get('host')}/verify/${newUser.id}`;
+
+        try {
+            const emails = await generateRegistrationEmails(newUser, config, verificationLink, qrCodeUrl);
+            if (emails.userEmail) {
+                await sendEmail(config, newUser.email, emails.userEmail.subject, emails.userEmail.body);
+            }
+            if (emails.hostEmail) {
+                await sendEmail(config, config.host.email, emails.hostEmail.subject, emails.hostEmail.body);
+            }
+        } catch (emailErr) {
+            console.error("Failed to generate/send email:", emailErr);
+        }
+
         res.json({ success: true, user: newUser });
     } catch (e) {
         res.status(500).json({ success: false, message: (e as Error).message });
+    }
+});
+
+// Send Test Email
+app.post('/api/admin/communications/send', authenticateToken, async (req: AuthRequest, res) => {
+    const { to, config } = req.body;
+    if (!to || !config) return res.status(400).json({ error: "Missing 'to' or 'config'." });
+
+    try {
+        await sendEmail(config, to, "Test Email from Event Platform", `
+            <h1>Test Email</h1>
+            <p>This is a test email sent from the Event Platform settings page.</p>
+            <p>If you are reading this, your email configuration is working correctly!</p>
+            <hr>
+            <p><small>Sent via ${config.emailProvider}</small></p>
+        `);
+        res.json({ success: true });
+    } catch (e) {
+        res.status(500).json({ error: (e as Error).message });
     }
 });
 
@@ -501,7 +617,7 @@ app.post('/api/admin/config/sync', authenticateToken, async (req: AuthRequest, r
     
     try {
         const events = await db.findAll('events');
-        const event = events[0]; // Assuming single event for now
+        const event = events[0];
         const ghConfig = event?.config?.githubSync;
 
         if (!ghConfig || (!ghConfig.configUrl && (!ghConfig.owner || !ghConfig.repo))) {
@@ -510,11 +626,9 @@ app.post('/api/admin/config/sync', authenticateToken, async (req: AuthRequest, r
 
         let newConfig;
 
-        // Strategy 1: GitHub API (Preferred if token exists)
         if (ghConfig.token && ghConfig.owner && ghConfig.repo) {
             const path = ghConfig.path || 'config.json';
             const url = `https://api.github.com/repos/${ghConfig.owner}/${ghConfig.repo}/contents/${path}`;
-            
             const ghRes = await fetch(url, {
                 headers: {
                     'Authorization': `Bearer ${ghConfig.token}`,
@@ -522,15 +636,12 @@ app.post('/api/admin/config/sync', authenticateToken, async (req: AuthRequest, r
                     'User-Agent': 'EventPlatform-Backend'
                 }
             });
-
             if (!ghRes.ok) {
                 const errText = await ghRes.text();
                 throw new Error(`GitHub API Error: ${ghRes.status} ${errText}`);
             }
             newConfig = await ghRes.json();
-        } 
-        // Strategy 2: Raw URL (Public repos)
-        else if (ghConfig.configUrl) {
+        } else if (ghConfig.configUrl) {
             const rawRes = await fetch(ghConfig.configUrl);
             if (!rawRes.ok) throw new Error("Failed to fetch from Raw URL");
             newConfig = await rawRes.json();
@@ -538,19 +649,10 @@ app.post('/api/admin/config/sync', authenticateToken, async (req: AuthRequest, r
             throw new Error("Invalid GitHub configuration.");
         }
 
-        // Validate structure minimally
-        if (!newConfig.event || !newConfig.theme) {
-            throw new Error("Invalid config format received from GitHub.");
-        }
-
-        // Preserve local secrets if they are missing in remote (optional safety)
-        // For now, we overwrite, assuming secrets are managed via env or separate injection if needed.
-        // However, we must ensure we don't wipe the githubSync config itself if the remote file lacks it!
-        
         const mergedConfig = {
             ...newConfig,
             githubSync: {
-                ...ghConfig, // Keep local credentials
+                ...ghConfig, 
                 lastSyncTimestamp: Date.now(),
                 lastSyncStatus: 'success'
             }
@@ -561,7 +663,6 @@ app.post('/api/admin/config/sync', authenticateToken, async (req: AuthRequest, r
 
     } catch (e) {
         console.error("Sync Error:", e);
-        // Update status to failed in DB?
         res.status(500).json({ error: (e as Error).message });
     }
 });
@@ -583,7 +684,6 @@ app.post('/api/admin/config/push', authenticateToken, async (req: AuthRequest, r
         const filePath = ghConfig.path || 'config.json';
         const apiUrl = `https://api.github.com/repos/${ghConfig.owner}/${ghConfig.repo}/contents/${filePath}`;
         
-        // 1. Get current file SHA (required for update)
         let sha: string | undefined;
         try {
             const getRes = await fetch(apiUrl, {
@@ -596,17 +696,12 @@ app.post('/api/admin/config/push', authenticateToken, async (req: AuthRequest, r
             if (getRes.ok) {
                 const data = await getRes.json();
                 sha = data.sha;
-            } else if (getRes.status !== 404) {
-                throw new Error(`Failed to check existing file: ${getRes.status}`);
             }
-        } catch (e) {
-            // ignore 404 (file doesn't exist yet)
-        }
+        } catch (e) {}
 
-        // 2. Prepare content - STRIP SECRETS
         const configToPush = JSON.parse(JSON.stringify(config));
         
-        // Sanitize
+        // Sanitize secrets
         if (configToPush.githubSync) configToPush.githubSync.token = ""; 
         if (configToPush.smtp) configToPush.smtp.password = "";
         if (configToPush.telegram) configToPush.telegram.botToken = "";
@@ -616,7 +711,6 @@ app.post('/api/admin/config/push', authenticateToken, async (req: AuthRequest, r
 
         const content = Buffer.from(JSON.stringify(configToPush, null, 2)).toString('base64');
 
-        // 3. Push (PUT)
         const putRes = await fetch(apiUrl, {
             method: 'PUT',
             headers: {
@@ -743,7 +837,7 @@ app.post('/api/delegate/wallet/transfer', authenticateToken, async (req: AuthReq
             id: `tx_${Date.now()}`,
             fromId: req.user.id,
             toId: recipient.id,
-            fromName: req.user.email, // simplified
+            fromName: req.user.email,
             toName: recipient.name,
             fromEmail: req.user.email,
             toEmail: recipient.email,
@@ -764,8 +858,34 @@ app.post('/api/delegate/wallet/transfer', authenticateToken, async (req: AuthReq
 app.post('/api/payments/create-intent', authenticateToken, async (req, res) => {
     try {
         const { amount } = req.body;
-        // Mock Stripe for now
-        res.json({ clientSecret: `mock_secret_${Date.now()}` });
+        
+        if (process.env.STRIPE_SECRET_KEY) {
+            const paymentIntent = await stripe.paymentIntents.create({
+                amount: Math.round(amount * 100), // cents
+                currency: 'usd',
+            });
+            res.json({ clientSecret: paymentIntent.client_secret });
+        } else {
+            res.json({ clientSecret: `mock_secret_${Date.now()}` });
+        }
+    } catch (e) {
+        res.status(500).json({ error: (e as Error).message });
+    }
+});
+
+// Public Payment Intent
+app.post('/api/public/payments/create-intent', async (req, res) => {
+    try {
+        const { amount } = req.body;
+        if (process.env.STRIPE_SECRET_KEY) {
+            const paymentIntent = await stripe.paymentIntents.create({
+                amount: Math.round(amount * 100), // cents
+                currency: 'usd',
+            });
+            res.json({ clientSecret: paymentIntent.client_secret });
+        } else {
+            res.json({ clientSecret: `mock_secret_${Date.now()}` });
+        }
     } catch (e) {
         res.status(500).json({ error: (e as Error).message });
     }
@@ -784,7 +904,7 @@ app.get('/api/admin/dashboard', authenticateToken, async (req, res) => {
             totalRegistrations: registrations.length,
             maxAttendees: config.event.maxAttendees || 500,
             eventDate: config.event.date,
-            registrationTrend: [], // Calculate if needed
+            registrationTrend: [], 
             taskStats: {
                 total: tasks.length,
                 completed: tasks.filter((t: any) => t.status === 'completed').length,
@@ -805,9 +925,8 @@ app.get('/api/admin/dashboard', authenticateToken, async (req, res) => {
 // Broadcast
 app.post('/api/admin/communications/broadcast', authenticateToken, async (req, res) => {
     const { subject, body, target, channel } = req.body;
-    
-    // Simulate sending
     console.log(`[Broadcast] Sending to ${target} via ${channel}: ${subject}`);
+    
     await db.insert('email_logs', {
         id: `log_${Date.now()}`,
         to: target,
@@ -818,6 +937,22 @@ app.post('/api/admin/communications/broadcast', authenticateToken, async (req, r
     });
     
     res.json({ success: true, message: `Broadcast queued for ${target} recipients.` });
+});
+
+// --- SPA Serving (Critical for Production) ---
+// Serve static files from the React frontend build
+app.use(express.static(path.join(__dirname, '../dist')));
+
+// Serve uploads
+app.use('/uploads', express.static(UPLOADS_DIR));
+
+// Handle React Routing, return all requests to React app
+app.get('*', (req, res) => {
+    // Avoid redirecting API calls
+    if (req.path.startsWith('/api')) {
+        return res.status(404).json({ error: 'API endpoint not found' });
+    }
+    res.sendFile(path.join(__dirname, '../dist', 'index.html'));
 });
 
 // Server Start

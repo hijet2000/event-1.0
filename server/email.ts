@@ -1,4 +1,3 @@
-
 import { type EmailPayload, type EventConfig } from '../types';
 
 /**
