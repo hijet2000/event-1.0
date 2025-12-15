@@ -1,6 +1,4 @@
 
-
-
 import * as db from './db';
 import * as auth from './auth';
 import * as emailService from './email';
@@ -411,12 +409,20 @@ export const triggerRegistrationEmails = async (eventId: string, user: Registrat
         // Ensure user.id is available, fallback to a unique string if missing (should not happen if flow is correct)
         const uniqueId = user.id || `ticket_${Date.now()}_${Math.random().toString(36).substr(2, 5)}`;
         
-        // Generate QR URL - in a real scenario this might point to a validation endpoint
-        const qrCodeUrl = `https://api.qrserver.com/v1/create-qr-code/?size=250x250&data=${encodeURIComponent(uniqueId)}`;
-        const verificationLink = `${window.location.origin}/verify/${uniqueId}`; // Mock verification link
+        // Create Enhanced QR Data Payload for Offline Simulation
+        // This matches the format expected by the Kiosk scanner and App success view
+        const verificationLink = `${window.location.origin}/verify/${uniqueId}`; 
+        const qrPayload = JSON.stringify({
+            id: uniqueId,
+            event: config.event.name,
+            url: verificationLink,
+            token: `secure_${uniqueId.slice(-6)}_${Date.now()}`, // Mock security token
+            ver: '1.0'
+        });
+        const qrCodeUrl = `https://api.qrserver.com/v1/create-qr-code/?size=250x250&data=${encodeURIComponent(qrPayload)}`;
 
         // Generate email content using Gemini
-        console.log(`Generating registration emails with AI for ${user.email}. QR Data: ${uniqueId}`);
+        console.log(`Generating registration emails with AI for ${user.email}. QR Data: ${qrPayload}`);
         const emails = await geminiService.generateRegistrationEmails(user, config, verificationLink, qrCodeUrl);
         
         // Send User Email
@@ -447,12 +453,38 @@ export const updateRegistrationStatus = async (token: string, id: string, status
 export const deleteAdminRegistration = async (token: string, id: string) => { await db.remove('registrations', id); };
 export const promoteToConfirmed = async (token: string, id: string) => { await db.update('registrations', id, { status: 'confirmed' }); };
 export const verifyTicketToken = async (token: string, ticketToken: string) => {
-    const reg = await db.find('registrations', r => ticketToken.includes(r.id) || r.id === ticketToken);
+    // Handle both raw ID/Email and new JSON payload format
+    let lookupValue = ticketToken;
+    let eventContext = '';
+
+    try {
+        // Try parsing as JSON first
+        const payload = JSON.parse(ticketToken);
+        if (payload.id) {
+            lookupValue = payload.id;
+            if (payload.event) eventContext = payload.event;
+        }
+    } catch (e) {
+        // assume raw ID or Email if JSON parse fails
+        lookupValue = ticketToken;
+    }
+
+    // Sanitize
+    lookupValue = lookupValue.trim();
+
+    // Try finding by ID first
+    let reg = await db.find('registrations', r => r.id === lookupValue);
+    
+    // If not found, try by Email
+    if (!reg) {
+        reg = await db.find('registrations', r => r.email.toLowerCase() === lookupValue.toLowerCase());
+    }
+
     if (reg) {
         await db.update('registrations', reg.id, { checkedIn: true });
         return { success: true, message: `Checked in ${reg.name}`, user: reg };
     }
-    return { success: false, message: "Invalid ticket" };
+    return { success: false, message: "Invalid ticket or email not found." };
 };
 export const processCheckIn = async (token: string, qrData: string) => {
     if (IS_ONLINE) {
@@ -467,7 +499,15 @@ export const processCheckIn = async (token: string, qrData: string) => {
 };
 export const getSignedTicketToken = async (token: string) => {
     const payload = requireAuth(token, 'delegate');
-    return `SIGNED_TICKET_${payload.id}`;
+    // Return the JSON payload matching the backend format
+    return JSON.stringify({
+        id: payload.id,
+        // Mock event data for client simulation
+        event: 'Event', 
+        url: `${window.location.origin}/verify/${payload.id}`,
+        token: `secure_${payload.id.slice(-6)}_${Date.now()}`,
+        ver: '1.0'
+    });
 };
 
 export const bulkImportRegistrations = async (token: string, csvData: string) => {

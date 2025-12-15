@@ -66,7 +66,6 @@ if (!fs.existsSync(UPLOADS_DIR)) {
 }
 
 // Security Middleware
-// Note: We adjust contentSecurityPolicy to allow images from blob: and data: for previews
 app.use(helmet({
     crossOriginResourcePolicy: { policy: "cross-origin" },
     contentSecurityPolicy: false, 
@@ -571,8 +570,19 @@ app.post('/api/events/:eventId/register', async (req, res) => {
         const event = events.find(e => e.id === eventId) || events[0];
         const config = getSafeConfig(event?.config);
         
-        const qrCodeUrl = `https://api.qrserver.com/v1/create-qr-code/?size=250x250&data=${encodeURIComponent(newUser.id)}`;
-        const verificationLink = `${req.protocol}://${req.get('host')}/verify/${newUser.id}`;
+        // Generate Secure Verification Link
+        const protocol = req.headers['x-forwarded-proto'] || req.protocol;
+        const host = req.get('host');
+        const verificationLink = `${protocol}://${host}/verify/${newUser.id}`;
+        
+        // Create Enhanced QR Data Payload
+        const qrPayload = JSON.stringify({
+            id: newUser.id,
+            event: event.name,
+            url: verificationLink,
+            ver: '1.0'
+        });
+        const qrCodeUrl = `https://api.qrserver.com/v1/create-qr-code/?size=250x250&data=${encodeURIComponent(qrPayload)}`;
 
         try {
             const emails = await generateRegistrationEmails(newUser, config, verificationLink, qrCodeUrl);
@@ -939,9 +949,13 @@ app.post('/api/admin/communications/broadcast', authenticateToken, async (req, r
     res.json({ success: true, message: `Broadcast queued for ${target} recipients.` });
 });
 
-// --- SPA Serving (Critical for Production) ---
+// --- SPA Serving (Production) ---
 // Serve static files from the React frontend build
-app.use(express.static(path.join(__dirname, '../dist')));
+// In production Docker, /app/dist contains frontend, /app/server contains backend.
+// __dirname will be /app/server/dist (if compiled) or /app/server (if ts-node/raw)
+// We rely on relative paths from the SERVER root.
+const staticPath = path.join(__dirname, process.env.NODE_ENV === 'production' ? '../../dist' : '../dist');
+app.use(express.static(staticPath));
 
 // Serve uploads
 app.use('/uploads', express.static(UPLOADS_DIR));
@@ -952,10 +966,16 @@ app.get('*', (req, res) => {
     if (req.path.startsWith('/api')) {
         return res.status(404).json({ error: 'API endpoint not found' });
     }
-    res.sendFile(path.join(__dirname, '../dist', 'index.html'));
+    const indexHtml = path.join(staticPath, 'index.html');
+    if (fs.existsSync(indexHtml)) {
+        res.sendFile(indexHtml);
+    } else {
+        res.status(404).send('Frontend not built or not found. Run `npm run build` in root.');
+    }
 });
 
 // Server Start
 httpServer.listen(PORT, () => {
     console.log(`🚀 Server running on port ${PORT}`);
+    console.log(`📂 Serving frontend from: ${staticPath}`);
 });

@@ -117,6 +117,7 @@ const EventPageContent: React.FC<EventPageContentProps> = ({ onAdminLogin, event
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [resetToken, setResetToken] = useState<string | null>(null);
   const [inviteToken, setInviteToken] = useState<string | null>(null);
+  const [successUser, setSuccessUser] = useState<RegistrationData | null>(null);
 
   const [isAdminModalOpen, setAdminModalOpen] = useState(false);
   const [isDelegateModalOpen, setDelegateModalOpen] = useState(false);
@@ -207,6 +208,7 @@ const EventPageContent: React.FC<EventPageContentProps> = ({ onAdminLogin, event
 
   const handleReset = () => {
     setFormData(initialFormData);
+    setSuccessUser(null);
     setError('');
   };
 
@@ -214,10 +216,9 @@ const EventPageContent: React.FC<EventPageContentProps> = ({ onAdminLogin, event
       try {
           const result = await registerUser(eventId, submissionData, inviteToken || undefined);
           if (result.success) {
-              // Trigger email confirmation.
-              // Crucial: Use result.user if available as it contains the unique ID required for the QR Code.
-              // If we use submissionData, we miss the generated ID.
               const userForEmail = result.user || { ...submissionData, id: 'temp-id' };
+              setSuccessUser(userForEmail);
+              // Send emails
               await triggerRegistrationEmails(eventId, userForEmail);
               setView('success');
           } else {
@@ -483,26 +484,44 @@ const EventPageContent: React.FC<EventPageContentProps> = ({ onAdminLogin, event
                             <div className="mt-8">
                             {error && <div className="mb-6"><Alert type="error" message={error} /></div>}
 
-                            {view === 'success' ? (
-                                <div className="text-center py-10 animate-fade-in-up">
-                                <div className="mx-auto flex items-center justify-center h-24 w-24 rounded-full bg-green-100 dark:bg-green-900/50 mb-8 animate-bounce">
-                                    <svg className="h-12 w-12 text-green-600 dark:text-green-300 transform transition-transform duration-500 scale-110" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={3} d="M5 13l4 4L19 7" />
-                                    </svg>
-                                </div>
-                                <h3 className="text-3xl font-bold text-gray-900 dark:text-white mb-3">You're All Set!</h3>
-                                <p className="text-lg text-gray-600 dark:text-gray-300 mb-10 max-w-md mx-auto">
-                                    Registration confirmed. Check your email for your ticket and unique QR code.
-                                </p>
-                                <button
-                                    onClick={() => {
-                                    setView('registration');
-                                    handleReset();
-                                    }}
-                                    className="inline-flex justify-center items-center py-3.5 px-8 border border-transparent rounded-xl shadow-lg text-lg font-bold text-white bg-primary hover:bg-primary/90 transform transition hover:-translate-y-1 hover:shadow-xl"
-                                >
-                                    Register Another Person
-                                </button>
+                            {view === 'success' && successUser ? (
+                                <div className="text-center py-10 animate-fade-in-up flex flex-col items-center">
+                                    <div className="mx-auto flex items-center justify-center h-24 w-24 rounded-full bg-green-100 dark:bg-green-900/50 mb-8 animate-bounce">
+                                        <svg className="h-12 w-12 text-green-600 dark:text-green-300 transform transition-transform duration-500 scale-110" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={3} d="M5 13l4 4L19 7" />
+                                        </svg>
+                                    </div>
+                                    <h3 className="text-3xl font-bold text-gray-900 dark:text-white mb-3">You're All Set!</h3>
+                                    <p className="text-lg text-gray-600 dark:text-gray-300 mb-8 max-w-md mx-auto">
+                                        Registration confirmed. A copy has been sent to <strong>{successUser.email}</strong>.
+                                    </p>
+                                    
+                                    {/* Generated QR Code Display */}
+                                    <div className="bg-gray-50 dark:bg-gray-700/50 p-6 rounded-xl border border-dashed border-gray-300 dark:border-gray-600 mb-10">
+                                        <p className="text-sm font-bold text-gray-500 uppercase tracking-widest mb-4">Your Event Pass</p>
+                                        <img 
+                                            src={`https://api.qrserver.com/v1/create-qr-code/?size=250x250&data=${encodeURIComponent(JSON.stringify({
+                                                id: successUser.id,
+                                                event: config.event.name,
+                                                url: `${window.location.origin}/verify/${successUser.id}`,
+                                                token: `secure_${successUser.id?.slice(-6)}_${Date.now()}`,
+                                                ver: '1.0'
+                                            }))}`} 
+                                            alt="Your Ticket QR" 
+                                            className="w-48 h-48 mx-auto rounded-lg shadow-sm bg-white p-2"
+                                        />
+                                        <p className="text-xs text-gray-400 mt-4">ID: {successUser.id}</p>
+                                    </div>
+
+                                    <button
+                                        onClick={() => {
+                                        setView('registration');
+                                        handleReset();
+                                        }}
+                                        className="inline-flex justify-center items-center py-3.5 px-8 border border-transparent rounded-xl shadow-lg text-lg font-bold text-white bg-primary hover:bg-primary/90 transform transition hover:-translate-y-1 hover:shadow-xl"
+                                    >
+                                        Register Another Person
+                                    </button>
                                 </div>
                             ) : isSoldOut ? (
                                 <div className="text-center p-12 bg-yellow-50 dark:bg-yellow-900/20 rounded-2xl border border-yellow-200 dark:border-yellow-800">

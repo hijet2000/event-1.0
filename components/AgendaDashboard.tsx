@@ -1,7 +1,7 @@
 
 import React, { useState, useEffect, useMemo } from 'react';
 import { type Session, type Speaker } from '../types';
-import { getSessions, saveSession, deleteSession, getSpeakers, getSessionFeedbackStats, analyzeFeedback } from '../server/api';
+import { getSessions, saveSession, deleteSession, getSpeakers, getSessionFeedbackStats, analyzeFeedback, generateAiContent } from '../server/api';
 import { ContentLoader } from './ContentLoader';
 import { Alert } from './Alert';
 import { SessionEditorModal } from './SessionEditorModal';
@@ -103,6 +103,10 @@ export const AgendaDashboard: React.FC<AgendaDashboardProps> = ({ adminToken }) 
     const [editingSession, setEditingSession] = useState<Session | null>(null);
     const [isModalOpen, setIsModalOpen] = useState(false);
     
+    // Batch AI State
+    const [isBatchGenerating, setIsBatchGenerating] = useState(false);
+    const [batchProgress, setBatchProgress] = useState('');
+    
     // Filters
     const [searchQuery, setSearchQuery] = useState('');
     const [filterTrack, setFilterTrack] = useState('');
@@ -137,6 +141,43 @@ export const AgendaDashboard: React.FC<AgendaDashboardProps> = ({ adminToken }) 
         if (window.confirm('Are you sure you want to delete this session?')) {
             await deleteSession(adminToken, id);
             await fetchData();
+        }
+    };
+
+    const handleAutoFillDescriptions = async () => {
+        if (!window.confirm("Auto-fill missing session descriptions using AI? This may take a moment.")) return;
+        
+        setIsBatchGenerating(true);
+        let updatedCount = 0;
+        const missing = sessions.filter(s => !s.description || s.description.length < 20);
+
+        try {
+            for (let i = 0; i < missing.length; i++) {
+                const s = missing[i];
+                setBatchProgress(`Generating description for "${s.title}" (${i + 1}/${missing.length})...`);
+                
+                try {
+                    const speakerNames = s.speakerIds.map(id => speakers.find(sp => sp.id === id)?.name).filter(Boolean).join(', ');
+                    const description = await generateAiContent('session', { 
+                        title: s.title, 
+                        speakers: speakerNames || 'industry experts' 
+                    });
+                    
+                    if (description) {
+                        await saveSession(adminToken, { ...s, description });
+                        updatedCount++;
+                    }
+                } catch (e) {
+                    console.error(`Failed to generate for ${s.title}`, e);
+                }
+            }
+            await fetchData();
+            setBatchProgress(`Completed! Updated ${updatedCount} sessions.`);
+            setTimeout(() => setBatchProgress(''), 3000);
+        } catch (e) {
+            setError("Batch generation failed.");
+        } finally {
+            setIsBatchGenerating(false);
         }
     };
     
@@ -201,6 +242,16 @@ export const AgendaDashboard: React.FC<AgendaDashboardProps> = ({ adminToken }) 
                         <option value="">All Tracks</option>
                         {uniqueTracks.map(track => <option key={track} value={track}>{track}</option>)}
                     </select>
+                    
+                    <button
+                        onClick={handleAutoFillDescriptions}
+                        disabled={isBatchGenerating}
+                        className="px-4 py-2 text-sm font-bold text-white bg-gradient-to-r from-purple-600 to-indigo-600 rounded-md shadow-sm hover:from-purple-700 hover:to-indigo-700 disabled:opacity-70 flex items-center gap-2 whitespace-nowrap"
+                        title="Auto-generate missing descriptions"
+                    >
+                        {isBatchGenerating ? <Spinner /> : <span>✨ Auto-fill Info</span>}
+                    </button>
+
                     <button
                         onClick={() => { setEditingSession(null); setIsModalOpen(true); }}
                         className="py-2 px-4 text-sm font-medium text-white bg-primary rounded-md shadow-sm hover:bg-primary/90 whitespace-nowrap"
@@ -209,6 +260,12 @@ export const AgendaDashboard: React.FC<AgendaDashboardProps> = ({ adminToken }) 
                     </button>
                 </div>
             </div>
+            
+            {batchProgress && (
+                <div className="mb-4 bg-purple-50 dark:bg-purple-900/30 text-purple-800 dark:text-purple-200 px-4 py-2 rounded-md text-sm font-medium animate-pulse">
+                    {batchProgress}
+                </div>
+            )}
             
             <div className="space-y-8">
                 {Object.keys(sessionsByDay).map(day => {

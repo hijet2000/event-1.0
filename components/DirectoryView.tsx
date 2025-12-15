@@ -13,12 +13,12 @@ const SpeakerCard: React.FC<{ speaker: Speaker }> = ({ speaker }) => {
     return (
         <div 
             onClick={() => setIsExpanded(!isExpanded)}
-            className={`bg-gray-50 dark:bg-gray-700/50 rounded-lg p-6 text-center cursor-pointer transition-all duration-300 hover:shadow-lg border border-transparent hover:border-gray-200 dark:hover:border-gray-600 ${isExpanded ? 'ring-2 ring-primary/50' : ''}`}
+            className={`bg-white dark:bg-gray-800 rounded-xl p-6 text-center cursor-pointer transition-all duration-300 hover:shadow-lg border border-gray-100 dark:border-gray-700 shadow-sm ${isExpanded ? 'ring-2 ring-primary/50' : ''}`}
         >
             <div className="relative inline-block">
-                <img src={speaker.photoUrl} alt={speaker.name} className="w-28 h-28 rounded-full mx-auto object-cover border-4 border-white dark:border-gray-600 shadow-md" />
+                <img src={speaker.photoUrl} alt={speaker.name} className="w-28 h-28 rounded-full mx-auto object-cover border-4 border-gray-50 dark:border-gray-700 shadow-md" />
                 {isExpanded && (
-                    <div className="absolute inset-0 rounded-full bg-black/10"></div>
+                    <div className="absolute inset-0 rounded-full bg-black/5 dark:bg-white/5"></div>
                 )}
             </div>
             
@@ -26,12 +26,12 @@ const SpeakerCard: React.FC<{ speaker: Speaker }> = ({ speaker }) => {
             <p className="text-sm font-medium text-primary">{speaker.title}</p>
             <p className="text-sm text-gray-500 dark:text-gray-300 mb-3">{speaker.company}</p>
             
-            <div className={`text-sm text-gray-600 dark:text-gray-400 text-left bg-white dark:bg-gray-800 p-3 rounded-lg shadow-inner transition-all duration-500 ease-in-out ${isExpanded ? '' : 'line-clamp-3'}`}>
-                {speaker.bio}
+            <div className={`text-sm text-gray-600 dark:text-gray-400 text-left bg-gray-50 dark:bg-gray-900/50 p-3 rounded-lg border border-gray-100 dark:border-gray-700 transition-all duration-500 ease-in-out ${isExpanded ? '' : 'line-clamp-3'}`}>
+                {speaker.bio || "No biography available."}
             </div>
             
             {isExpanded ? (
-                <div className="mt-4 pt-4 border-t border-gray-200 dark:border-gray-600 animate-fade-in">
+                <div className="mt-4 pt-4 border-t border-gray-200 dark:border-gray-700 animate-fade-in">
                     <div className="flex justify-center space-x-4">
                         {speaker.linkedinUrl && (
                             <a href={speaker.linkedinUrl} target="_blank" rel="noopener noreferrer" className="text-blue-600 hover:text-blue-800 transition-colors p-2 hover:bg-blue-50 dark:hover:bg-blue-900/30 rounded-full" onClick={e => e.stopPropagation()}>
@@ -62,23 +62,43 @@ const SponsorCard: React.FC<{ sponsor: Sponsor }> = ({ sponsor }) => (
         href={sponsor.websiteUrl} 
         target="_blank" 
         rel="noopener noreferrer" 
-        className="group flex flex-col bg-white dark:bg-gray-800 rounded-xl overflow-hidden shadow-sm hover:shadow-lg transition-all duration-300 border border-gray-100 dark:border-gray-700 h-full"
+        className="group bg-white dark:bg-gray-800 rounded-xl overflow-hidden shadow-sm hover:shadow-lg transition-all duration-300 border border-gray-100 dark:border-gray-700 h-full flex flex-col"
     >
-        <div className="h-40 p-6 flex items-center justify-center bg-gray-50 dark:bg-gray-900/50 group-hover:bg-white dark:group-hover:bg-gray-800 transition-colors relative">
-            <img 
-                src={sponsor.logoUrl} 
-                alt={sponsor.name} 
-                className="max-h-full max-w-full object-contain filter grayscale group-hover:grayscale-0 transition-all duration-500 transform group-hover:scale-105" 
-            />
-            <div className="absolute top-2 right-2 opacity-0 group-hover:opacity-100 transition-opacity">
-                <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5 text-gray-400" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14" /></svg>
+        <div className="p-5 flex items-start gap-4">
+            <div className="flex-shrink-0 w-24 h-24 bg-gray-50 dark:bg-gray-700/50 rounded-lg p-2 flex items-center justify-center border border-gray-200 dark:border-gray-600">
+                 {sponsor.logoUrl ? (
+                    <img 
+                        src={sponsor.logoUrl} 
+                        alt={sponsor.name} 
+                        className="max-h-full max-w-full object-contain mix-blend-multiply dark:mix-blend-normal" 
+                    />
+                 ) : (
+                    <span className="text-2xl font-bold text-gray-400">{sponsor.name.charAt(0)}</span>
+                 )}
             </div>
-        </div>
-        <div className="p-4 text-center border-t border-gray-100 dark:border-gray-700 flex-1 flex flex-col justify-center">
-            <h4 className="font-bold text-gray-900 dark:text-white text-lg">{sponsor.name}</h4>
-            <span className="inline-block mt-2 px-3 py-1 bg-gray-100 dark:bg-gray-700 text-gray-600 dark:text-gray-300 text-xs font-semibold rounded-full uppercase tracking-wider">
-                {sponsor.tier}
-            </span>
+            
+            <div className="flex-1 min-w-0">
+                <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between mb-2 gap-2">
+                     <h4 className="font-bold text-gray-900 dark:text-white text-lg truncate">{sponsor.name}</h4>
+                     <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-bold uppercase tracking-wider whitespace-nowrap w-fit ${
+                        sponsor.tier === 'Platinum' ? 'bg-slate-100 text-slate-800 border border-slate-200' :
+                        sponsor.tier === 'Gold' ? 'bg-yellow-100 text-yellow-800 border border-yellow-200' :
+                        sponsor.tier === 'Silver' ? 'bg-gray-100 text-gray-800 border border-gray-200' :
+                        'bg-orange-50 text-orange-800 border border-orange-100'
+                     }`}>
+                        {sponsor.tier}
+                    </span>
+                </div>
+                
+                <p className="text-sm text-gray-500 dark:text-gray-400 line-clamp-2 leading-relaxed">
+                    {sponsor.description || "Proud sponsor of this event."}
+                </p>
+                
+                <div className="mt-3 flex items-center text-xs font-semibold text-primary group-hover:underline">
+                    Visit Website
+                    <svg className="w-3 h-3 ml-1 transform group-hover:translate-x-0.5 transition-transform" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M14 5l7 7m0 0l-7 7m7-7H3" /></svg>
+                </div>
+            </div>
         </div>
     </a>
 );
@@ -142,7 +162,7 @@ export const DirectoryView: React.FC<DirectoryViewProps> = ({ speakers, sponsors
                                         <h3 className="text-xl font-bold text-gray-900 dark:text-white mr-4">{tier} Sponsors</h3>
                                         <div className="flex-1 h-px bg-gray-200 dark:bg-gray-700"></div>
                                     </div>
-                                    <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6">
+                                    <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
                                         {sponsorsByTier[tier].map(sponsor => (
                                             <SponsorCard key={sponsor.id} sponsor={sponsor} />
                                         ))}

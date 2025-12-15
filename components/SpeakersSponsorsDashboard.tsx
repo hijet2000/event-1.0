@@ -1,11 +1,12 @@
 
 import React, { useState, useEffect, useMemo } from 'react';
 import { type Speaker, type Sponsor, SPONSORSHIP_TIERS, type SponsorshipTier } from '../types';
-import { getSpeakers, getSponsors, saveSpeaker, deleteSpeaker, saveSponsor, deleteSponsor } from '../server/api';
+import { getSpeakers, getSponsors, saveSpeaker, deleteSpeaker, saveSponsor, deleteSponsor, generateAiContent } from '../server/api';
 import { ContentLoader } from './ContentLoader';
 import { Alert } from './Alert';
 import { SpeakerEditorModal } from './SpeakerEditorModal';
 import { SponsorEditorModal } from './SponsorEditorModal';
+import { Spinner } from './Spinner';
 
 interface SpeakersSponsorsDashboardProps {
   adminToken: string;
@@ -31,6 +32,10 @@ export const SpeakersSponsorsDashboard: React.FC<SpeakersSponsorsDashboardProps>
     const [sponsors, setSponsors] = useState<Sponsor[]>([]);
     const [isLoading, setIsLoading] = useState(true);
     const [error, setError] = useState<string | null>(null);
+    
+    // Batch AI State
+    const [isBatchGenerating, setIsBatchGenerating] = useState(false);
+    const [batchProgress, setBatchProgress] = useState('');
 
     // Filters
     const [searchQuery, setSearchQuery] = useState('');
@@ -83,6 +88,62 @@ export const SpeakersSponsorsDashboard: React.FC<SpeakersSponsorsDashboardProps>
         if (window.confirm('Are you sure you want to delete this sponsor?')) {
             await deleteSponsor(adminToken, id);
             await fetchData();
+        }
+    };
+
+    const handleAutoFillMissing = async () => {
+        const type = activeTab === 'speakers' ? 'bios' : 'descriptions';
+        if (!window.confirm(`Auto-fill missing ${type} using AI? This may take a moment.`)) return;
+
+        setIsBatchGenerating(true);
+        let updatedCount = 0;
+
+        try {
+            if (activeTab === 'speakers') {
+                const missing = speakers.filter(s => !s.bio || s.bio.length < 20);
+                for (let i = 0; i < missing.length; i++) {
+                    const s = missing[i];
+                    setBatchProgress(`Generating bio for ${s.name} (${i + 1}/${missing.length})...`);
+                    try {
+                        const bio = await generateAiContent('speaker_bio', { 
+                            name: s.name, 
+                            title: s.title, 
+                            company: s.company 
+                        });
+                        if (bio) {
+                            await saveSpeaker(adminToken, { ...s, bio });
+                            updatedCount++;
+                        }
+                    } catch (e) {
+                        console.error(`Failed to generate bio for ${s.name}`, e);
+                    }
+                }
+            } else {
+                const missing = sponsors.filter(s => !s.description || s.description.length < 20);
+                for (let i = 0; i < missing.length; i++) {
+                    const s = missing[i];
+                    setBatchProgress(`Generating description for ${s.name} (${i + 1}/${missing.length})...`);
+                    try {
+                        const description = await generateAiContent('sponsor_description', { 
+                            name: s.name, 
+                            websiteUrl: s.websiteUrl 
+                        });
+                        if (description) {
+                            await saveSponsor(adminToken, { ...s, description });
+                            updatedCount++;
+                        }
+                    } catch (e) {
+                        console.error(`Failed to generate desc for ${s.name}`, e);
+                    }
+                }
+            }
+            await fetchData();
+            setBatchProgress(`Completed! Updated ${updatedCount} items.`);
+            setTimeout(() => setBatchProgress(''), 3000);
+        } catch (e) {
+            setError("Batch generation failed.");
+        } finally {
+            setIsBatchGenerating(false);
         }
     };
 
@@ -234,6 +295,16 @@ export const SpeakersSponsorsDashboard: React.FC<SpeakersSponsorsDashboardProps>
                         </select>
                     )}
 
+                    {/* Batch Generate Button */}
+                    <button
+                        onClick={handleAutoFillMissing}
+                        disabled={isBatchGenerating}
+                        className="px-4 py-2 text-sm font-bold text-white bg-gradient-to-r from-purple-600 to-indigo-600 rounded-md shadow-sm hover:from-purple-700 hover:to-indigo-700 disabled:opacity-70 flex items-center gap-2"
+                        title={`Auto-generate missing ${activeTab === 'speakers' ? 'bios' : 'descriptions'}`}
+                    >
+                        {isBatchGenerating ? <Spinner /> : <span>✨ Auto-fill Missing Info</span>}
+                    </button>
+
                     {/* Add Button */}
                      <button
                         onClick={() => { 
@@ -246,6 +317,12 @@ export const SpeakersSponsorsDashboard: React.FC<SpeakersSponsorsDashboardProps>
                     </button>
                  </div>
             </div>
+
+            {batchProgress && (
+                <div className="mb-4 bg-purple-50 dark:bg-purple-900/30 text-purple-800 dark:text-purple-200 px-4 py-2 rounded-md text-sm font-medium animate-pulse">
+                    {batchProgress}
+                </div>
+            )}
 
             {/* Tabs */}
             <div className="border-b border-gray-200 dark:border-gray-700 mb-6">

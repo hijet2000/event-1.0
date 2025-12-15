@@ -1,7 +1,4 @@
 
-
-
-
 import { type EventConfig } from '../types';
 
 export const defaultConfig: EventConfig = {
@@ -35,7 +32,7 @@ export const defaultConfig: EventConfig = {
       label: "Company / Organization",
       type: "text",
       placeholder: "e.g., Acme Corporation",
-      required: false,
+      required: true,
       enabled: true,
     },
     {
@@ -43,7 +40,7 @@ export const defaultConfig: EventConfig = {
       label: "Job Title",
       type: "text",
       placeholder: "e.g., Software Engineer",
-      required: false,
+      required: true,
       enabled: true,
     },
     {
@@ -62,6 +59,15 @@ export const defaultConfig: EventConfig = {
       required: false,
       enabled: true,
       options: ["None", "Vegetarian", "Vegan", "Gluten-Free", "Other"],
+    },
+    {
+      id: "t_shirt_size",
+      label: "T-Shirt Size",
+      type: "dropdown",
+      placeholder: "Select size...",
+      required: true,
+      enabled: true,
+      options: ["S", "M", "L", "XL", "XXL"],
     },
     {
       id: "comments",

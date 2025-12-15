@@ -47,7 +47,7 @@ export const RegistrationForm: React.FC<RegistrationFormProps> = ({
     }
   }, []);
   
-  const handleFormChangeInternal = (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) => {
+  const handleFormChangeInternal = (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement>) => {
     const { name, value } = e.target;
     
     if (name === 'password') {
@@ -409,7 +409,7 @@ export const RegistrationForm: React.FC<RegistrationFormProps> = ({
             </div>
         </div>
         
-        {/* Additional Info Section */}
+        {/* Additional Info Section (Dynamic) */}
         {enabledCustomFields.length > 0 && (
             <div className="bg-white dark:bg-gray-800 rounded-2xl p-6 sm:p-8 shadow-sm border border-gray-100 dark:border-gray-700">
             <h3 className="text-xl font-bold text-gray-900 dark:text-white mb-6 flex items-center">
@@ -422,7 +422,7 @@ export const RegistrationForm: React.FC<RegistrationFormProps> = ({
                     key={field.id}
                     field={field}
                     value={formData[field.id] || ''}
-                    onChange={onFormChange}
+                    onChange={handleFormChangeInternal}
                     onBlur={handleBlur}
                     error={touched[field.id] ? errors[field.id] : ''}
                 />
