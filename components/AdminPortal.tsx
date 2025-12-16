@@ -19,9 +19,10 @@ import { TestDashboard } from './TestDashboard';
 import { GamificationDashboard } from './GamificationDashboard';
 import { TicketTiersDashboard } from './TicketTiersDashboard';
 import { MapDashboard } from './MapDashboard';
+import { HelpDashboard } from './HelpDashboard';
 import { Permission } from '../types';
 
-type AdminView = 'dashboard' | 'registrations' | 'settings' | 'users' | 'tasks' | 'dining' | 'hotels' | 'id_design' | 'eventcoin' | 'agenda' | 'speakers_sponsors' | 'marketing' | 'system' | 'communications' | 'media' | 'tests' | 'gamification' | 'ticketing' | 'maps';
+type AdminView = 'dashboard' | 'registrations' | 'settings' | 'users' | 'tasks' | 'dining' | 'hotels' | 'id_design' | 'eventcoin' | 'agenda' | 'speakers_sponsors' | 'marketing' | 'system' | 'communications' | 'media' | 'tests' | 'gamification' | 'ticketing' | 'maps' | 'help';
 
 interface AdminPortalProps {
   onLogout: () => void;
@@ -29,13 +30,14 @@ interface AdminPortalProps {
   user: { email: string; permissions: Permission[] };
 }
 
-const NavLink: React.FC<{ label: string, isActive: boolean, onClick: () => void, userPermissions: Permission[], permission?: Permission }> = ({ label, isActive, onClick, userPermissions, permission }) => {
+const NavLink: React.FC<{ label: string, isActive: boolean, onClick: () => void, userPermissions: Permission[], permission?: Permission, icon?: React.ReactNode }> = ({ label, isActive, onClick, userPermissions, permission, icon }) => {
     if (permission && !userPermissions.includes(permission)) return null;
     return (
         <button
             onClick={onClick}
             className={`flex items-center w-full px-4 py-2.5 text-left text-sm font-medium transition-colors ${isActive ? 'bg-primary/10 text-primary border-r-4 border-primary' : 'text-gray-600 dark:text-gray-400 hover:bg-gray-50 dark:hover:bg-gray-700'}`}
         >
+            {icon && <span className="mr-3">{icon}</span>}
             {label}
         </button>
     );
@@ -65,6 +67,7 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({ onLogout, adminToken, 
       case 'gamification': return <GamificationDashboard adminToken={adminToken} />;
       case 'ticketing': return <TicketTiersDashboard adminToken={adminToken} />;
       case 'maps': return <MapDashboard adminToken={adminToken} />;
+      case 'help': return <HelpDashboard adminToken={adminToken} />;
       default: return <AdminDashboard user={user} adminToken={adminToken} onNavigate={(v) => setView(v as AdminView)} />;
     }
   };
@@ -102,6 +105,14 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({ onLogout, adminToken, 
             <NavLink label="Users & Roles" isActive={view === 'users'} onClick={() => setView('users')} userPermissions={user.permissions} permission="manage_users" />
             <NavLink label="System Status" isActive={view === 'system'} onClick={() => setView('system')} userPermissions={user.permissions} permission="manage_settings" />
             <NavLink label="Diagnostics" isActive={view === 'tests'} onClick={() => setView('tests')} userPermissions={user.permissions} permission="manage_settings" />
+            <NavLink 
+                label="Help & Support" 
+                isActive={view === 'help'} 
+                onClick={() => setView('help')} 
+                userPermissions={user.permissions} 
+                permission="view_dashboard"
+                icon={<svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8.228 9c.549-1.165 2.03-2 3.772-2 2.21 0 4 1.343 4 3 0 1.4-1.278 2.575-3.006 2.907-.542.104-.994.54-.994 1.093m0 3h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>}
+            />
         </nav>
         <div className="p-4 border-t border-gray-200 dark:border-gray-700">
             <div className="mb-2 px-2 text-xs text-gray-500 truncate">{user.email}</div>

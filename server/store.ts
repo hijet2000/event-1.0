@@ -26,7 +26,8 @@ export const db: any = {
     email_logs: [],
     session_questions: [],
     session_feedback: [],
-    poll_votes: []
+    poll_votes: [],
+    polls: []
 };
 
 export const initializeDb = async () => {

@@ -7,6 +7,7 @@ import { Spinner } from './Spinner';
 import { Alert } from './Alert';
 import { SessionQAModal } from './SessionQAModal';
 import { SessionLivePollsModal } from './SessionLivePollsModal';
+import { SessionSkeleton } from './Skeleton';
 
 interface AgendaViewProps {
   sessions: Session[];
@@ -178,6 +179,9 @@ export const AgendaView: React.FC<AgendaViewProps> = ({ sessions, speakers, mySe
   const [pollSession, setPollSession] = useState<Session | null>(null);
   const [feedbackSuccess, setFeedbackSuccess] = useState(false);
 
+  // Treat empty sessions array as loading state if not empty array provided initially
+  const isLoading = sessions.length === 0;
+
   useEffect(() => {
       setLocalMySessionIds(new Set(mySessionIds));
   }, [mySessionIds]);
@@ -268,7 +272,11 @@ export const AgendaView: React.FC<AgendaViewProps> = ({ sessions, speakers, mySe
       
       {feedbackSuccess && <div className="mb-4"><Alert type="success" message="Feedback submitted! Thank you." /></div>}
 
-      {Object.keys(sessionsByDay).length > 0 ? (
+      {isLoading ? (
+          <div className="animate-fade-in">
+              {[1, 2, 3].map(i => <SessionSkeleton key={i} />)}
+          </div>
+      ) : Object.keys(sessionsByDay).length > 0 ? (
         Object.keys(sessionsByDay).map(day => {
           const daySessions = sessionsByDay[day];
           return (

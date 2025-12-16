@@ -1,5 +1,4 @@
 
-
 export type Permission = 
   | 'view_dashboard' 
   | 'manage_registrations' 

@@ -1163,3 +1163,17 @@ export const getEventContextForAI = async (token: string) => {
     const sessions = await db.findAll('sessions');
     return `Event: ${config.event.name}. Date: ${config.event.date}. Sessions: ${sessions.map(s => s.title).join(', ')}`;
 };
+
+export const askHelp = async (token: string, query: string) => {
+    if (IS_ONLINE) {
+        const res = await fetch('/api/admin/help', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
+            body: JSON.stringify({ query })
+        });
+        if (!res.ok) throw new Error("Help request failed");
+        const data = await res.json();
+        return data.answer;
+    }
+    return geminiService.askSystemHelp(query);
+};

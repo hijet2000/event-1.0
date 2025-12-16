@@ -1,5 +1,5 @@
 
-import React, { useRef, useEffect, useState } from 'react';
+import React, { useRef, useEffect, useState, useCallback } from 'react';
 import { processCheckIn, getEventConfig } from '../server/api';
 import { BadgePrintLayout } from './BadgePrintLayout';
 import { EventConfig } from '../types';
@@ -22,6 +22,10 @@ export const KioskView: React.FC<KioskViewProps> = ({ adminToken, onExit }) => {
     const [cameras, setCameras] = useState<MediaDeviceInfo[]>([]);
     const [activeCameraId, setActiveCameraId] = useState<string>('');
     const [isFullscreen, setIsFullscreen] = useState(false);
+
+    // Debounce ref to prevent double scanning
+    const lastScannedCode = useRef<string | null>(null);
+    const processingRef = useRef(false);
 
     // Audio Context for Beeps
     const playSuccessSound = () => {
@@ -102,13 +106,61 @@ export const KioskView: React.FC<KioskViewProps> = ({ adminToken, onExit }) => {
         }
     }, [status, scannedUser, config]);
 
+    const handleCheckInAttempt = useCallback(async (identifier: string) => {
+        // Prevent duplicate scans of the same code within 3 seconds
+        if (processingRef.current || (lastScannedCode.current === identifier && status === 'success')) return;
+        
+        processingRef.current = true;
+        lastScannedCode.current = identifier;
+        setStatus('processing');
+        
+        try {
+            const result = await processCheckIn(adminToken, identifier);
+            if (result.success) {
+                setScannedUser(result.user);
+                setStatus('success');
+                setManualInput(''); // Clear input
+                playSuccessSound();
+                
+                // Auto reset
+                setTimeout(() => {
+                    setScannedUser(null);
+                    setStatus('scanning');
+                    processingRef.current = false;
+                    // Keep lastScannedCode for a bit longer to prevent re-scan of same ticket immediately after success
+                    setTimeout(() => { lastScannedCode.current = null; }, 2000); 
+                }, 4000);
+            } else {
+                setErrorMsg(result.message);
+                setStatus('error');
+                playErrorSound();
+                setTimeout(() => {
+                    setErrorMsg(null);
+                    setStatus('scanning');
+                    processingRef.current = false;
+                    lastScannedCode.current = null;
+                }, 3000);
+            }
+        } catch (e) {
+            setErrorMsg("Network error or invalid token.");
+            setStatus('error');
+            playErrorSound();
+            setTimeout(() => {
+                setErrorMsg(null);
+                setStatus('scanning');
+                processingRef.current = false;
+                lastScannedCode.current = null;
+            }, 3000);
+        }
+    }, [adminToken, status]);
+
     // Scanner Logic
     useEffect(() => {
         let stream: MediaStream | null = null;
         let animationFrameId: number;
 
         const startCamera = async () => {
-            if (status !== 'scanning' || mode !== 'scan') return;
+            if (mode !== 'scan') return;
 
             // Browser Support Check
             if (!('BarcodeDetector' in window)) {
@@ -128,15 +180,21 @@ export const KioskView: React.FC<KioskViewProps> = ({ adminToken, onExit }) => {
                     const barcodeDetector = new (window as any).BarcodeDetector({ formats: ['qr_code'] });
                     
                     const detect = async () => {
-                        if (status !== 'scanning' || mode !== 'scan' || !videoRef.current) return;
+                        if (mode !== 'scan' || !videoRef.current) return;
                         
+                        // Only scan if we are in 'scanning' state or 'error' state (to allow retry)
+                        // We pause scanning during 'processing' and 'success'
+                        if (status !== 'scanning' && status !== 'error') {
+                             animationFrameId = requestAnimationFrame(detect);
+                             return;
+                        }
+
                         try {
                             const barcodes = await barcodeDetector.detect(videoRef.current);
                             if (barcodes.length > 0) {
                                 handleCheckInAttempt(barcodes[0].rawValue);
-                            } else {
-                                animationFrameId = requestAnimationFrame(detect);
-                            }
+                            } 
+                            animationFrameId = requestAnimationFrame(detect);
                         } catch (e) {
                             // Detection failed (frame empty, etc), retry
                             animationFrameId = requestAnimationFrame(detect);
@@ -146,7 +204,6 @@ export const KioskView: React.FC<KioskViewProps> = ({ adminToken, onExit }) => {
                 }
             } catch (err) {
                 console.error("Camera error", err);
-                // Fail gracefully to manual mode if camera denied/missing
                 setMode('manual');
             }
         };
@@ -157,42 +214,7 @@ export const KioskView: React.FC<KioskViewProps> = ({ adminToken, onExit }) => {
             if (stream) stream.getTracks().forEach(t => t.stop());
             cancelAnimationFrame(animationFrameId);
         };
-    }, [status, mode, activeCameraId]);
-
-    const handleCheckInAttempt = async (identifier: string) => {
-        setStatus('processing');
-        try {
-            const result = await processCheckIn(adminToken, identifier);
-            if (result.success) {
-                setScannedUser(result.user);
-                setStatus('success');
-                setManualInput(''); // Clear input
-                playSuccessSound();
-                
-                // Auto reset
-                setTimeout(() => {
-                    setScannedUser(null);
-                    setStatus('scanning');
-                }, 5000);
-            } else {
-                setErrorMsg(result.message);
-                setStatus('error');
-                playErrorSound();
-                setTimeout(() => {
-                    setErrorMsg(null);
-                    setStatus('scanning');
-                }, 3000);
-            }
-        } catch (e) {
-            setErrorMsg("Network error or invalid token.");
-            setStatus('error');
-            playErrorSound();
-            setTimeout(() => {
-                setErrorMsg(null);
-                setStatus('scanning');
-            }, 3000);
-        }
-    };
+    }, [mode, activeCameraId, handleCheckInAttempt, status]);
 
     const handleManualSubmit = (e: React.FormEvent) => {
         e.preventDefault();
@@ -257,8 +279,8 @@ export const KioskView: React.FC<KioskViewProps> = ({ adminToken, onExit }) => {
             <div className="w-full max-w-3xl px-6 relative z-10 flex flex-col items-center">
                 
                 {/* 1. Scanning State */}
-                {status === 'scanning' && mode === 'scan' && (
-                    <div className="relative w-full aspect-[4/3] max-h-[60vh] bg-black rounded-3xl overflow-hidden shadow-2xl border-4 border-gray-800">
+                {mode === 'scan' && (
+                    <div className={`relative w-full aspect-[4/3] max-h-[60vh] bg-black rounded-3xl overflow-hidden shadow-2xl border-4 transition-colors duration-300 ${status === 'success' ? 'border-green-500' : status === 'error' ? 'border-red-500' : 'border-gray-800'}`}>
                         <video 
                             ref={videoRef} 
                             className="w-full h-full object-cover" 
@@ -267,19 +289,19 @@ export const KioskView: React.FC<KioskViewProps> = ({ adminToken, onExit }) => {
                         />
                         {/* Overlay Frame */}
                         <div className="absolute inset-0 border-[60px] border-black/60 pointer-events-none flex flex-col items-center justify-center">
-                            <div className="w-64 h-64 border-4 border-white/50 rounded-2xl relative shadow-[0_0_50px_rgba(0,0,0,0.5)]">
-                                {/* Corners */}
-                                <div className="absolute -top-1 -left-1 w-8 h-8 border-t-4 border-l-4 border-primary rounded-tl-lg"></div>
-                                <div className="absolute -top-1 -right-1 w-8 h-8 border-t-4 border-r-4 border-primary rounded-tr-lg"></div>
-                                <div className="absolute -bottom-1 -left-1 w-8 h-8 border-b-4 border-l-4 border-primary rounded-bl-lg"></div>
-                                <div className="absolute -bottom-1 -right-1 w-8 h-8 border-b-4 border-r-4 border-primary rounded-br-lg"></div>
-                                
-                                {/* Scan Line Animation */}
-                                <div className="absolute left-0 right-0 h-0.5 bg-red-500/80 shadow-[0_0_10px_red] animate-scan-y top-1/2"></div>
-                            </div>
-                            <p className="text-white mt-8 text-lg font-medium drop-shadow-md tracking-wide">
-                                Scan your QR Code
-                            </p>
+                            {status === 'scanning' && (
+                                <div className="w-64 h-64 border-4 border-white/50 rounded-2xl relative shadow-[0_0_50px_rgba(0,0,0,0.5)]">
+                                    {/* Corners */}
+                                    <div className="absolute -top-1 -left-1 w-8 h-8 border-t-4 border-l-4 border-primary rounded-tl-lg"></div>
+                                    <div className="absolute -top-1 -right-1 w-8 h-8 border-t-4 border-r-4 border-primary rounded-tr-lg"></div>
+                                    <div className="absolute -bottom-1 -left-1 w-8 h-8 border-b-4 border-l-4 border-primary rounded-bl-lg"></div>
+                                    <div className="absolute -bottom-1 -right-1 w-8 h-8 border-b-4 border-r-4 border-primary rounded-br-lg"></div>
+                                    
+                                    {/* Scan Line Animation */}
+                                    <div className="absolute left-0 right-0 h-0.5 bg-red-500/80 shadow-[0_0_10px_red] animate-scan-y top-1/2"></div>
+                                </div>
+                            )}
+                             {status === 'scanning' && <p className="text-white mt-8 text-lg font-medium drop-shadow-md tracking-wide">Scan your QR Code</p>}
                         </div>
                         
                         {/* Camera Switcher */}
@@ -295,7 +317,7 @@ export const KioskView: React.FC<KioskViewProps> = ({ adminToken, onExit }) => {
                 )}
 
                 {/* 2. Manual Entry State */}
-                {status === 'scanning' && mode === 'manual' && (
+                {mode === 'manual' && status !== 'success' && status !== 'processing' && (
                     <div className="w-full max-w-lg bg-white dark:bg-gray-800 p-10 rounded-3xl shadow-2xl text-center border border-gray-700">
                         <div className="w-16 h-16 bg-gray-100 dark:bg-gray-700 rounded-full flex items-center justify-center mx-auto mb-6 text-primary">
                             <svg xmlns="http://www.w3.org/2000/svg" className="h-8 w-8" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" /></svg>
@@ -334,57 +356,63 @@ export const KioskView: React.FC<KioskViewProps> = ({ adminToken, onExit }) => {
 
                 {/* 3. Processing State */}
                 {status === 'processing' && (
-                    <div className="bg-gray-800/90 backdrop-blur-md p-12 rounded-3xl flex flex-col items-center justify-center shadow-2xl border border-gray-700 w-full max-w-md">
-                        <div className="w-20 h-20 border-8 border-primary border-t-transparent rounded-full animate-spin mb-8"></div>
-                        <p className="text-white text-2xl font-medium tracking-wide">Verifying...</p>
+                    <div className="absolute inset-0 flex items-center justify-center z-50">
+                        <div className="bg-gray-900/90 backdrop-blur-md p-12 rounded-3xl flex flex-col items-center justify-center shadow-2xl border border-gray-700 w-full max-w-md">
+                            <div className="w-20 h-20 border-8 border-primary border-t-transparent rounded-full animate-spin mb-8"></div>
+                            <p className="text-white text-2xl font-medium tracking-wide">Verifying...</p>
+                        </div>
                     </div>
                 )}
 
                 {/* 4. Success State */}
                 {status === 'success' && scannedUser && (
-                    <div className="w-full max-w-lg bg-white dark:bg-gray-800 rounded-3xl shadow-2xl overflow-hidden animate-fade-in-up border-4 border-green-500">
-                        <div className="bg-green-500 p-8 flex flex-col items-center text-white">
-                            <div className="w-24 h-24 bg-white rounded-full flex items-center justify-center mb-4 shadow-lg animate-bounce">
-                                <svg className="w-12 h-12 text-green-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={4} d="M5 13l4 4L19 7"/></svg>
+                     <div className="absolute inset-0 flex items-center justify-center z-50">
+                        <div className="w-full max-w-lg bg-white dark:bg-gray-800 rounded-3xl shadow-2xl overflow-hidden animate-fade-in-up border-4 border-green-500">
+                            <div className="bg-green-500 p-8 flex flex-col items-center text-white">
+                                <div className="w-24 h-24 bg-white rounded-full flex items-center justify-center mb-4 shadow-lg animate-bounce">
+                                    <svg className="w-12 h-12 text-green-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={4} d="M5 13l4 4L19 7"/></svg>
+                                </div>
+                                <h2 className="text-4xl font-bold">You're Checked In!</h2>
                             </div>
-                            <h2 className="text-4xl font-bold">You're Checked In!</h2>
-                        </div>
-                        <div className="p-10 text-center">
-                            <h3 className="text-5xl font-extrabold text-gray-900 dark:text-white mb-3">{scannedUser.name}</h3>
-                            <p className="text-2xl text-gray-500 dark:text-gray-300 font-medium">{scannedUser.company || scannedUser.role || 'Delegate'}</p>
-                            
-                            <div className="mt-10 pt-8 border-t border-gray-200 dark:border-gray-700 flex flex-col gap-3">
-                                {config?.printConfig?.autoPrintOnKiosk ? (
-                                    <div className="flex items-center justify-center gap-3 text-primary animate-pulse font-bold text-lg">
-                                        <svg xmlns="http://www.w3.org/2000/svg" className="h-8 w-8" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 17h2a2 2 0 002-2v-4a2 2 0 00-2-2H5a2 2 0 00-2 2v4a2 2 0 002 2h2m2 4h6a2 2 0 002-2v-4a2 2 0 00-2-2H9a2 2 0 00-2 2v4h10z" /></svg>
-                                        <span>Printing Badge...</span>
-                                    </div>
-                                ) : (
-                                    <p className="text-lg text-gray-400">Please proceed to the event hall.</p>
-                                )}
+                            <div className="p-10 text-center">
+                                <h3 className="text-5xl font-extrabold text-gray-900 dark:text-white mb-3">{scannedUser.name}</h3>
+                                <p className="text-2xl text-gray-500 dark:text-gray-300 font-medium">{scannedUser.company || scannedUser.role || 'Delegate'}</p>
+                                
+                                <div className="mt-10 pt-8 border-t border-gray-200 dark:border-gray-700 flex flex-col gap-3">
+                                    {config?.printConfig?.autoPrintOnKiosk ? (
+                                        <div className="flex items-center justify-center gap-3 text-primary animate-pulse font-bold text-lg">
+                                            <svg xmlns="http://www.w3.org/2000/svg" className="h-8 w-8" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 17h2a2 2 0 002-2v-4a2 2 0 00-2-2H5a2 2 0 00-2 2v4a2 2 0 002 2h2m2 4h6a2 2 0 002-2v-4a2 2 0 00-2-2H9a2 2 0 00-2 2v4h10z" /></svg>
+                                            <span>Printing Badge...</span>
+                                        </div>
+                                    ) : (
+                                        <p className="text-lg text-gray-400">Please proceed to the event hall.</p>
+                                    )}
+                                </div>
                             </div>
-                        </div>
-                        <div className="bg-gray-50 dark:bg-gray-900 p-2">
-                            <div className="h-2 bg-green-500 w-full animate-shrink-width origin-left"></div>
+                            <div className="bg-gray-50 dark:bg-gray-900 p-2">
+                                <div className="h-2 bg-green-500 w-full animate-shrink-width origin-left"></div>
+                            </div>
                         </div>
                     </div>
                 )}
 
                 {/* 5. Error State */}
                 {status === 'error' && (
-                    <div className="w-full max-w-md bg-white dark:bg-gray-800 rounded-3xl shadow-2xl p-10 text-center border-4 border-red-500 animate-shake">
-                        <div className="w-24 h-24 bg-red-100 dark:bg-red-900/30 rounded-full flex items-center justify-center mx-auto mb-6 text-red-600 dark:text-red-500">
-                            <svg className="w-12 h-12" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={3} d="M6 18L18 6M6 6l12 12"/></svg>
+                     <div className="absolute inset-0 flex items-center justify-center z-50">
+                        <div className="w-full max-w-md bg-white dark:bg-gray-800 rounded-3xl shadow-2xl p-10 text-center border-4 border-red-500 animate-shake">
+                            <div className="w-24 h-24 bg-red-100 dark:bg-red-900/30 rounded-full flex items-center justify-center mx-auto mb-6 text-red-600 dark:text-red-500">
+                                <svg className="w-12 h-12" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={3} d="M6 18L18 6M6 6l12 12"/></svg>
+                            </div>
+                            <h2 className="text-3xl font-bold text-gray-900 dark:text-white mb-2">Check-in Failed</h2>
+                            <p className="text-xl text-gray-600 dark:text-gray-300 mb-8">{errorMsg || "Invalid Ticket"}</p>
+                            
+                            <button 
+                                onClick={() => { setStatus('scanning'); setErrorMsg(null); processingRef.current = false; }}
+                                className="px-10 py-4 bg-gray-200 dark:bg-gray-700 hover:bg-gray-300 dark:hover:bg-gray-600 rounded-xl font-bold text-gray-800 dark:text-white transition-colors text-lg"
+                            >
+                                Try Again
+                            </button>
                         </div>
-                        <h2 className="text-3xl font-bold text-gray-900 dark:text-white mb-2">Check-in Failed</h2>
-                        <p className="text-xl text-gray-600 dark:text-gray-300 mb-8">{errorMsg || "Invalid Ticket"}</p>
-                        
-                        <button 
-                            onClick={() => { setStatus('scanning'); setErrorMsg(null); }}
-                            className="px-10 py-4 bg-gray-200 dark:bg-gray-700 hover:bg-gray-300 dark:hover:bg-gray-600 rounded-xl font-bold text-gray-800 dark:text-white transition-colors text-lg"
-                        >
-                            Try Again
-                        </button>
                     </div>
                 )}
 

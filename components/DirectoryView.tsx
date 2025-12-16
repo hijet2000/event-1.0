@@ -1,6 +1,7 @@
 
 import React, { useState, useMemo } from 'react';
 import { type Speaker, type Sponsor, type SponsorshipTier, SPONSORSHIP_TIERS } from '../types';
+import { CardSkeleton } from './Skeleton';
 
 interface DirectoryViewProps {
   speakers: Speaker[];
@@ -107,6 +108,10 @@ export const DirectoryView: React.FC<DirectoryViewProps> = ({ speakers, sponsors
     const [activeTab, setActiveTab] = useState<'speakers' | 'sponsors'>('speakers');
     const [filterTier, setFilterTier] = useState<string>('All');
 
+    // Treat empty arrays as loading state if passed initially as empty
+    // In a real app, we'd pass an explicit `isLoading` prop
+    const isLoading = speakers.length === 0 && sponsors.length === 0;
+
     const sponsorsByTier = useMemo(() => {
         const grouped = sponsors.reduce((acc, sponsor) => {
             (acc[sponsor.tier] = acc[sponsor.tier] || []).push(sponsor);
@@ -122,6 +127,13 @@ export const DirectoryView: React.FC<DirectoryViewProps> = ({ speakers, sponsors
 
     const renderContent = () => {
         if (activeTab === 'speakers') {
+            if (isLoading && speakers.length === 0) {
+                return (
+                    <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6 animate-fade-in">
+                        {[1, 2, 3, 4, 5, 6].map(i => <CardSkeleton key={i} />)}
+                    </div>
+                );
+            }
             return speakers.length > 0 ? (
                 <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6 animate-fade-in">
                     {speakers.map(speaker => <SpeakerCard key={speaker.id} speaker={speaker} />)}
@@ -129,6 +141,14 @@ export const DirectoryView: React.FC<DirectoryViewProps> = ({ speakers, sponsors
             ) : <div className="text-center py-12 bg-gray-50 dark:bg-gray-800/50 rounded-lg"><p className="italic text-gray-500">Speakers for this event have not been announced yet.</p></div>;
         }
         if (activeTab === 'sponsors') {
+             if (isLoading && sponsors.length === 0) {
+                return (
+                    <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 animate-fade-in">
+                        {[1, 2, 3, 4].map(i => <CardSkeleton key={i} />)}
+                    </div>
+                );
+             }
+             
              const visibleTiers = SPONSORSHIP_TIERS.filter(t => filterTier === 'All' || filterTier === t);
              const hasSponsors = sponsors.length > 0;
 

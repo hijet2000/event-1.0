@@ -1,12 +1,13 @@
+
 {
   "name": "event-platform-server",
   "version": "1.0.0",
   "description": "Backend API for Event Platform",
   "main": "backend.ts",
   "scripts": {
-    "start": "ts-node backend.ts",
+    "start": "node dist/backend.js",
     "dev": "nodemon --exec ts-node backend.ts",
-    "db:init": "ts-node init-db.ts",
+    "db:init": "node dist/init-db.js",
     "build": "tsc"
   },
   "dependencies": {

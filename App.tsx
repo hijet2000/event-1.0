@@ -218,7 +218,7 @@ const EventPageContent: React.FC<EventPageContentProps> = ({ onAdminLogin, event
           if (result.success) {
               const userForEmail = result.user || { ...submissionData, id: 'temp-id' };
               setSuccessUser(userForEmail);
-              // Send emails
+              // Send emails (logic handles backend call)
               await triggerRegistrationEmails(eventId, userForEmail);
               setView('success');
           } else {
@@ -499,12 +499,13 @@ const EventPageContent: React.FC<EventPageContentProps> = ({ onAdminLogin, event
                                     {/* Generated QR Code Display */}
                                     <div className="bg-gray-50 dark:bg-gray-700/50 p-6 rounded-xl border border-dashed border-gray-300 dark:border-gray-600 mb-10">
                                         <p className="text-sm font-bold text-gray-500 uppercase tracking-widest mb-4">Your Event Pass</p>
+                                        {/* Use Date.parse on createdAt for stable timestamp instead of Date.now() to prevent flicker */}
                                         <img 
                                             src={`https://api.qrserver.com/v1/create-qr-code/?size=250x250&data=${encodeURIComponent(JSON.stringify({
                                                 id: successUser.id,
                                                 event: config.event.name,
                                                 url: `${window.location.origin}/verify/${successUser.id}`,
-                                                token: `secure_${successUser.id?.slice(-6)}_${Date.now()}`,
+                                                token: `secure_${successUser.id?.slice(-6)}_${successUser.createdAt}`,
                                                 ver: '1.0'
                                             }))}`} 
                                             alt="Your Ticket QR" 

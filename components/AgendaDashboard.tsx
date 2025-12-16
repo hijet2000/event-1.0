@@ -7,6 +7,7 @@ import { Alert } from './Alert';
 import { SessionEditorModal } from './SessionEditorModal';
 import { Spinner } from './Spinner';
 import { StarRating } from './StarRating';
+import { SessionLivePollsModal } from './SessionLivePollsModal';
 
 interface AgendaDashboardProps {
   adminToken: string;
@@ -102,6 +103,9 @@ export const AgendaDashboard: React.FC<AgendaDashboardProps> = ({ adminToken }) 
     const [error, setError] = useState<string | null>(null);
     const [editingSession, setEditingSession] = useState<Session | null>(null);
     const [isModalOpen, setIsModalOpen] = useState(false);
+    
+    // Poll Modal State
+    const [pollSession, setPollSession] = useState<Session | null>(null);
     
     // Batch AI State
     const [isBatchGenerating, setIsBatchGenerating] = useState(false);
@@ -307,6 +311,15 @@ export const AgendaDashboard: React.FC<AgendaDashboardProps> = ({ adminToken }) 
                                                 {getSpeakerNames(session.speakerIds)}
                                             </div>
                                         )}
+                                        
+                                        {/* Live Polls Button */}
+                                        <button 
+                                            onClick={() => setPollSession(session)}
+                                            className="mt-3 w-full py-1.5 text-xs font-bold text-white bg-indigo-600 hover:bg-indigo-700 rounded transition-colors flex items-center justify-center gap-2"
+                                        >
+                                            <svg xmlns="http://www.w3.org/2000/svg" className="h-3 w-3" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z" /></svg>
+                                            Manage Live Polls
+                                        </button>
                                     </div>
                                     
                                     <FeedbackSummary session={session} adminToken={adminToken} />
@@ -341,6 +354,17 @@ export const AgendaDashboard: React.FC<AgendaDashboardProps> = ({ adminToken }) 
                 speakers={speakers} 
                 existingSessions={sessions}
             />
+
+            {pollSession && (
+                <SessionLivePollsModal
+                    isOpen={!!pollSession}
+                    onClose={() => setPollSession(null)}
+                    sessionId={pollSession.id}
+                    sessionTitle={pollSession.title}
+                    delegateToken={adminToken} // Admins use their token
+                    isAdmin={true}
+                />
+            )}
         </>
     );
 };
