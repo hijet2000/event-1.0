@@ -6,469 +6,302 @@ import { EventConfig } from '../types';
 
 interface KioskViewProps {
     adminToken: string;
+    eventId: string;
     onExit: () => void;
 }
 
-export const KioskView: React.FC<KioskViewProps> = ({ adminToken, onExit }) => {
+export const KioskView: React.FC<KioskViewProps> = ({ adminToken, eventId, onExit }) => {
     const videoRef = useRef<HTMLVideoElement>(null);
     const [status, setStatus] = useState<'scanning' | 'processing' | 'success' | 'error'>('scanning');
     const [scannedUser, setScannedUser] = useState<any>(null);
     const [errorMsg, setErrorMsg] = useState<string | null>(null);
     const [config, setConfig] = useState<EventConfig | null>(null);
-    
-    // Improved Kiosk States
     const [mode, setMode] = useState<'scan' | 'manual'>('scan');
     const [manualInput, setManualInput] = useState('');
     const [cameras, setCameras] = useState<MediaDeviceInfo[]>([]);
     const [activeCameraId, setActiveCameraId] = useState<string>('');
     const [isFullscreen, setIsFullscreen] = useState(false);
 
-    // Debounce ref to prevent double scanning
     const lastScannedCode = useRef<string | null>(null);
     const processingRef = useRef(false);
 
-    // Audio Context for Beeps
-    const playSuccessSound = () => {
+    const playBeep = (type: 'success' | 'error') => {
         try {
             const ctx = new (window.AudioContext || (window as any).webkitAudioContext)();
             const osc = ctx.createOscillator();
             const gain = ctx.createGain();
             osc.connect(gain);
             gain.connect(ctx.destination);
-            
-            // Pleasant chime
-            osc.type = 'sine';
-            osc.frequency.setValueAtTime(500, ctx.currentTime);
-            osc.frequency.exponentialRampToValueAtTime(1000, ctx.currentTime + 0.1);
-            
-            gain.gain.setValueAtTime(0.2, ctx.currentTime);
-            gain.gain.exponentialRampToValueAtTime(0.01, ctx.currentTime + 0.3);
-            
-            osc.start();
-            osc.stop(ctx.currentTime + 0.3);
-        } catch (e) {
-            // Ignore if audio context fails
-        }
-    };
-
-    const playErrorSound = () => {
-        try {
-            const ctx = new (window.AudioContext || (window as any).webkitAudioContext)();
-            const osc = ctx.createOscillator();
-            const gain = ctx.createGain();
-            osc.connect(gain);
-            gain.connect(ctx.destination);
-            
-            osc.type = 'sawtooth';
-            osc.frequency.setValueAtTime(150, ctx.currentTime);
-            osc.frequency.linearRampToValueAtTime(100, ctx.currentTime + 0.2);
-            
-            gain.gain.setValueAtTime(0.2, ctx.currentTime);
-            gain.gain.linearRampToValueAtTime(0.01, ctx.currentTime + 0.2);
-            
+            osc.type = type === 'success' ? 'sine' : 'sawtooth';
+            osc.frequency.setValueAtTime(type === 'success' ? 800 : 200, ctx.currentTime);
+            gain.gain.setValueAtTime(0.1, ctx.currentTime);
+            gain.gain.exponentialRampToValueAtTime(0.01, ctx.currentTime + 0.2);
             osc.start();
             osc.stop(ctx.currentTime + 0.2);
-        } catch (e) {
-            // Ignore
-        }
+        } catch (e) {}
     };
 
-    // Load config
     useEffect(() => {
-        getEventConfig().then(setConfig).catch(console.error);
+        getEventConfig(eventId).then(setConfig).catch(console.error);
         
-        // Check for cameras
-        if (navigator.mediaDevices && navigator.mediaDevices.enumerateDevices) {
+        if (navigator.mediaDevices?.enumerateDevices) {
             navigator.mediaDevices.enumerateDevices().then(devices => {
                 const videoDevices = devices.filter(d => d.kind === 'videoinput');
                 setCameras(videoDevices);
-                if (videoDevices.length > 0) {
-                    // Prefer back camera if available
-                    const backCam = videoDevices.find(d => d.label.toLowerCase().includes('back')) || videoDevices[videoDevices.length - 1];
-                    setActiveCameraId(backCam.deviceId);
+                if (videoDevices.length > 0 && !activeCameraId) {
+                    // Default to back camera if available
+                    const backCamera = videoDevices.find(d => d.label.toLowerCase().includes('back'));
+                    setActiveCameraId(backCamera?.deviceId || videoDevices[0].deviceId);
                 }
             });
         }
         
-        // Listen for fullscreen change
         const handleFsChange = () => setIsFullscreen(!!document.fullscreenElement);
         document.addEventListener('fullscreenchange', handleFsChange);
         return () => document.removeEventListener('fullscreenchange', handleFsChange);
-    }, []);
+    }, [eventId]);
 
-    // Auto-Print Logic
     useEffect(() => {
         if (status === 'success' && scannedUser && config?.printConfig?.autoPrintOnKiosk) {
-            const timer = setTimeout(() => {
-                window.print();
-            }, 500);
+            const timer = setTimeout(() => window.print(), 1000);
             return () => clearTimeout(timer);
         }
     }, [status, scannedUser, config]);
 
     const handleCheckInAttempt = useCallback(async (identifier: string) => {
-        // Prevent duplicate scans of the same code within 3 seconds
         if (processingRef.current || (lastScannedCode.current === identifier && status === 'success')) return;
         
         processingRef.current = true;
         lastScannedCode.current = identifier;
         setStatus('processing');
+        setErrorMsg(null);
         
         try {
-            const result = await processCheckIn(adminToken, identifier);
+            const result = await processCheckIn(adminToken, identifier, eventId);
             if (result.success) {
                 setScannedUser(result.user);
                 setStatus('success');
-                setManualInput(''); // Clear input
-                playSuccessSound();
-                
-                // Auto reset
+                setManualInput('');
+                playBeep('success');
                 setTimeout(() => {
                     setScannedUser(null);
                     setStatus('scanning');
                     processingRef.current = false;
-                    // Keep lastScannedCode for a bit longer to prevent re-scan of same ticket immediately after success
-                    setTimeout(() => { lastScannedCode.current = null; }, 2000); 
+                    lastScannedCode.current = null;
                 }, 4000);
             } else {
                 setErrorMsg(result.message);
                 setStatus('error');
-                playErrorSound();
+                playBeep('error');
                 setTimeout(() => {
-                    setErrorMsg(null);
                     setStatus('scanning');
                     processingRef.current = false;
                     lastScannedCode.current = null;
                 }, 3000);
             }
         } catch (e) {
-            setErrorMsg("Network error or invalid token.");
+            setErrorMsg("Check-in failed. Try again.");
             setStatus('error');
-            playErrorSound();
+            playBeep('error');
             setTimeout(() => {
-                setErrorMsg(null);
                 setStatus('scanning');
                 processingRef.current = false;
                 lastScannedCode.current = null;
             }, 3000);
         }
-    }, [adminToken, status]);
+    }, [adminToken, status, eventId]);
 
-    // Scanner Logic
     useEffect(() => {
         let stream: MediaStream | null = null;
         let animationFrameId: number;
 
         const startCamera = async () => {
             if (mode !== 'scan') return;
-
-            // Browser Support Check
+            
+            // Check if environment supports scanning
             if (!('BarcodeDetector' in window)) {
-                console.warn("BarcodeDetector API not supported. Defaulting to manual entry.");
+                console.warn("BarcodeDetector not supported, switching to manual mode.");
                 setMode('manual');
                 return;
             }
 
             try {
-                const constraints = activeCameraId ? { video: { deviceId: { exact: activeCameraId } } } : { video: { facingMode: 'environment' } };
+                const constraints = activeCameraId ? 
+                    { video: { deviceId: { exact: activeCameraId } } } : 
+                    { video: { facingMode: 'environment' } };
+                    
                 stream = await navigator.mediaDevices.getUserMedia(constraints);
                 
                 if (videoRef.current) {
                     videoRef.current.srcObject = stream;
                     await videoRef.current.play();
                     
-                    const barcodeDetector = new (window as any).BarcodeDetector({ formats: ['qr_code'] });
+                    const detector = new (window as any).BarcodeDetector({ formats: ['qr_code'] });
                     
                     const detect = async () => {
                         if (mode !== 'scan' || !videoRef.current) return;
                         
-                        // Only scan if we are in 'scanning' state or 'error' state (to allow retry)
-                        // We pause scanning during 'processing' and 'success'
-                        if (status !== 'scanning' && status !== 'error') {
-                             animationFrameId = requestAnimationFrame(detect);
-                             return;
+                        if (status === 'scanning' && videoRef.current.readyState === videoRef.current.HAVE_ENOUGH_DATA) {
+                            try {
+                                const barcodes = await detector.detect(videoRef.current);
+                                if (barcodes.length > 0) {
+                                    handleCheckInAttempt(barcodes[0].rawValue);
+                                }
+                            } catch (e) {
+                                // Ignore non-critical detection errors
+                            }
                         }
-
-                        try {
-                            const barcodes = await barcodeDetector.detect(videoRef.current);
-                            if (barcodes.length > 0) {
-                                handleCheckInAttempt(barcodes[0].rawValue);
-                            } 
-                            animationFrameId = requestAnimationFrame(detect);
-                        } catch (e) {
-                            // Detection failed (frame empty, etc), retry
-                            animationFrameId = requestAnimationFrame(detect);
-                        }
+                        animationFrameId = requestAnimationFrame(detect);
                     };
                     detect();
                 }
             } catch (err) {
-                console.error("Camera error", err);
+                console.error("Camera start error:", err);
                 setMode('manual');
             }
         };
 
         startCamera();
-
+        
         return () => {
-            if (stream) stream.getTracks().forEach(t => t.stop());
+            if (stream) {
+                stream.getTracks().forEach(t => t.stop());
+            }
             cancelAnimationFrame(animationFrameId);
         };
     }, [mode, activeCameraId, handleCheckInAttempt, status]);
 
-    const handleManualSubmit = (e: React.FormEvent) => {
-        e.preventDefault();
-        if (!manualInput.trim()) return;
-        handleCheckInAttempt(manualInput.trim());
-    };
-
     const toggleFullscreen = () => {
         if (!document.fullscreenElement) {
-            document.documentElement.requestFullscreen().catch(err => console.error("Fullscreen error:", err));
+            document.documentElement.requestFullscreen().catch(e => console.error(e));
         } else {
             document.exitFullscreen();
         }
     };
 
-    const cycleCamera = () => {
+    const switchCamera = () => {
         if (cameras.length < 2) return;
-        const currentIndex = cameras.findIndex(c => c.deviceId === activeCameraId);
-        const nextIndex = (currentIndex + 1) % cameras.length;
-        setActiveCameraId(cameras[nextIndex].deviceId);
+        const currentIdx = cameras.findIndex(c => c.deviceId === activeCameraId);
+        const nextIdx = (currentIdx + 1) % cameras.length;
+        setActiveCameraId(cameras[nextIdx].deviceId);
     };
 
     return (
-        <div className="min-h-screen bg-gray-900 flex flex-col items-center justify-center relative overflow-hidden font-sans text-gray-100">
-            {/* Hidden Print Layout */}
-            {config && scannedUser && (
-                <BadgePrintLayout user={scannedUser} config={config} />
-            )}
-
-            {/* Top Bar */}
-            <div className="absolute top-0 w-full p-6 flex justify-between items-center z-30 bg-gradient-to-b from-black/80 to-transparent">
-                <div className="flex items-center gap-3">
-                    {config?.theme.logoUrl && <img src={config.theme.logoUrl} className="h-10 w-10 bg-white rounded-full p-1" alt="Logo" />}
+        <div className="min-h-screen bg-gray-950 flex flex-col items-center justify-center relative overflow-hidden text-gray-100">
+            {config && scannedUser && <BadgePrintLayout user={scannedUser} config={config} />}
+            
+            {/* Header Overlay */}
+            <div className="absolute top-0 w-full p-8 flex justify-between items-center z-30 bg-gradient-to-b from-black/50 to-transparent">
+                <div className="flex items-center gap-4">
+                    {config?.theme.logoUrl ? (
+                        <img src={config.theme.logoUrl} className="h-12 w-auto bg-white rounded-lg p-1 shadow-lg" alt="Logo" />
+                    ) : (
+                        <div className="h-12 w-12 bg-primary rounded-lg flex items-center justify-center text-white font-bold text-2xl">E</div>
+                    )}
                     <div>
-                        <h1 className="text-xl font-bold tracking-wider text-white">{config?.event.name || 'Event'}</h1>
-                        <p className="text-gray-300 text-xs uppercase tracking-widest font-semibold">Self Check-in Kiosk</p>
+                        <h1 className="text-xl font-bold tracking-tight text-white uppercase leading-none">{config?.event.name || 'Event Check-in'}</h1>
+                        <p className="text-[10px] text-primary font-bold mt-1 tracking-widest">SELF-SERVICE KIOSK</p>
                     </div>
                 </div>
                 <div className="flex gap-4">
-                    <button 
-                        onClick={toggleFullscreen}
-                        className="text-gray-400 hover:text-white transition-colors p-2"
-                        title="Toggle Fullscreen"
-                    >
-                        {isFullscreen ? (
-                            <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 20l-5.447-2.724A1 1 0 013 16.382V5.618a1 1 0 011.447-.894L9 7m0 13l6-3m-6 3V7m6 10l4.553 2.276A1 1 0 0021 18.382V7.618a1 1 0 00-.553-.894L15 7m0 13V7m0 0L9.553 4.553A1 1 0 009 3.618C9 3.618 9.553 4.553 15 7z" /></svg>
-                        ) : (
-                            <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 8V4m0 0h4M4 4l5 5m11-1V4m0 0h-4m4 0l-5 5M4 16v4m0 0h4m-4 0l5-5m11 5l-5-5m5 5v-4m0 4h-4" /></svg>
-                        )}
+                    {cameras.length > 1 && (
+                         <button onClick={switchCamera} className="text-gray-400 hover:text-white p-2 bg-white/5 rounded-full backdrop-blur-md" title="Switch Camera">
+                            <svg className="w-8 h-8" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" /></svg>
+                        </button>
+                    )}
+                    <button onClick={toggleFullscreen} className="text-gray-400 hover:text-white p-2 bg-white/5 rounded-full backdrop-blur-md">
+                        <svg className="w-8 h-8" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 8V4m0 0h4M4 4l5 5m11-1V4m0 0h-4m4 0l-5 5M4 16v4m0 0h4m-4 0l5-5m11 5l-5-5m5 5v-4m0 4h-4" /></svg>
                     </button>
-                    <button 
-                        onClick={onExit}
-                        className="text-gray-400 hover:text-red-400 transition-colors p-2"
-                        title="Exit Kiosk"
-                    >
-                        <svg xmlns="http://www.w3.org/2000/svg" className="h-8 w-8" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" /></svg>
+                    <button onClick={onExit} className="text-gray-400 hover:text-red-500 p-2 bg-white/5 rounded-full backdrop-blur-md">
+                        <svg className="w-8 h-8" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" /></svg>
                     </button>
                 </div>
             </div>
 
-            {/* Main Stage */}
-            <div className="w-full max-w-3xl px-6 relative z-10 flex flex-col items-center">
-                
-                {/* 1. Scanning State */}
-                {mode === 'scan' && (
-                    <div className={`relative w-full aspect-[4/3] max-h-[60vh] bg-black rounded-3xl overflow-hidden shadow-2xl border-4 transition-colors duration-300 ${status === 'success' ? 'border-green-500' : status === 'error' ? 'border-red-500' : 'border-gray-800'}`}>
-                        <video 
-                            ref={videoRef} 
-                            className="w-full h-full object-cover" 
-                            playsInline 
-                            muted
-                        />
-                        {/* Overlay Frame */}
-                        <div className="absolute inset-0 border-[60px] border-black/60 pointer-events-none flex flex-col items-center justify-center">
-                            {status === 'scanning' && (
-                                <div className="w-64 h-64 border-4 border-white/50 rounded-2xl relative shadow-[0_0_50px_rgba(0,0,0,0.5)]">
-                                    {/* Corners */}
-                                    <div className="absolute -top-1 -left-1 w-8 h-8 border-t-4 border-l-4 border-primary rounded-tl-lg"></div>
-                                    <div className="absolute -top-1 -right-1 w-8 h-8 border-t-4 border-r-4 border-primary rounded-tr-lg"></div>
-                                    <div className="absolute -bottom-1 -left-1 w-8 h-8 border-b-4 border-l-4 border-primary rounded-bl-lg"></div>
-                                    <div className="absolute -bottom-1 -right-1 w-8 h-8 border-b-4 border-r-4 border-primary rounded-br-lg"></div>
-                                    
-                                    {/* Scan Line Animation */}
-                                    <div className="absolute left-0 right-0 h-0.5 bg-red-500/80 shadow-[0_0_10px_red] animate-scan-y top-1/2"></div>
-                                </div>
-                            )}
-                             {status === 'scanning' && <p className="text-white mt-8 text-lg font-medium drop-shadow-md tracking-wide">Scan your QR Code</p>}
+            <div className="w-full max-w-4xl px-8 flex flex-col items-center">
+                {mode === 'scan' && status !== 'success' && status !== 'error' && (
+                    <div className="relative w-full aspect-video bg-black rounded-[2rem] overflow-hidden shadow-2xl border-4 border-gray-800">
+                        <video ref={videoRef} className="w-full h-full object-cover" playsInline muted />
+                        <div className="absolute inset-0 flex items-center justify-center">
+                            <div className="w-72 h-72 border-2 border-white/20 rounded-3xl relative">
+                                <div className="absolute top-0 left-0 w-8 h-8 border-t-4 border-l-4 border-primary rounded-tl-lg"></div>
+                                <div className="absolute top-0 right-0 w-8 h-8 border-t-4 border-r-4 border-primary rounded-tr-lg"></div>
+                                <div className="absolute bottom-0 left-0 w-8 h-8 border-b-4 border-l-4 border-primary rounded-bl-lg"></div>
+                                <div className="absolute bottom-0 right-0 w-8 h-8 border-b-4 border-r-4 border-primary rounded-br-lg"></div>
+                                {status === 'scanning' && <div className="absolute left-0 right-0 h-1 bg-primary/50 shadow-[0_0_15px_rgba(79,70,229,1)] animate-scan-y top-0"></div>}
+                            </div>
                         </div>
-                        
-                        {/* Camera Switcher */}
-                        {cameras.length > 1 && (
-                            <button 
-                                onClick={cycleCamera}
-                                className="absolute bottom-4 right-4 bg-black/50 text-white p-3 rounded-full hover:bg-black/70 backdrop-blur-sm z-40"
-                            >
-                                <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" /></svg>
-                            </button>
-                        )}
+                        <div className="absolute bottom-6 left-0 right-0 text-center">
+                            <p className="text-white/60 text-sm font-medium tracking-wide">Position your QR code in the frame</p>
+                        </div>
                     </div>
                 )}
 
-                {/* 2. Manual Entry State */}
-                {mode === 'manual' && status !== 'success' && status !== 'processing' && (
-                    <div className="w-full max-w-lg bg-white dark:bg-gray-800 p-10 rounded-3xl shadow-2xl text-center border border-gray-700">
-                        <div className="w-16 h-16 bg-gray-100 dark:bg-gray-700 rounded-full flex items-center justify-center mx-auto mb-6 text-primary">
-                            <svg xmlns="http://www.w3.org/2000/svg" className="h-8 w-8" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" /></svg>
-                        </div>
-                        <h2 className="text-3xl font-bold text-gray-900 dark:text-white mb-2">Manual Check-in</h2>
-                        <p className="text-gray-500 dark:text-gray-400 mb-8 text-lg">Enter the Ticket ID or Email Address.</p>
-                        
-                        <form onSubmit={handleManualSubmit} className="space-y-6">
+                {mode === 'manual' && status === 'scanning' && (
+                    <div className="w-full max-w-lg bg-white dark:bg-gray-800 p-12 rounded-[2.5rem] shadow-2xl text-center border border-gray-100 dark:border-gray-700 animate-fade-in">
+                        <h2 className="text-4xl font-bold text-gray-900 dark:text-white mb-8">Manual Entry</h2>
+                        <form onSubmit={(e) => { e.preventDefault(); handleCheckInAttempt(manualInput); }} className="space-y-8">
                             <input 
                                 type="text" 
-                                value={manualInput}
-                                onChange={(e) => setManualInput(e.target.value)}
-                                placeholder="e.g. ticket_123 or name@email.com"
-                                className="w-full px-6 py-4 rounded-xl border-2 border-gray-300 dark:border-gray-600 bg-gray-50 dark:bg-gray-900 text-gray-900 dark:text-white text-xl focus:ring-4 focus:ring-primary/20 focus:border-primary outline-none transition-all placeholder-gray-400"
-                                autoFocus
+                                value={manualInput} 
+                                onChange={(e) => setManualInput(e.target.value)} 
+                                placeholder="ID or Email" 
+                                className="w-full px-8 py-5 rounded-2xl border-2 border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-900 text-3xl text-center focus:border-primary outline-none transition-all dark:text-white" 
+                                autoFocus 
                             />
-                            <div className="flex gap-4">
-                                <button 
-                                    type="button"
-                                    onClick={() => setMode('scan')}
-                                    className="flex-1 py-4 bg-gray-200 dark:bg-gray-700 hover:bg-gray-300 dark:hover:bg-gray-600 text-gray-800 dark:text-white rounded-xl font-bold text-lg transition-colors"
-                                >
-                                    Cancel
-                                </button>
-                                <button 
-                                    type="submit" 
-                                    disabled={!manualInput.trim()}
-                                    className="flex-1 py-4 bg-primary hover:bg-primary/90 text-white rounded-xl font-bold text-lg shadow-lg transform transition-transform active:scale-95 disabled:opacity-50 disabled:cursor-not-allowed"
-                                >
-                                    Check In
-                                </button>
+                            <div className="flex gap-6">
+                                <button type="button" onClick={() => setMode('scan')} className="flex-1 py-5 bg-gray-100 dark:bg-gray-700 text-2xl font-bold rounded-2xl text-gray-700 dark:text-gray-200">Back to Scan</button>
+                                <button type="submit" disabled={!manualInput.trim()} className="flex-1 py-5 bg-primary text-white text-2xl font-bold rounded-2xl shadow-xl hover:bg-primary/90 disabled:opacity-50">Find Me</button>
                             </div>
                         </form>
                     </div>
                 )}
 
-                {/* 3. Processing State */}
                 {status === 'processing' && (
-                    <div className="absolute inset-0 flex items-center justify-center z-50">
-                        <div className="bg-gray-900/90 backdrop-blur-md p-12 rounded-3xl flex flex-col items-center justify-center shadow-2xl border border-gray-700 w-full max-w-md">
-                            <div className="w-20 h-20 border-8 border-primary border-t-transparent rounded-full animate-spin mb-8"></div>
-                            <p className="text-white text-2xl font-medium tracking-wide">Verifying...</p>
-                        </div>
+                    <div className="text-center animate-pulse">
+                        <div className="w-32 h-32 border-[12px] border-primary border-t-transparent rounded-full animate-spin mx-auto mb-8"></div>
+                        <h2 className="text-4xl font-bold text-white">Verifying Ticket...</h2>
                     </div>
                 )}
 
-                {/* 4. Success State */}
                 {status === 'success' && scannedUser && (
-                     <div className="absolute inset-0 flex items-center justify-center z-50">
-                        <div className="w-full max-w-lg bg-white dark:bg-gray-800 rounded-3xl shadow-2xl overflow-hidden animate-fade-in-up border-4 border-green-500">
-                            <div className="bg-green-500 p-8 flex flex-col items-center text-white">
-                                <div className="w-24 h-24 bg-white rounded-full flex items-center justify-center mb-4 shadow-lg animate-bounce">
-                                    <svg className="w-12 h-12 text-green-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={4} d="M5 13l4 4L19 7"/></svg>
-                                </div>
-                                <h2 className="text-4xl font-bold">You're Checked In!</h2>
+                    <div className="w-full max-w-2xl bg-white dark:bg-gray-800 rounded-[3rem] shadow-2xl overflow-hidden animate-fade-in-up">
+                        <div className="bg-green-500 p-12 flex flex-col items-center text-white">
+                            <div className="w-32 h-32 bg-white rounded-full flex items-center justify-center mb-6 shadow-xl animate-bounce">
+                                <svg className="w-16 h-16 text-green-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={4} d="M5 13l4 4L19 7"/></svg>
                             </div>
-                            <div className="p-10 text-center">
-                                <h3 className="text-5xl font-extrabold text-gray-900 dark:text-white mb-3">{scannedUser.name}</h3>
-                                <p className="text-2xl text-gray-500 dark:text-gray-300 font-medium">{scannedUser.company || scannedUser.role || 'Delegate'}</p>
-                                
-                                <div className="mt-10 pt-8 border-t border-gray-200 dark:border-gray-700 flex flex-col gap-3">
-                                    {config?.printConfig?.autoPrintOnKiosk ? (
-                                        <div className="flex items-center justify-center gap-3 text-primary animate-pulse font-bold text-lg">
-                                            <svg xmlns="http://www.w3.org/2000/svg" className="h-8 w-8" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 17h2a2 2 0 002-2v-4a2 2 0 00-2-2H5a2 2 0 00-2 2v4a2 2 0 002 2h2m2 4h6a2 2 0 002-2v-4a2 2 0 00-2-2H9a2 2 0 00-2 2v4h10z" /></svg>
-                                            <span>Printing Badge...</span>
-                                        </div>
-                                    ) : (
-                                        <p className="text-lg text-gray-400">Please proceed to the event hall.</p>
-                                    )}
-                                </div>
-                            </div>
-                            <div className="bg-gray-50 dark:bg-gray-900 p-2">
-                                <div className="h-2 bg-green-500 w-full animate-shrink-width origin-left"></div>
-                            </div>
+                            <h2 className="text-5xl font-black">WELCOME!</h2>
+                        </div>
+                        <div className="p-16 text-center">
+                            <h3 className="text-6xl font-extrabold text-gray-900 dark:text-white mb-4">{scannedUser.name}</h3>
+                            <p className="text-3xl text-gray-500 dark:text-gray-400 font-medium italic">{scannedUser.company || 'Confirmed Attendee'}</p>
+                            {config?.printConfig?.autoPrintOnKiosk ? (
+                                <p className="mt-12 text-2xl text-primary font-bold animate-pulse">Printing your badge now...</p>
+                            ) : (
+                                <p className="mt-12 text-2xl text-primary font-bold">Successfully Checked In!</p>
+                            )}
                         </div>
                     </div>
                 )}
 
-                {/* 5. Error State */}
                 {status === 'error' && (
-                     <div className="absolute inset-0 flex items-center justify-center z-50">
-                        <div className="w-full max-w-md bg-white dark:bg-gray-800 rounded-3xl shadow-2xl p-10 text-center border-4 border-red-500 animate-shake">
-                            <div className="w-24 h-24 bg-red-100 dark:bg-red-900/30 rounded-full flex items-center justify-center mx-auto mb-6 text-red-600 dark:text-red-500">
-                                <svg className="w-12 h-12" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={3} d="M6 18L18 6M6 6l12 12"/></svg>
-                            </div>
-                            <h2 className="text-3xl font-bold text-gray-900 dark:text-white mb-2">Check-in Failed</h2>
-                            <p className="text-xl text-gray-600 dark:text-gray-300 mb-8">{errorMsg || "Invalid Ticket"}</p>
-                            
-                            <button 
-                                onClick={() => { setStatus('scanning'); setErrorMsg(null); processingRef.current = false; }}
-                                className="px-10 py-4 bg-gray-200 dark:bg-gray-700 hover:bg-gray-300 dark:hover:bg-gray-600 rounded-xl font-bold text-gray-800 dark:text-white transition-colors text-lg"
-                            >
-                                Try Again
-                            </button>
-                        </div>
+                    <div className="w-full max-w-lg bg-red-50 dark:bg-red-900/20 p-16 rounded-[3rem] text-center border-4 border-red-500 animate-shake shadow-2xl">
+                        <h2 className="text-4xl font-bold text-red-600 dark:text-red-400 mb-4">Access Denied</h2>
+                        <p className="text-2xl text-gray-700 dark:text-gray-300">{errorMsg || "Invalid or used ticket."}</p>
+                        <button onClick={() => { setStatus('scanning'); lastScannedCode.current = null; }} className="mt-10 px-12 py-4 bg-red-600 text-white text-2xl font-bold rounded-2xl shadow-lg hover:bg-red-700">Try Again</button>
                     </div>
                 )}
 
-                {/* Mode Switcher (Scan vs Manual) */}
-                {status === 'scanning' && (
-                    <div className="mt-12 flex gap-6">
-                        <button
-                            onClick={() => setMode('scan')}
-                            className={`px-8 py-4 rounded-full font-bold transition-all shadow-xl flex items-center gap-3 text-lg ${mode === 'scan' ? 'bg-primary text-white scale-105 ring-4 ring-primary/30' : 'bg-gray-800 text-gray-400 hover:bg-gray-700 hover:text-white'}`}
-                        >
-                            <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v1m6 11h2m-6.5 6.5v-1m-6.5-5.5h-1M4 12V4a2 2 0 012-2h8a2 2 0 012 2v8a2 2 0 01-2 2H6a2 2 0 01-2-2z" /></svg>
-                            Scan QR
-                        </button>
-                        <button
-                            onClick={() => setMode('manual')}
-                            className={`px-8 py-4 rounded-full font-bold transition-all shadow-xl flex items-center gap-3 text-lg ${mode === 'manual' ? 'bg-primary text-white scale-105 ring-4 ring-primary/30' : 'bg-gray-800 text-gray-400 hover:bg-gray-700 hover:text-white'}`}
-                        >
-                            <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" /></svg>
-                            Manual Entry
-                        </button>
-                    </div>
+                {status === 'scanning' && mode === 'scan' && (
+                    <button onClick={() => setMode('manual')} className="mt-12 px-10 py-4 bg-gray-800/80 backdrop-blur-md text-gray-300 rounded-full font-bold text-lg hover:text-white border border-gray-700 hover:border-gray-500 transition-all">Manual ID Lookup</button>
                 )}
             </div>
-            
-            {/* Background Effects */}
-            <div className="absolute inset-0 pointer-events-none">
-                <div className="absolute top-[-10%] left-[-10%] w-[40%] h-[40%] bg-primary/20 rounded-full blur-[100px]"></div>
-                <div className="absolute bottom-[-10%] right-[-10%] w-[40%] h-[40%] bg-purple-600/20 rounded-full blur-[100px]"></div>
-            </div>
-            
-            {/* Styles for animations */}
+
             <style>{`
-                @keyframes scan-y {
-                    0% { top: 10%; opacity: 0.5; }
-                    50% { top: 90%; opacity: 1; }
-                    100% { top: 10%; opacity: 0.5; }
-                }
-                .animate-scan-y {
-                    animation: scan-y 3s infinite ease-in-out;
-                }
-                @keyframes shrink-width {
-                    from { width: 100%; }
-                    to { width: 0%; }
-                }
-                .animate-shrink-width {
-                    animation: shrink-width 5s linear forwards;
-                }
-                .animate-shake {
-                    animation: shake 0.5s cubic-bezier(.36,.07,.19,.97) both;
-                }
-                @keyframes shake {
-                    10%, 90% { transform: translate3d(-1px, 0, 0); }
-                    20%, 80% { transform: translate3d(2px, 0, 0); }
-                    30%, 50%, 70% { transform: translate3d(-4px, 0, 0); }
-                    40%, 60% { transform: translate3d(4px, 0, 0); }
-                }
+                @keyframes scan-y { 0%, 100% { top: 0% } 50% { top: 100% } }
+                .animate-scan-y { animation: scan-y 2.5s infinite linear; }
+                .animate-shake { animation: shake 0.5s linear; }
+                @keyframes shake { 0%, 100% { transform: translateX(0) } 25% { transform: translateX(-10px) } 75% { transform: translateX(10px) } }
             `}</style>
         </div>
     );

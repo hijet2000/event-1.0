@@ -10,20 +10,45 @@ export type Permission =
   | 'manage_agenda'
   | 'manage_speakers_sponsors'
   | 'view_eventcoin_dashboard'
-  | 'send_invitations';
+  | 'manage_eventcoin'
+  | 'send_invitations'
+  | 'manage_gamification'
+  | 'manage_communications'
+  | 'manage_media'
+  | 'manage_marketing'
+  | 'manage_maps'
+  | 'view_system_status'
+  | 'view_diagnostics';
+
+export const PERMISSION_GROUPS: Record<string, Permission[]> = {
+  'General': ['view_dashboard', 'manage_settings', 'manage_users'],
+  'Event Content': ['manage_agenda', 'manage_speakers_sponsors', 'manage_maps', 'manage_media', 'manage_marketing'],
+  'Delegate Management': ['manage_registrations', 'send_invitations', 'manage_communications'],
+  'Operations': ['manage_tasks', 'manage_dining', 'manage_accommodation', 'manage_gamification'],
+  'Economy': ['view_eventcoin_dashboard', 'manage_eventcoin'],
+  'System': ['view_system_status', 'view_diagnostics']
+};
 
 export const ALL_PERMISSIONS: Record<Permission, string> = {
-  view_dashboard: 'View Dashboard',
-  manage_registrations: 'Manage Registrations',
-  manage_settings: 'Manage Settings',
-  manage_users: 'Manage Users',
-  manage_tasks: 'Manage Tasks',
-  manage_dining: 'Manage Dining',
-  manage_accommodation: 'Manage Accommodation',
-  manage_agenda: 'Manage Agenda',
+  view_dashboard: 'View Dashboard Stats',
+  manage_registrations: 'Manage Registrations & Check-in',
+  manage_settings: 'Edit Global Event Settings',
+  manage_users: 'Manage Admin Users & Roles',
+  manage_tasks: 'Manage Staff Tasks',
+  manage_dining: 'Manage Meal Plans & Restaurants',
+  manage_accommodation: 'Manage Hotel Bookings',
+  manage_agenda: 'Manage Sessions & Schedule',
   manage_speakers_sponsors: 'Manage Speakers & Sponsors',
-  view_eventcoin_dashboard: 'View EventCoin Dashboard',
-  send_invitations: 'Send Invitations'
+  view_eventcoin_dashboard: 'View Economy Stats',
+  manage_eventcoin: 'Issue/Deduct EventCoins',
+  send_invitations: 'Send Direct Invitations',
+  manage_gamification: 'Manage Scavenger Hunt',
+  manage_communications: 'Send Broadcasts & View Logs',
+  manage_media: 'Manage Media Library',
+  manage_marketing: 'Generate Marketing Content',
+  manage_maps: 'Manage Venue Maps',
+  view_system_status: 'View Technical Logs/Export',
+  view_diagnostics: 'Run System Health Tests'
 };
 
 export interface RegistrationData {
@@ -131,6 +156,7 @@ export interface EventConfig {
   };
   googleConfig: {
     serviceAccountKeyJson: string;
+    subjectEmail: string;
   };
   badgeConfig: {
     showName: boolean;

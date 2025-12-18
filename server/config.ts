@@ -104,8 +104,10 @@ export const defaultConfig: EventConfig = {
       password: '',
       encryption: 'tls',
   },
+  /* Added missing subjectEmail property to match EventConfig interface defined in types.ts */
   googleConfig: {
       serviceAccountKeyJson: '',
+      subjectEmail: '',
   },
   badgeConfig: {
     showName: true,

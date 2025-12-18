@@ -131,12 +131,8 @@ export const VirtualConcierge: React.FC<VirtualConciergeProps> = ({ isOpen, onCl
                 // Combine Persona with Facts
                 const systemInstruction = `${aiConfig.persona}\n\n${eventContext}`;
 
-                const apiKey = getEnv('API_KEY');
-                if (!apiKey) {
-                    throw new Error("API Key not found.");
-                }
-
-                const ai = new GoogleGenAI({ apiKey });
+                // Updated: Use process.env.API_KEY directly as per guidelines
+                const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
                 
                 // Setup Audio
                 inputContextRef.current = new (window.AudioContext || (window as any).webkitAudioContext)({ sampleRate: 16000 });
@@ -161,6 +157,7 @@ export const VirtualConcierge: React.FC<VirtualConciergeProps> = ({ isOpen, onCl
                             processor.onaudioprocess = (e) => {
                                 const inputData = e.inputBuffer.getChannelData(0);
                                 const blob = createBlob(inputData);
+                                // CRITICAL: Solely rely on sessionPromise resolves
                                 sessionPromise.then(session => {
                                     session.sendRealtimeInput({ media: blob });
                                 });
@@ -171,10 +168,10 @@ export const VirtualConcierge: React.FC<VirtualConciergeProps> = ({ isOpen, onCl
                         },
                         onmessage: async (message: LiveServerMessage) => {
                             if (message.serverContent?.outputTranscription) {
-                                setTranscript(prev => ({ ...prev, model: prev.model + message.serverContent?.outputTranscription?.text }));
+                                setTranscript(prev => ({ ...prev, model: prev.model + message.serverContent.outputTranscription.text }));
                                 setStatus('speaking');
                             } else if (message.serverContent?.inputTranscription) {
-                                setTranscript(prev => ({ ...prev, user: prev.user + message.serverContent?.inputTranscription?.text }));
+                                setTranscript(prev => ({ ...prev, user: prev.user + message.serverContent.inputTranscription.text }));
                                 setStatus('listening');
                             }
 
@@ -228,7 +225,8 @@ export const VirtualConcierge: React.FC<VirtualConciergeProps> = ({ isOpen, onCl
                         speechConfig: {
                             voiceConfig: { prebuiltVoiceConfig: { voiceName: aiConfig.voice } }
                         },
-                        systemInstruction: { parts: [{ text: systemInstruction }] },
+                        // Updated: systemInstruction should be a string in config as per examples
+                        systemInstruction: systemInstruction,
                         inputAudioTranscription: {},
                         outputAudioTranscription: {}
                     }

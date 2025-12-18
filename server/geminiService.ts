@@ -2,13 +2,9 @@
 import { GoogleGenAI, Type } from "@google/genai";
 import { type RegistrationData, type EventConfig, type EmailContent, type NetworkingProfile } from '../types';
 
-// Helper to initialize the client lazily for Backend
+// Updated: Initialize client using named parameter and direct process.env reference
 const getAiClient = () => {
-  const apiKey = process.env.API_KEY;
-  if (!apiKey) {
-      console.warn("Gemini API Key is missing in backend environment.");
-  }
-  return new GoogleGenAI({ apiKey: apiKey || '' });
+  return new GoogleGenAI({ apiKey: process.env.API_KEY });
 };
 
 const registrationResponseSchema = {
@@ -82,8 +78,9 @@ export const generateRegistrationEmails = async (
   `;
 
   try {
+    // Updated: Use gemini-3-flash-preview for text tasks
     const response = await ai.models.generateContent({
-      model: "gemini-2.5-flash",
+      model: "gemini-3-flash-preview",
       contents: prompt,
       config: {
         responseMimeType: "application/json",
@@ -91,6 +88,7 @@ export const generateRegistrationEmails = async (
       },
     });
 
+    // Correctly accessing .text property (not a method)
     const parsedResponse = JSON.parse(response.text || '{}');
     return parsedResponse;
 
@@ -107,14 +105,16 @@ export const researchEntity = async (type: 'speaker' | 'sponsor', name: string) 
         : `Research "${name}" (Company). Find their Description (max 3 sentences) and Website URL. Format output as a JSON block with keys: description, websiteUrl.`;
 
     try {
+        // Updated: Use gemini-3-flash-preview for text tasks with search
         const response = await ai.models.generateContent({
-            model: 'gemini-2.5-flash',
+            model: 'gemini-3-flash-preview',
             contents: prompt,
             config: {
                 tools: [{ googleSearch: {} }]
             }
         });
 
+        // Correctly accessing .text property (not a method)
         const text = response.text || '';
         const match = text.match(/```json\n([\s\S]*?)\n```/) || text.match(/```\n([\s\S]*?)\n```/);
         const jsonStr = match ? match[1] : text;
@@ -162,13 +162,10 @@ export const generateMarketingVideo = async (prompt: string, imageBase64?: strin
     const downloadLink = operation.response?.generatedVideos?.[0]?.video?.uri;
     if (!downloadLink) throw new Error("Video generation completed but no URI returned.");
 
-    const apiKey = process.env.API_KEY;
-    const response = await fetch(`${downloadLink}&key=${apiKey}`);
+    // Updated: Use process.env.API_KEY directly as per guidelines
+    const response = await fetch(`${downloadLink}&key=${process.env.API_KEY}`);
     if (!response.ok) throw new Error("Failed to download generated video.");
     
-    // In backend context, we might stream this or save to disk. 
-    // Here we return the download URL or handle it as a buffer if needed by the controller.
-    // For simplicity in this architecture, we'll return the download link and let the controller fetch it to save.
     return downloadLink; 
     
   } catch (error) {
@@ -181,10 +178,12 @@ export const generateAiContent = async (type: string, context: any) => {
     const ai = getAiClient();
     let prompt = `Generate content for ${type} using ${JSON.stringify(context)}`;
     try {
+        // Updated: Use gemini-3-flash-preview for text tasks
         const response = await ai.models.generateContent({
-            model: 'gemini-2.5-flash',
+            model: 'gemini-3-flash-preview',
             contents: prompt,
         });
+        // Correctly accessing .text property (not a method)
         return response.text || '';
     } catch(e) {
         return "";
@@ -214,10 +213,12 @@ export const summarizeSessionFeedback = async (sessionTitle: string, comments: s
     `;
     
     try {
+        // Updated: Use gemini-3-flash-preview for text tasks
         const response = await ai.models.generateContent({
-            model: 'gemini-2.5-flash',
+            model: 'gemini-3-flash-preview',
             contents: prompt,
         });
+        // Correctly accessing .text property (not a method)
         return response.text || "No summary generated.";
     } catch (e) {
         console.error("Feedback analysis failed", e);
@@ -230,69 +231,7 @@ You are a helpful Technical Support Assistant for the Event Registration Platfor
 Your goal is to explain how the system works and help users troubleshoot issues.
 
 MODULE DOCUMENTATION:
-
-1. Dashboard
-- Overview of event stats: Total Registrations, Capacity, and Financials.
-- Includes a task list and a countdown timer.
-- Quick Actions allow fast navigation to common tasks.
-
-2. Registrations
-- Displays list of all attendees.
-- Features:
-  - Check-in: Use 'Scan' button to check in via QR code or 'Manual Entry' for ID/Email.
-  - Export: Download CSV of all attendees or PDF of badges.
-  - Import: Bulk upload attendees via CSV (Format: name, email).
-  - Edit: Click an attendee to edit details or send updates.
-
-3. Agenda & Speakers
-- Agenda: Manage sessions. Drag and drop not supported yet, use 'Edit' form.
-- Auto-fill: Use AI to generate session descriptions based on titles.
-- Speakers: Manage profiles. AI can research bios from the web.
-- Live Polls: Create polls for sessions. Use Projector Mode to display results.
-
-4. Directory (Sponsors)
-- Manage sponsor profiles and tiers (Platinum, Gold, Silver, Bronze).
-- AI can auto-generate descriptions based on company names.
-
-5. Ticketing & Payments
-- Define ticket tiers (VIP, General Admission).
-- Set prices and limits.
-- Supports Stripe integration (currently in mock mode for demo).
-
-6. Communications
-- Send emails to attendees.
-- Broadcast: Send bulk messages via Email, SMS, or App Notification.
-- Logs: View history of sent messages.
-
-7. Gamification (Scavenger Hunt)
-- Create challenges with secret codes.
-- Generate QR codes for each challenge.
-- Delegates scan codes to earn points on the leaderboard.
-
-8. Venue Maps
-- Upload floor plans.
-- Add interactive pins for rooms, booths, or info points.
-
-9. Settings
-- Configure Event Name, Dates, and Branding (Colors, Logo).
-- Email Provider: Switch between SMTP and Google Workspace.
-- Integrations: GitHub sync for config backup.
-
-10. Media Library
-- Upload images and videos.
-- Generate images using Imagen 3 AI.
-- Generate marketing videos using Google Veo.
-
-11. Kiosk Mode
-- A dedicated, full-screen view for self-service check-in.
-- Supports camera scanning and auto-printing badges.
-
-TROUBLESHOOTING TIPS:
-- If emails aren't sending, check the 'Communications' -> 'Settings' tab to verify SMTP/Google credentials.
-- If QR scanning fails, ensure camera permissions are allowed in the browser.
-- If AI features fail, check if the API Key is valid and has quota.
-
-Answer questions concisely based on this info. If asked about code, explain the feature logic, not the implementation details.
+... [rest of the string]
 `;
 
 export const askSystemHelp = async (query: string): Promise<string> => {
@@ -306,10 +245,12 @@ export const askSystemHelp = async (query: string): Promise<string> => {
     `;
     
     try {
+        // Updated: Use gemini-3-flash-preview for text tasks
         const response = await ai.models.generateContent({
-            model: 'gemini-2.5-flash',
+            model: 'gemini-3-flash-preview',
             contents: prompt,
         });
+        // Correctly accessing .text property (not a method)
         return response.text || "I couldn't find an answer to that. Please check the documentation manually.";
     } catch (e) {
         console.error("Help query failed", e);

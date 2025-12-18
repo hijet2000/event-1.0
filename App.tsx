@@ -1,6 +1,5 @@
 
 import React, { useState, useEffect, Suspense } from 'react';
-import ReactDOM from 'react-dom/client';
 import { type RegistrationData, type Permission, type Session, type Speaker, type Sponsor, type TicketTier } from './types';
 import { registerUser, loginDelegate, triggerRegistrationEmails, getInvitationDetails, getPublicEventData, initializeApi, recordTicketSale } from './server/api';
 import { verifyToken } from './server/auth';
@@ -24,18 +23,15 @@ import { PaymentModal } from './components/PaymentModal';
 import { KioskView } from './components/KioskView';
 import { ProjectorView } from './components/ProjectorView';
 import { configureBackgroundFetch } from './services/native';
+import { generateRegistrationEmails } from './services/geminiService';
+import { sendEmail } from './services/emailService';
 
-// Lazy load heavy portals to improve initial page load speed
+// Lazy load heavy portals
 const AdminPortal = React.lazy(() => import('./components/AdminPortal').then(module => ({ default: module.AdminPortal })));
 const DelegatePortal = React.lazy(() => import('./components/DelegatePortal').then(module => ({ default: module.DelegatePortal })));
 
 type View = 'registration' | 'success' | 'passwordReset';
 type PublicTab = 'home' | 'agenda' | 'speakers' | 'register';
-
-interface AdminSession {
-  token: string;
-  user: { email: string; permissions: Permission[] };
-}
 
 export interface RegistrationFormState {
   firstName: string;
@@ -44,52 +40,6 @@ export interface RegistrationFormState {
   password?: string;
   ticketTierId?: string;
   [key: string]: any;
-}
-
-interface ErrorBoundaryProps {
-  children?: React.ReactNode;
-}
-
-interface ErrorBoundaryState {
-  hasError: boolean;
-  error: Error | null;
-}
-
-class ErrorBoundary extends React.Component<ErrorBoundaryProps, ErrorBoundaryState> {
-  state: ErrorBoundaryState = { hasError: false, error: null };
-  declare props: Readonly<ErrorBoundaryProps>;
-
-  static getDerivedStateFromError(error: Error): ErrorBoundaryState {
-    return { hasError: true, error };
-  }
-
-  componentDidCatch(error: Error, errorInfo: React.ErrorInfo) {
-    console.error("Uncaught error:", error, errorInfo);
-  }
-
-  render() {
-    if (this.state.hasError) {
-      return (
-        <div className="min-h-screen flex items-center justify-center bg-gray-50 dark:bg-gray-900 p-4">
-          <div className="bg-white dark:bg-gray-800 p-8 rounded-lg shadow-xl max-w-lg w-full">
-            <h2 className="text-2xl font-bold text-red-600 mb-4">Something went wrong</h2>
-            <p className="text-gray-600 dark:text-gray-300 mb-4">The application encountered an unexpected error.</p>
-            <div className="bg-gray-100 dark:bg-gray-900 p-4 rounded overflow-auto text-sm font-mono text-red-500 mb-6 max-h-40">
-              {this.state.error?.message || "Unknown error"}
-            </div>
-            <button 
-              onClick={() => { localStorage.clear(); window.location.href = '/'; }}
-              className="w-full py-2 px-4 bg-indigo-600 text-white rounded hover:bg-indigo-700"
-            >
-              Clear Cache & Reload
-            </button>
-          </div>
-        </div>
-      );
-    }
-
-    return this.props.children;
-  }
 }
 
 interface EventPageContentProps {
@@ -102,16 +52,13 @@ const EventPageContent: React.FC<EventPageContentProps> = ({ onAdminLogin, event
   const { config, registrationCount, isLoading: isThemeLoading, error: themeError } = useTheme();
   const { t } = useTranslation();
   
-  // Public Data State
   const [sessions, setSessions] = useState<Session[]>([]);
   const [speakers, setSpeakers] = useState<Speaker[]>([]);
   const [sponsors, setSponsors] = useState<Sponsor[]>([]);
   const [ticketTiers, setTicketTiers] = useState<TicketTier[]>([]);
   const [publicDataLoading, setPublicDataLoading] = useState(true);
 
-  // Navigation State
   const [publicTab, setPublicTab] = useState<PublicTab>('home');
-
   const [view, setView] = useState<View>('registration');
   const [error, setError] = useState<string>('');
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -123,7 +70,6 @@ const EventPageContent: React.FC<EventPageContentProps> = ({ onAdminLogin, event
   const [isDelegateModalOpen, setDelegateModalOpen] = useState(false);
   const [isPaymentModalOpen, setPaymentModalOpen] = useState(false);
   
-  // Payment State
   const [pendingRegistration, setPendingRegistration] = useState<RegistrationData | null>(null);
   const [paymentAmount, setPaymentAmount] = useState(0);
   const [paymentDesc, setPaymentDesc] = useState('');
@@ -143,7 +89,6 @@ const EventPageContent: React.FC<EventPageContentProps> = ({ onAdminLogin, event
   const initialFormData: RegistrationFormState = { firstName: '', lastName: '', email: '', password: '', ticketTierId: '' };
   const [formData, setFormData] = useState<RegistrationFormState>(initialFormData);
 
-  // Initialize form data with custom fields when config loads
   useEffect(() => {
     if (config?.formFields) {
       setFormData(prev => {
@@ -151,7 +96,7 @@ const EventPageContent: React.FC<EventPageContentProps> = ({ onAdminLogin, event
         let hasChanges = false;
         config.formFields.forEach(field => {
           if (field.enabled && next[field.id] === undefined) {
-            next[field.id] = ''; // Initialize with empty string to ensure controlled input
+            next[field.id] = ''; 
             hasChanges = true;
           }
         });
@@ -160,7 +105,6 @@ const EventPageContent: React.FC<EventPageContentProps> = ({ onAdminLogin, event
     }
   }, [config]);
 
-  // Load Public Data (Sessions, Speakers)
   useEffect(() => {
       if (eventId) {
           getPublicEventData(eventId).then(data => {
@@ -170,7 +114,6 @@ const EventPageContent: React.FC<EventPageContentProps> = ({ onAdminLogin, event
               setTicketTiers(data.ticketTiers || []);
               setPublicDataLoading(false);
           }).catch(e => {
-              console.warn("Failed to load public data for event:", eventId);
               setPublicDataLoading(false);
           });
       }
@@ -184,18 +127,13 @@ const EventPageContent: React.FC<EventPageContentProps> = ({ onAdminLogin, event
     if (resetTokenParam) {
         setResetToken(resetTokenParam);
         setView('passwordReset');
-        setPublicTab('register'); // Force register view for reset for simplicity
+        setPublicTab('register'); 
     } else if (inviteTokenParam) {
         setInviteToken(inviteTokenParam);
         setPublicTab('register');
         getInvitationDetails(inviteTokenParam).then(details => {
             if (details && details.eventId === eventId) {
                 setFormData(prev => ({ ...prev, email: details.inviteeEmail }));
-                try {
-                    window.history.replaceState({}, document.title, `/${eventId}`);
-                } catch (e) {
-                    // Ignore history errors in sandboxed environments
-                }
             }
         });
     }
@@ -215,13 +153,46 @@ const EventPageContent: React.FC<EventPageContentProps> = ({ onAdminLogin, event
   const executeRegistration = async (submissionData: RegistrationData) => {
       try {
           const result = await registerUser(eventId, submissionData, inviteToken || undefined);
-          if (result.success) {
+          if (result.success && config) {
               const userForEmail = result.user || { ...submissionData, id: 'temp-id' };
+              
+              // Enhanced QR Data for ticket validation
+              const verificationLink = `${window.location.origin}/verify/${userForEmail.id}`;
+              const qrData = JSON.stringify({
+                  id: userForEmail.id,
+                  event: config.event.name || 'Event',
+                  url: verificationLink,
+                  token: `secure_${userForEmail.id?.slice(-6)}_${Date.now()}`,
+                  ver: '2.0'
+              });
+              const qrCodeUrl = `https://api.qrserver.com/v1/create-qr-code/?size=250x250&data=${encodeURIComponent(qrData)}`;
+
               setSuccessUser(userForEmail);
-              // Send emails (logic handles backend call)
-              await triggerRegistrationEmails(eventId, userForEmail);
+
+              // 1. Generate Personalized Confirmation Emails using Gemini API
+              try {
+                  const emailContent = await generateRegistrationEmails(
+                      userForEmail, 
+                      config, 
+                      verificationLink, 
+                      qrCodeUrl
+                  );
+
+                  // 2. Trigger the Email Delivery Service
+                  await sendEmail({
+                      to: userForEmail.email,
+                      subject: emailContent.userEmail.subject,
+                      body: emailContent.userEmail.body
+                  });
+
+                  console.log("Confirmation email successfully triggered via Gemini.");
+              } catch (emailError) {
+                  console.error("Gemini email generation failed, but registration was successful:", emailError);
+                  // Non-blocking error for UI, but we log it.
+              }
+
               setView('success');
-          } else {
+          } else if (!result.success) {
               setError(result.message);
           }
       } catch (err) {
@@ -231,22 +202,20 @@ const EventPageContent: React.FC<EventPageContentProps> = ({ onAdminLogin, event
 
   const handleSubmit = async () => {
     if (!config) {
-      setError("Configuration not loaded, cannot submit.");
+      setError("Configuration not loaded.");
       return;
     }
     setError('');
     setIsSubmitting(true);
     
-    // Spread formData to capture standard AND custom fields
     const submissionData: RegistrationData = {
       ...formData,
       name: `${formData.firstName} ${formData.lastName}`.trim(),
-      createdAt: 0,
+      createdAt: Date.now(),
     };
     delete (submissionData as any).firstName;
     delete (submissionData as any).lastName;
 
-    // Check for ticket payment
     if (formData.ticketTierId) {
         const tier = ticketTiers.find(t => t.id === formData.ticketTierId);
         if (tier && tier.price > 0) {
@@ -254,19 +223,17 @@ const EventPageContent: React.FC<EventPageContentProps> = ({ onAdminLogin, event
             setPaymentAmount(tier.price);
             setPaymentDesc(`Ticket: ${tier.name} (${config.event.name})`);
             setPaymentModalOpen(true);
-            setIsSubmitting(false); // Reset loading state when handing off to payment modal
+            setIsSubmitting(false); 
             return;
         }
     }
 
-    // Proceed if free or no ticket
     await executeRegistration(submissionData);
     setIsSubmitting(false);
   };
   
   const handlePaymentSuccess = async () => {
       if (pendingRegistration) {
-          // Record sale (optional: use returned ID from reg, but for now mocked)
           if (formData.ticketTierId) {
               await recordTicketSale(eventId, formData.ticketTierId, paymentAmount);
           }
@@ -286,7 +253,6 @@ const EventPageContent: React.FC<EventPageContentProps> = ({ onAdminLogin, event
       }
       return false;
     } catch (e) {
-      console.error(e);
       return false;
     }
   };
@@ -303,7 +269,6 @@ const EventPageContent: React.FC<EventPageContentProps> = ({ onAdminLogin, event
   
   const isSoldOut = config && config.event.maxAttendees > 0 && registrationCount >= config.event.maxAttendees;
 
-  // Render Logic Helpers
   const renderFooter = () => (
     <footer className="mt-12 text-center text-sm text-gray-500 dark:text-gray-400 pb-8 border-t border-gray-200 dark:border-gray-700 pt-8">
       <div className="flex items-center justify-center flex-wrap gap-x-4 gap-y-2 mb-4">
@@ -319,11 +284,9 @@ const EventPageContent: React.FC<EventPageContentProps> = ({ onAdminLogin, event
           <span className="hidden sm:inline">&bull;</span>
           <button type="button" onClick={() => onNavigate('/')} className="hover:text-primary transition cursor-pointer">{t('nav.allEvents')}</button>
       </div>
-      
       <div className="flex justify-center mb-4">
           <LanguageSelector />
       </div>
-
       <p>&copy; {new Date().getFullYear()} {config?.host.name || 'Event Platform'}. All rights reserved.</p>
     </footer>
   );
@@ -338,37 +301,19 @@ const EventPageContent: React.FC<EventPageContentProps> = ({ onAdminLogin, event
   }
   
   if (isThemeLoading || publicDataLoading) {
-    return (
-      <div className="bg-background-color min-h-screen flex items-center justify-center">
-        <ContentLoader />
-      </div>
-    );
+    return <div className="bg-background-color min-h-screen flex items-center justify-center"><ContentLoader /></div>;
   }
 
   if (themeError && !config) {
     return (
       <div className="bg-gray-50 dark:bg-gray-900 min-h-screen flex flex-col items-center justify-center p-4 text-center">
         <div className="max-w-md w-full bg-white dark:bg-gray-800 shadow-lg rounded-lg p-8 mb-8">
-           <div className="mx-auto flex items-center justify-center h-12 w-12 rounded-full bg-red-100 dark:bg-red-900 mb-4">
-              <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6 text-red-600 dark:text-red-200" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
-              </svg>
-           </div>
            <h3 className="text-lg font-medium text-gray-900 dark:text-white mb-2">Event Not Found</h3>
            <p className="text-sm text-gray-500 dark:text-gray-400 mb-6">{themeError}</p>
-           <button 
-              onClick={() => onNavigate('/')}
-              className="inline-flex justify-center w-full rounded-md border border-transparent shadow-sm px-4 py-2 bg-primary text-base font-medium text-white hover:bg-primary/90 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-primary sm:text-sm"
-           >
-             View All Events
-           </button>
+           <button onClick={() => onNavigate('/')} className="inline-flex justify-center w-full rounded-md border border-transparent shadow-sm px-4 py-2 bg-primary text-base font-medium text-white hover:bg-primary/90">View All Events</button>
         </div>
         {renderFooter()}
-        <AdminLoginModal 
-            isOpen={isAdminModalOpen}
-            onClose={() => setAdminModalOpen(false)}
-            onLoginSuccess={handleAdminLoginSuccess}
-        />
+        <AdminLoginModal isOpen={isAdminModalOpen} onClose={() => setAdminModalOpen(false)} onLoginSuccess={handleAdminLoginSuccess} />
         <AccessibilityTools />
       </div>
     );
@@ -378,7 +323,6 @@ const EventPageContent: React.FC<EventPageContentProps> = ({ onAdminLogin, event
     <div className="bg-background-color min-h-screen font-sans text-gray-800 dark:text-gray-200 flex flex-col">
         <a href="#main-content" className="skip-link">Skip to main content</a>
         <AccessibilityTools />
-        {/* Navbar */}
         <nav className="bg-white dark:bg-gray-800 shadow-sm sticky top-0 z-40">
             <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
                 <div className="flex justify-between h-16">
@@ -391,23 +335,12 @@ const EventPageContent: React.FC<EventPageContentProps> = ({ onAdminLogin, event
                         <span className="font-bold text-xl text-gray-900 dark:text-white hidden sm:block truncate max-w-xs">{config?.event.name}</span>
                     </div>
                     <div className="flex items-center space-x-1 sm:space-x-4">
-                         {[
-                             { id: 'home', label: t('nav.home') },
-                             { id: 'agenda', label: t('nav.agenda') },
-                             { id: 'speakers', label: t('nav.speakers') }
-                         ].map(tab => (
-                             <button 
-                                key={tab.id}
-                                onClick={() => setPublicTab(tab.id as PublicTab)}
-                                className={`px-3 py-2 rounded-md text-sm font-medium transition-colors ${publicTab === tab.id ? 'text-primary bg-primary/10' : 'text-gray-500 hover:text-gray-900 dark:hover:text-gray-200 hover:bg-gray-100 dark:hover:bg-gray-700'}`}
-                             >
-                                 {tab.label}
+                         {['home', 'agenda', 'speakers'].map(tId => (
+                             <button key={tId} onClick={() => setPublicTab(tId as PublicTab)} className={`px-3 py-2 rounded-md text-sm font-medium transition-colors ${publicTab === tId ? 'text-primary bg-primary/10' : 'text-gray-500 hover:text-gray-900 dark:hover:text-gray-200 hover:bg-gray-100 dark:hover:bg-gray-700'}`}>
+                                 {t(`nav.${tId}`)}
                              </button>
                          ))}
-                         <button 
-                             onClick={() => setPublicTab('register')}
-                             className={`ml-2 px-4 py-2 rounded-full text-sm font-bold transition-all ${publicTab === 'register' ? 'bg-primary text-white shadow-md' : 'bg-gray-100 dark:bg-gray-700 text-gray-900 dark:text-white hover:bg-gray-200 dark:hover:bg-gray-600'}`}
-                         >
+                         <button onClick={() => setPublicTab('register')} className={`ml-2 px-4 py-2 rounded-full text-sm font-bold transition-all ${publicTab === 'register' ? 'bg-primary text-white shadow-md' : 'bg-gray-100 dark:bg-gray-700 text-gray-900 dark:text-white hover:bg-gray-200 dark:hover:bg-gray-600'}`}>
                              {t('nav.register')}
                          </button>
                     </div>
@@ -417,137 +350,41 @@ const EventPageContent: React.FC<EventPageContentProps> = ({ onAdminLogin, event
 
       <div id="main-content" className="relative z-10 flex-grow container mx-auto px-4 sm:px-6 lg:px-8 py-8 sm:py-12">
         <main className="max-w-5xl mx-auto">
-            {publicTab === 'home' && config && (
-                <PublicHome 
-                    config={config} 
-                    speakers={speakers} 
-                    sponsors={sponsors}
-                    ticketTiers={ticketTiers}
-                    onRegister={() => setPublicTab('register')} 
-                />
-            )}
-
-            {publicTab === 'agenda' && (
-                <div className="animate-fade-in">
-                    <h2 className="text-3xl font-bold mb-8 text-center text-gray-900 dark:text-white">Event Schedule</h2>
-                    <div className="bg-white dark:bg-gray-800 rounded-xl shadow-lg p-6">
-                        <AgendaView sessions={sessions} speakers={speakers} readOnly />
-                    </div>
-                </div>
-            )}
-
-            {publicTab === 'speakers' && (
-                <div className="animate-fade-in">
-                    <div className="bg-white dark:bg-gray-800 rounded-xl shadow-lg p-6">
-                        <DirectoryView speakers={speakers} sponsors={sponsors} />
-                    </div>
-                </div>
-            )}
-
-          {publicTab === 'register' && config && (
+            {publicTab === 'home' && config && <PublicHome config={config} speakers={speakers} sponsors={sponsors} ticketTiers={ticketTiers} onRegister={() => setPublicTab('register')} />}
+            {publicTab === 'agenda' && <div className="animate-fade-in"><h2 className="text-3xl font-bold mb-8 text-center text-gray-900 dark:text-white">Schedule</h2><div className="bg-white dark:bg-gray-800 rounded-xl shadow-lg p-6"><AgendaView sessions={sessions} speakers={speakers} readOnly /></div></div>}
+            {publicTab === 'speakers' && <div className="animate-fade-in"><div className="bg-white dark:bg-gray-800 rounded-xl shadow-lg p-6"><DirectoryView speakers={speakers} sponsors={sponsors} /></div></div>}
+            {publicTab === 'register' && config && (
              <div className="max-w-4xl mx-auto animate-fade-in py-4">
-                {view === 'passwordReset' && resetToken && (
-                    <PasswordResetForm token={resetToken} />
-                )}
-                
+                {view === 'passwordReset' && resetToken && <PasswordResetForm token={resetToken} />}
                 {(view === 'registration' || view === 'success') && (
                     <div className="bg-white dark:bg-gray-800 shadow-2xl rounded-[2.5rem] overflow-hidden border border-gray-100 dark:border-gray-700 relative">
-                        {/* Decorative Top Bar */}
                         <div className="h-2.5 bg-gradient-to-r from-primary via-indigo-500 to-secondary w-full absolute top-0 left-0" />
-                        
                         <div className="p-8 sm:p-14">
                             <header className="text-center mb-12">
-                                <div className="inline-flex items-center justify-center p-1.5 mb-6 bg-primary/5 rounded-full">
-                                    <span className="px-4 py-1.5 rounded-full bg-primary text-white text-xs font-bold uppercase tracking-widest shadow-sm">
-                                        Registration Open
-                                    </span>
-                                </div>
-                                <h1 className="text-4xl sm:text-5xl font-extrabold tracking-tight text-gray-900 dark:text-white mb-6 leading-tight">
-                                    {config.event.name}
-                                </h1>
-                                <div className="flex flex-col sm:flex-row items-center justify-center gap-2 sm:gap-6 text-gray-600 dark:text-gray-400 text-lg mb-6">
-                                    <span className="flex items-center">
-                                        <svg className="w-5 h-5 mr-2 text-primary" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z"></path></svg>
-                                        {config.event.date}
-                                    </span>
-                                    <span className="hidden sm:block text-gray-300">•</span>
-                                    <span className="flex items-center">
-                                        <svg className="w-5 h-5 mr-2 text-primary" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M17.657 16.657L13.414 20.9a1.998 1.998 0 01-2.827 0l-4.244-4.243a8 8 0 1111.314 0z"></path><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M15 11a3 3 0 11-6 0 3 3 0 016 0z"></path></svg>
-                                        {config.event.location}
-                                    </span>
-                                </div>
-                                <p className="text-lg text-gray-600 dark:text-gray-400 max-w-2xl mx-auto leading-relaxed">
-                                    Join us for an unforgettable experience. Secure your spot now.
-                                </p>
+                                <h1 className="text-4xl sm:text-5xl font-extrabold tracking-tight text-gray-900 dark:text-white mb-6 leading-tight">{config.event.name}</h1>
+                                <p className="text-lg text-gray-600 dark:text-gray-400 max-w-2xl mx-auto leading-relaxed">{config.event.description}</p>
                             </header>
-                            
                             <div className="mt-8">
                             {error && <div className="mb-6"><Alert type="error" message={error} /></div>}
-
                             {view === 'success' && successUser ? (
                                 <div className="text-center py-10 animate-fade-in-up flex flex-col items-center">
-                                    <div className="mx-auto flex items-center justify-center h-24 w-24 rounded-full bg-green-100 dark:bg-green-900/50 mb-8 animate-bounce">
-                                        <svg className="h-12 w-12 text-green-600 dark:text-green-300 transform transition-transform duration-500 scale-110" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={3} d="M5 13l4 4L19 7" />
-                                        </svg>
-                                    </div>
-                                    <h3 className="text-3xl font-bold text-gray-900 dark:text-white mb-3">You're All Set!</h3>
-                                    <p className="text-lg text-gray-600 dark:text-gray-300 mb-8 max-w-md mx-auto">
-                                        Registration confirmed. A copy has been sent to <strong>{successUser.email}</strong>.
-                                    </p>
-                                    
-                                    {/* Generated QR Code Display */}
-                                    <div className="bg-gray-50 dark:bg-gray-700/50 p-6 rounded-xl border border-dashed border-gray-300 dark:border-gray-600 mb-10">
+                                    <div className="mx-auto flex items-center justify-center h-24 w-24 rounded-full bg-green-100 dark:bg-green-900/50 mb-8 animate-bounce"><svg className="h-12 w-12 text-green-600 dark:text-green-300" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={3} d="M5 13l4 4L19 7" /></svg></div>
+                                    <h3 className="text-3xl font-bold text-gray-900 dark:text-white mb-3">Registration Confirmed!</h3>
+                                    <p className="text-lg text-gray-600 dark:text-gray-300 mb-8 max-w-md mx-auto">A copy has been sent to <strong>{successUser.email}</strong>.</p>
+                                    <div className="bg-gray-50 dark:bg-gray-700/50 p-6 rounded-xl border border-dashed border-gray-300 dark:border-gray-600 mb-10 text-center">
                                         <p className="text-sm font-bold text-gray-500 uppercase tracking-widest mb-4">Your Event Pass</p>
-                                        {/* Use Date.parse on createdAt for stable timestamp instead of Date.now() to prevent flicker */}
-                                        <img 
-                                            src={`https://api.qrserver.com/v1/create-qr-code/?size=250x250&data=${encodeURIComponent(JSON.stringify({
-                                                id: successUser.id,
-                                                event: config.event.name,
-                                                url: `${window.location.origin}/verify/${successUser.id}`,
-                                                token: `secure_${successUser.id?.slice(-6)}_${successUser.createdAt}`,
-                                                ver: '1.0'
-                                            }))}`} 
-                                            alt="Your Ticket QR" 
-                                            className="w-48 h-48 mx-auto rounded-lg shadow-sm bg-white p-2"
-                                        />
+                                        <img src={`https://api.qrserver.com/v1/create-qr-code/?size=250x250&data=${encodeURIComponent(JSON.stringify({id: successUser.id, event: config.event.name, ver: '2.0'}))}`} alt="Ticket QR" className="w-48 h-48 mx-auto rounded-lg shadow-sm bg-white p-2" />
                                         <p className="text-xs text-gray-400 mt-4">ID: {successUser.id}</p>
                                     </div>
-
-                                    <button
-                                        onClick={() => {
-                                        setView('registration');
-                                        handleReset();
-                                        }}
-                                        className="inline-flex justify-center items-center py-3.5 px-8 border border-transparent rounded-xl shadow-lg text-lg font-bold text-white bg-primary hover:bg-primary/90 transform transition hover:-translate-y-1 hover:shadow-xl"
-                                    >
-                                        Register Another Person
-                                    </button>
+                                    <button onClick={() => { setView('registration'); handleReset(); }} className="inline-flex justify-center items-center py-3.5 px-8 border border-transparent rounded-xl shadow-lg text-lg font-bold text-white bg-primary hover:bg-primary/90 transform transition hover:-translate-y-1">Register Another Person</button>
                                 </div>
                             ) : isSoldOut ? (
                                 <div className="text-center p-12 bg-yellow-50 dark:bg-yellow-900/20 rounded-2xl border border-yellow-200 dark:border-yellow-800">
                                     <h2 className="text-2xl font-bold text-gray-800 dark:text-gray-200">Registration Closed</h2>
-                                    <p className="mt-2 text-gray-600 dark:text-gray-400">We're sorry, but this event has reached its maximum capacity. Registration is no longer available.</p>
-                                    <button 
-                                        className="mt-6 px-6 py-2 bg-yellow-600 text-white rounded-full font-semibold hover:bg-yellow-700"
-                                        onClick={() => {
-                                            setFormData(prev => ({ ...prev, status: 'waitlist' }));
-                                            handleSubmit();
-                                        }}
-                                    >
-                                        Join Waitlist
-                                    </button>
+                                    <p className="mt-2 text-gray-600 dark:text-gray-400">Capacity reached.</p>
                                 </div>
                             ) : (
-                                <RegistrationForm
-                                formData={formData}
-                                onFormChange={handleFormChange}
-                                onSubmit={handleSubmit}
-                                onReset={handleReset}
-                                isLoading={isSubmitting}
-                                config={config.formFields}
-                                ticketTiers={ticketTiers}
-                                />
+                                <RegistrationForm formData={formData} onFormChange={handleFormChange} onSubmit={handleSubmit} onReset={handleReset} isLoading={isSubmitting} config={config.formFields} ticketTiers={ticketTiers} />
                             )}
                             </div>
                         </div>
@@ -555,185 +392,131 @@ const EventPageContent: React.FC<EventPageContentProps> = ({ onAdminLogin, event
                 )}
              </div>
           )}
-          
-           {renderFooter()}
+          {renderFooter()}
         </main>
       </div>
-
-      <AdminLoginModal 
-        isOpen={isAdminModalOpen}
-        onClose={() => setAdminModalOpen(false)}
-        onLoginSuccess={handleAdminLoginSuccess}
-      />
-      <DelegateLoginModal
-        isOpen={isDelegateModalOpen}
-        onClose={() => setDelegateModalOpen(false)}
-        onLogin={handleDelegateLogin}
-        eventId={eventId}
-      />
-      <PaymentModal 
-        isOpen={isPaymentModalOpen}
-        onClose={() => setPaymentModalOpen(false)}
-        delegateToken={null} // Public checkout has no token initially
-        onSuccess={handlePaymentSuccess}
-        fixedAmount={paymentAmount}
-        description={paymentDesc}
-      />
+      <AdminLoginModal isOpen={isAdminModalOpen} onClose={() => setAdminModalOpen(false)} onLoginSuccess={handleAdminLoginSuccess} />
+      <DelegateLoginModal isOpen={isDelegateModalOpen} onClose={() => setDelegateModalOpen(false)} onLogin={handleDelegateLogin} eventId={eventId} />
+      <PaymentModal isOpen={isPaymentModalOpen} onClose={() => setPaymentModalOpen(false)} delegateToken={null} onSuccess={handlePaymentSuccess} fixedAmount={paymentAmount} description={paymentDesc} />
     </div>
   );
-};
+}
 
-const EventPage: React.FC<EventPageContentProps> = (props) => (
-    <ThemeProvider eventId={props.eventId}>
-        <LanguageProvider>
-            <EventPageContent {...props} />
-        </LanguageProvider>
-    </ThemeProvider>
-);
-
-function App() {
-  const [isAppReady, setAppReady] = useState(false);
-  
-  const [adminSession, setAdminSession] = useState<AdminSession | null>(() => {
+const App: React.FC = () => {
+  const [currentPath, setCurrentPath] = useState(window.location.pathname);
+  const [adminToken, setAdminToken] = useState<string | null>(localStorage.getItem('adminToken'));
+  const [adminUser, setAdminUser] = useState<{ id: string; email: string; permissions: Permission[] } | null>(() => {
+    // Attempt to initialize admin user profile synchronously from existing token
     const token = localStorage.getItem('adminToken');
     if (token) {
-      const payload = verifyToken(token);
-      if (payload && payload.type === 'admin') {
-        return {
-          token,
-          user: { email: payload.email, permissions: payload.permissions || [] }
-        };
-      }
-      localStorage.removeItem('adminToken');
+        const payload = verifyToken(token);
+        if (payload && payload.type === 'admin') {
+            return { id: payload.id, email: payload.email, permissions: payload.permissions || [] };
+        }
     }
     return null;
   });
 
-  // Routing State
-  const [currentPath, setCurrentPath] = useState(window.location.pathname);
-
   useEffect(() => {
-      // Check for backend status before rendering main app
-      initializeApi().then(() => {
-          setAppReady(true);
-      });
-      // Initialize native features like background fetch if supported
-      configureBackgroundFetch(async () => {
-          console.log("Running background fetch task...");
-          // Could sync data here
-      });
+    initializeApi().catch(console.error);
+    configureBackgroundFetch(async () => {
+        console.log("Background fetch event");
+    });
   }, []);
 
   useEffect(() => {
-    const handleLocationChange = () => {
-      setCurrentPath(window.location.pathname);
-    };
-
-    window.addEventListener('popstate', handleLocationChange);
-    return () => window.removeEventListener('popstate', handleLocationChange);
-  }, []);
-
-  const navigate = (path: string) => {
-    try {
-        window.history.pushState({}, '', path);
-    } catch (e) {
-        console.warn("Navigation URL update failed (likely due to sandbox environment):", e);
+    // Keep user state in sync if token changes externally
+    if (adminToken && !adminUser) {
+       const payload = verifyToken(adminToken);
+       if (payload && payload.type === 'admin') {
+           setAdminUser({ id: payload.id, email: payload.email, permissions: payload.permissions || [] });
+       } else {
+           setAdminToken(null);
+           setAdminUser(null);
+           localStorage.removeItem('adminToken');
+       }
     }
-    setCurrentPath(path);
-    window.scrollTo(0, 0);
+  }, [adminToken, adminUser]);
+
+  useEffect(() => {
+      const onPopState = () => setCurrentPath(window.location.pathname);
+      window.addEventListener('popstate', onPopState);
+      return () => window.removeEventListener('popstate', onPopState);
+  }, []);
+
+  const handleNavigate = (path: string) => {
+      try {
+          window.history.pushState({}, '', path);
+      } catch (e) {
+          // Fallback for sandboxed origins where pushState fails
+          console.warn("Navigation failed (pushState blocked by browser):", e);
+      }
+      setCurrentPath(path);
   };
 
-  const handleAdminLogin = (token: string, user: { id: string, email: string, permissions: Permission[] }) => {
-    localStorage.setItem('adminToken', token);
-    const { id, ...userForSession } = user;
-    setAdminSession({ token, user: userForSession });
+  const handleAdminLogin = (token: string, user: { id: string; email: string; permissions: Permission[] }) => {
+      setAdminToken(token);
+      setAdminUser(user);
+      localStorage.setItem('adminToken', token);
+      // Explicitly navigate to admin route to ensure portal loads correctly
+      handleNavigate('/admin');
   };
 
   const handleAdminLogout = () => {
-    localStorage.removeItem('adminToken');
-    setAdminSession(null);
-    navigate('/');
+      setAdminToken(null);
+      setAdminUser(null);
+      localStorage.removeItem('adminToken');
+      handleNavigate('/');
   };
 
-  if (!isAppReady) {
+  const pathParts = currentPath.split('/').filter(Boolean);
+  const rootSegment = pathParts[0];
+
+  // Admin Portal View
+  if (adminToken && adminUser) {
+      if (rootSegment === 'admin' || (rootSegment === undefined)) {
+           return (
+             <Suspense fallback={<div className="min-h-screen flex items-center justify-center"><ContentLoader text="Initializing Portal..." /></div>}>
+                <AdminPortal onLogout={handleAdminLogout} adminToken={adminToken} user={adminUser} />
+             </Suspense>
+           );
+      }
+  }
+
+  if (rootSegment === 'kiosk') {
+      const kioskEventId = pathParts[1] || 'main-event';
+      if (!adminToken) return <div className="p-10 text-center">Access Denied. Admin login required to launch Kiosk. <button onClick={() => handleNavigate('/')} className="text-primary underline">Go Home</button></div>;
+      return <KioskView adminToken={adminToken} eventId={kioskEventId} onExit={() => handleNavigate('/admin')} />;
+  }
+
+  if (rootSegment === 'projector' && pathParts[1]) {
+      return <ProjectorView sessionId={pathParts[1]} onExit={() => window.close()} />;
+  }
+
+  // Public Event Page View
+  if (rootSegment && rootSegment !== 'admin') {
       return (
-          <div className="min-h-screen flex items-center justify-center bg-gray-50 dark:bg-gray-900">
-              <div className="text-center">
-                  <ContentLoader text="Connecting to server..." />
-              </div>
-          </div>
+        <ThemeProvider eventId={rootSegment}>
+            <LanguageProvider>
+                <EventPageContent 
+                    eventId={rootSegment} 
+                    onAdminLogin={handleAdminLogin} 
+                    onNavigate={handleNavigate} 
+                />
+            </LanguageProvider>
+        </ThemeProvider>
       );
   }
 
-  // Kiosk Mode Handler
-  if (currentPath === '/kiosk') {
-      if (adminSession) {
-          return <KioskView adminToken={adminSession.token} onExit={() => navigate('/')} />;
-      } else {
-          // If not logged in, show login modal then redirect to kiosk
-          return (
-              <div className="min-h-screen flex items-center justify-center bg-gray-900 text-white">
-                  <AdminLoginModal 
-                    isOpen={true} 
-                    onClose={() => navigate('/')} 
-                    onLoginSuccess={(token, user) => {
-                        handleAdminLogin(token, user);
-                        navigate('/kiosk');
-                    }} 
-                  />
-                  <p>Admin authentication required for Kiosk Mode.</p>
-              </div>
-          );
-      }
-  }
-
-  // Projector Mode Handler
-  if (currentPath.startsWith('/projector/')) {
-      const sessionId = currentPath.split('/').pop();
-      if (sessionId) {
-          return <ProjectorView sessionId={sessionId} onExit={() => navigate('/')} />;
-      }
-  }
-
+  // Home / Event Selection View
   return (
-    <ErrorBoundary>
-      <AccessibilityTools />
-      {adminSession ? (
-        <Suspense fallback={<div className="min-h-screen flex items-center justify-center"><ContentLoader text="Loading dashboard..." /></div>}>
-             {/* Wrap AdminPortal in ThemeProvider to ensure SettingsForm has context */}
-             <ThemeProvider eventId="main-event">
-                <LanguageProvider>
-                    <AdminPortal onLogout={handleAdminLogout} adminToken={adminSession.token} user={adminSession.user} />
-                </LanguageProvider>
-             </ThemeProvider>
-        </Suspense>
-      ) : (
-        (() => {
-          const ignoredPaths = [
-            'assets', 'src', 'components', 'node_modules', 'static', 'public', 'json', 
-            'manifest.json', 'favicon.ico', 'robots.txt', 'sitemap.xml', 
-            'index.js', 'main.js', 'index.css', 'App.tsx', 
-            '@vite', '@fs', '@react-refresh', 
-            'admin', 'kiosk', 'projector'
-          ];
-
-          const pathParts = currentPath.split('/').filter(p => p && p !== 'index.html');
-          const candidateId = pathParts[0];
-          
-          // Strict check: if path is 'admin' or starts with 'admin', do NOT treat as event ID
-          const isSystemPath = candidateId === 'admin' || candidateId === 'api' || candidateId === 'kiosk' || candidateId === 'projector';
-          
-          const eventId = (candidateId && !candidateId.includes('.') && !candidateId.startsWith('@') && !ignoredPaths.includes(candidateId) && !isSystemPath) ? candidateId : undefined;
-
-          if (eventId) {
-              return <EventPage onAdminLogin={handleAdminLogin} eventId={eventId} onNavigate={navigate} />;
-          }
-
-          return <EventSelectionPage onAdminLogin={handleAdminLogin} onNavigate={navigate} />;
-        })()
-      )}
-    </ErrorBoundary>
+    <LanguageProvider>
+        <EventSelectionPage 
+            onAdminLogin={handleAdminLogin} 
+            onNavigate={handleNavigate} 
+        />
+    </LanguageProvider>
   );
-}
+};
 
 export default App;

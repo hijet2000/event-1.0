@@ -45,17 +45,29 @@ export const initializeDb = async () => {
     if (!db.admin_users || db.admin_users.length === 0) {
         // Ensure role exists
         const roleId = 'role_super_admin';
-        if (!db.roles.some((r: any) => r.id === roleId)) {
-            db.roles.push({
-                id: roleId,
-                name: 'Super Admin',
-                description: 'Full system access',
-                permissions: [
-                    'view_dashboard', 'manage_registrations', 'manage_settings', 'manage_users',
-                    'manage_tasks', 'manage_dining', 'manage_accommodation', 'manage_agenda',
-                    'manage_speakers_sponsors', 'view_eventcoin_dashboard', 'send_invitations'
-                ]
-            });
+        
+        const fullPermissions = [
+            'view_dashboard', 'manage_registrations', 'manage_settings', 'manage_users',
+            'manage_tasks', 'manage_dining', 'manage_accommodation', 'manage_agenda',
+            'manage_speakers_sponsors', 'view_eventcoin_dashboard', 'manage_eventcoin',
+            'send_invitations', 'manage_gamification', 'manage_communications',
+            'manage_media', 'manage_marketing', 'manage_maps', 'view_system_status',
+            'view_diagnostics'
+        ];
+
+        // Upsert super admin role
+        const roleIndex = db.roles.findIndex((r: any) => r.id === roleId);
+        const superAdminRole = {
+            id: roleId,
+            name: 'Super Admin',
+            description: 'Full system access',
+            permissions: fullPermissions
+        };
+
+        if (roleIndex > -1) {
+            db.roles[roleIndex] = superAdminRole;
+        } else {
+            db.roles.push(superAdminRole);
         }
 
         // Create Admin
@@ -103,7 +115,8 @@ export const initializeDb = async () => {
                     emailTemplates: {}, // Will be merged with defaults
                     emailProvider: 'smtp',
                     smtp: { host: '', port: 587, username: '', password: '', encryption: 'tls' },
-                    googleConfig: { serviceAccountKeyJson: '' },
+                    /* Added missing subjectEmail property to googleConfig in the seed data */
+                    googleConfig: { serviceAccountKeyJson: '', subjectEmail: '' },
                     badgeConfig: { showName: true, showEmail: false, showCompany: true, showRole: true },
                     eventCoin: { enabled: true, name: 'EventCoin', startingBalance: 100, exchangeRate: 1, peggedCurrency: 'USD' },
                     githubSync: { enabled: false, configUrl: '' },

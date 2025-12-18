@@ -1,7 +1,7 @@
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { type EventConfig, type FormField } from '../types';
-import { getEventConfig, saveConfig, syncConfigFromGitHub, pushConfigToGitHub, sendTestEmail, getSystemApiKey, sendTestMessage } from '../server/api';
+import { getEventConfig, saveConfig, syncConfigFromGitHub, pushConfigToGitHub, sendTestEmail, getSystemApiKey } from '../server/api';
 import { ContentLoader } from './ContentLoader';
 import { Alert } from './Alert';
 import { Spinner } from './Spinner';
@@ -27,6 +27,9 @@ export const SettingsForm: React.FC<SettingsFormProps> = ({ adminToken }) => {
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
   const [activeTab, setActiveTab] = useState<Tab>('general');
   const [apiKey, setApiKey] = useState<string>('');
+  const [showRawJson, setShowRawJson] = useState(false);
+
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
   // Test Email State
   const [testEmailTo, setTestEmailTo] = useState('');
@@ -71,17 +74,39 @@ export const SettingsForm: React.FC<SettingsFormProps> = ({ adminToken }) => {
     });
   };
 
-  const handleGoogleConfigChange = (e: React.ChangeEvent<HTMLTextAreaElement>) => {
+  const handleGoogleConfigChange = (e: React.ChangeEvent<HTMLTextAreaElement | HTMLInputElement>) => {
     if (!config) return;
     const { name, value } = e.target;
-    setJsonValidationMsg(null); // Clear validation on change
+    setJsonValidationMsg(null);
     setConfig(prevConfig => {
         if (!prevConfig) return null;
-        const newConfig = JSON.parse(JSON.stringify(prevConfig));
-        if (!newConfig.googleConfig) newConfig.googleConfig = { serviceAccountKeyJson: '' };
-        newConfig.googleConfig[name as keyof EventConfig['googleConfig']] = value;
+        const newConfig = { ...prevConfig };
+        if (!newConfig.googleConfig) newConfig.googleConfig = { serviceAccountKeyJson: '', subjectEmail: '' };
+        newConfig.googleConfig = { ...newConfig.googleConfig, [name]: value };
         return newConfig;
     });
+  };
+
+  const handleKeyFileImport = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    const reader = new FileReader();
+    reader.onload = (event) => {
+      try {
+        const text = event.target?.result as string;
+        const parsed = JSON.parse(text);
+        if (!parsed.client_email || !parsed.private_key) {
+           throw new Error("Missing Client Email or Private Key in JSON.");
+        }
+        handleInputChange('googleConfig', 'serviceAccountKeyJson', text);
+        setJsonValidationMsg({ type: 'success', message: `Successfully loaded key for ${parsed.client_email}` });
+      } catch (err) {
+        setJsonValidationMsg({ type: 'error', message: (err as Error).message });
+      }
+    };
+    reader.readAsText(file);
+    if (fileInputRef.current) fileInputRef.current.value = '';
   };
 
   const validateServiceAccountJson = () => {
@@ -107,7 +132,6 @@ export const SettingsForm: React.FC<SettingsFormProps> = ({ adminToken }) => {
     e.preventDefault();
     if (!config) return;
 
-    // Validate JSON if Google provider is selected
     if (config.emailProvider === 'google' && config.googleConfig?.serviceAccountKeyJson) {
         if (!validateServiceAccountJson()) {
             setError("Please fix Google Service Account JSON errors before saving.");
@@ -201,7 +225,10 @@ export const SettingsForm: React.FC<SettingsFormProps> = ({ adminToken }) => {
       return <ContentLoader text="Loading settings..." />;
   }
 
-  const safeGoogle = config.googleConfig || { serviceAccountKeyJson: '' };
+  const safeGoogle = config.googleConfig || { serviceAccountKeyJson: '', subjectEmail: '' };
+  
+  let parsedKey: any = null;
+  try { parsedKey = JSON.parse(safeGoogle.serviceAccountKeyJson); } catch (e) {}
 
   return (
     <div className="max-w-4xl mx-auto">
@@ -318,7 +345,7 @@ export const SettingsForm: React.FC<SettingsFormProps> = ({ adminToken }) => {
                     <h3 className="text-lg font-medium text-gray-900 dark:text-white border-b pb-2 dark:border-gray-700">Email Provider</h3>
                     <div className="grid grid-cols-1 gap-y-6 gap-x-4">
                         <div>
-                            <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">Service</label>
+                            <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">Service Type</label>
                             <select
                                 value={config.emailProvider}
                                 onChange={(e) => {
@@ -327,8 +354,8 @@ export const SettingsForm: React.FC<SettingsFormProps> = ({ adminToken }) => {
                                 }}
                                 className="block w-full rounded-md border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 shadow-sm focus:border-primary focus:ring-primary sm:text-sm dark:text-white"
                             >
-                                <option value="smtp">SMTP (Generic)</option>
-                                <option value="google">Google Workspace (Gmail API)</option>
+                                <option value="smtp">Standard SMTP (Outlook, SendGrid, etc.)</option>
+                                <option value="google">Google Workspace / Gmail API</option>
                             </select>
                         </div>
 
@@ -375,29 +402,80 @@ export const SettingsForm: React.FC<SettingsFormProps> = ({ adminToken }) => {
                         )}
 
                         {config.emailProvider === 'google' && (
-                            <div className="border-t pt-4 dark:border-gray-700 animate-fade-in">
-                                <div className="flex justify-between items-center mb-1">
-                                    <label className="block text-sm font-medium text-gray-700 dark:text-gray-300">Service Account JSON</label>
-                                    <button 
-                                        type="button" 
-                                        onClick={validateServiceAccountJson}
-                                        className="text-xs text-primary hover:underline"
-                                    >
-                                        Validate JSON
-                                    </button>
+                            <div className="space-y-6 animate-fade-in">
+                                <div className="bg-blue-50 dark:bg-blue-900/20 p-4 rounded-lg border border-blue-100 dark:border-blue-800">
+                                    <h4 className="text-sm font-bold text-blue-800 dark:text-blue-300 mb-1">Google Workspace Setup</h4>
+                                    <p className="text-xs text-blue-700 dark:text-blue-400">
+                                        You need a <strong>Service Account JSON key</strong> from Google Cloud. 
+                                        <a href="https://cloud.google.com/iam/docs/creating-managing-service-account-keys" target="_blank" rel="noopener noreferrer" className="ml-1 underline">Help Docs</a>
+                                    </p>
                                 </div>
-                                <textarea name="serviceAccountKeyJson" rows={5} value={safeGoogle.serviceAccountKeyJson} onChange={handleGoogleConfigChange} className="block w-full rounded-md border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 shadow-sm sm:text-sm font-mono text-xs text-gray-900 dark:text-white" placeholder='{"type": "service_account", ...}' />
+
+                                <div>
+                                    <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Sender Email Address</label>
+                                    <input 
+                                        type="email" 
+                                        name="subjectEmail" 
+                                        value={safeGoogle.subjectEmail} 
+                                        onChange={handleGoogleConfigChange}
+                                        placeholder="e.g. hello@yourdomain.com"
+                                        className="block w-full rounded-md border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 shadow-sm sm:text-sm"
+                                    />
+                                    <p className="text-[10px] text-gray-500 mt-1">This is the email address that will appear as the sender.</p>
+                                </div>
+
+                                <div className="border rounded-lg p-4 bg-gray-50 dark:bg-gray-700/30 border-gray-200 dark:border-gray-700">
+                                    <h4 className="text-sm font-bold mb-3">Service Account Authentication</h4>
+                                    
+                                    {!parsedKey ? (
+                                        <div className="flex flex-col items-center justify-center py-4 border-2 border-dashed rounded-lg border-gray-300 dark:border-gray-600">
+                                            <input type="file" ref={fileInputRef} onChange={handleKeyFileImport} accept=".json" className="hidden" />
+                                            <button 
+                                                type="button" 
+                                                onClick={() => fileInputRef.current?.click()}
+                                                className="px-4 py-2 bg-white dark:bg-gray-800 border border-gray-300 dark:border-gray-600 rounded-md shadow-sm text-sm font-medium text-gray-700 dark:text-gray-200 hover:bg-gray-50 flex items-center gap-2"
+                                            >
+                                                <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12" /></svg>
+                                                Upload .json Key File
+                                            </button>
+                                            <p className="text-xs text-gray-500 mt-2">Drag and drop or click to upload</p>
+                                        </div>
+                                    ) : (
+                                        <div className="space-y-3">
+                                            <div className="flex justify-between items-start">
+                                                <div>
+                                                    <p className="text-xs font-bold text-green-600 dark:text-green-400">✓ Key Loaded</p>
+                                                    <p className="text-sm font-medium">{parsedKey.client_email}</p>
+                                                    <p className="text-[10px] text-gray-500">Project: {parsedKey.project_id}</p>
+                                                </div>
+                                                <button type="button" onClick={() => handleInputChange('googleConfig', 'serviceAccountKeyJson', '')} className="text-xs text-red-500 hover:underline">Remove</button>
+                                            </div>
+                                        </div>
+                                    )}
+
+                                    <div className="mt-4">
+                                        <button 
+                                            type="button" 
+                                            onClick={() => setShowRawJson(!showRawJson)} 
+                                            className="text-[10px] text-primary hover:underline"
+                                        >
+                                            {showRawJson ? 'Hide Raw JSON' : 'Show/Edit Raw JSON (Advanced)'}
+                                        </button>
+                                        
+                                        {showRawJson && (
+                                            <div className="mt-2 animate-fade-in">
+                                                <textarea name="serviceAccountKeyJson" rows={5} value={safeGoogle.serviceAccountKeyJson} onChange={handleGoogleConfigChange} className="block w-full rounded-md border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 shadow-sm sm:text-sm font-mono text-[10px] text-gray-900 dark:text-white" placeholder='{"type": "service_account", ...}' />
+                                                <button type="button" onClick={validateServiceAccountJson} className="mt-1 text-[10px] bg-gray-200 dark:bg-gray-600 px-2 py-0.5 rounded">Validate JSON</button>
+                                            </div>
+                                        )}
+                                    </div>
+                                </div>
                                 
                                 {jsonValidationMsg && (
                                     <p className={`text-xs mt-1 font-bold ${jsonValidationMsg.type === 'success' ? 'text-green-600' : 'text-red-600'}`}>
                                         {jsonValidationMsg.message}
                                     </p>
                                 )}
-                                
-                                <p className="text-xs text-gray-500 mt-2">
-                                    Paste the full JSON content of your Google Cloud Service Account key. 
-                                    <a href="https://cloud.google.com/iam/docs/creating-managing-service-account-keys" target="_blank" rel="noopener noreferrer" className="ml-1 text-primary hover:underline">Learn how to create one.</a>
-                                </p>
                             </div>
                         )}
 
@@ -416,7 +494,7 @@ export const SettingsForm: React.FC<SettingsFormProps> = ({ adminToken }) => {
                                     type="button" 
                                     onClick={handleSendTestEmail}
                                     disabled={isSendingTest || !testEmailTo}
-                                    className="px-4 py-2 bg-white dark:bg-gray-600 border border-gray-300 dark:border-gray-500 rounded-md text-sm font-medium hover:bg-gray-50 dark:hover:bg-gray-500 disabled:opacity-50"
+                                    className="px-4 py-2 bg-white dark:bg-gray-600 border border-gray-300 dark:border-gray-600 rounded-md text-sm font-medium hover:bg-gray-50 dark:hover:bg-gray-500 disabled:opacity-50"
                                 >
                                     {isSendingTest ? 'Sending...' : 'Send'}
                                 </button>
@@ -526,7 +604,7 @@ export const SettingsForm: React.FC<SettingsFormProps> = ({ adminToken }) => {
                             disabled={isPushing}
                             className="px-4 py-2 border border-gray-300 dark:border-gray-600 rounded-md shadow-sm text-sm font-medium text-gray-700 dark:text-white hover:bg-gray-50 dark:hover:bg-gray-700 flex items-center gap-2"
                         >
-                            {isPushing ? <Spinner /> : <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12" /></svg>}
+                            {isPushing ? <Spinner /> : <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" /></svg>}
                             Push to GitHub
                         </button>
                     </div>

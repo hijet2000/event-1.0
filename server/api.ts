@@ -23,9 +23,14 @@ export const initializeApi = async (forceOnline = false): Promise<boolean> => {
     try {
         await db.initializeDb();
         
-        // Try to connect to backend
+        // Try to connect to backend with a realistic timeout for early detection
         try {
-            const res = await fetch('/api/health');
+            const controller = new AbortController();
+            const timeoutId = setTimeout(() => controller.abort(), 3000);
+            
+            const res = await fetch('/api/health', { signal: controller.signal });
+            clearTimeout(timeoutId);
+
             if (res.ok) {
                 IS_ONLINE = true;
                 db.setBackendAvailable(true);
@@ -34,7 +39,7 @@ export const initializeApi = async (forceOnline = false): Promise<boolean> => {
                 initializeSocket();
             }
         } catch (e) {
-            console.log("Backend offline, running in browser mode.");
+            console.log("Backend offline or connection timed out, running in browser mode.");
             IS_ONLINE = false;
             db.setBackendAvailable(false);
         }
@@ -96,7 +101,6 @@ const initializeSocket = () => {
     
     socket.on('refresh:gamification', () => {
         db.fetchTableFromBackend('scavenger_hunt_progress');
-        // Leaderboard re-fetch handled by component query invalidation or manual refresh
     });
     
     socket.on('signal', (payload: any) => {
@@ -123,7 +127,7 @@ const requireAuth = (token: string, type: 'admin' | 'delegate' = 'admin') => {
 
 // --- Config Merger ---
 const mergeWithDefault = (config: any): EventConfig => {
-    const base = defaultConfig; // Ensure defaults are used as base
+    const base = defaultConfig;
     if (!config) return base;
     return {
         ...base,
@@ -141,7 +145,6 @@ const mergeWithDefault = (config: any): EventConfig => {
         telegram: { ...base.telegram, ...(config.telegram || {}) },
         sms: { ...base.sms, ...(config.sms || {}) },
         aiConcierge: { ...base.aiConcierge, ...(config.aiConcierge || {}) },
-        // Arrays are typically overwritten, not merged deeply by index
         formFields: config.formFields || base.formFields
     };
 };
@@ -193,7 +196,6 @@ export const loginDelegate = async (eventId: string, email: string, password_inp
         const users = await db.findAll('registrations', (u) => u.email === email && (!u.eventId || u.eventId === eventId));
         const user = users[0];
         if (user) {
-            // For mock mode, accept any password or check a mock field if added
             const token = auth.generateToken({
                 id: user.id,
                 email: user.email,
@@ -211,7 +213,6 @@ export const requestDelegatePasswordReset = async (eventId: string, email: strin
 export const resetPassword = async (token: string, password: string) => { return true; };
 export const getSystemApiKey = async (token: string) => { return "mock-api-key-12345"; };
 
-// ... (Database schema/export functions) ...
 export const getDatabaseSchema = async (token: string) => { return "CREATE TABLE events (...);"; };
 export const generateSqlExport = async (token: string) => { return "INSERT INTO events ..."; };
 export const seedDemoData = async (token: string) => { return true; };
@@ -219,7 +220,6 @@ export const seedDemoData = async (token: string) => { return true; };
 // --- Config ---
 export const getEventConfig = async (eventId = 'main-event'): Promise<EventConfig> => {
     const event = await db.find('events', e => e.id === eventId);
-    // Use robust merger to prevent undefined property errors
     return mergeWithDefault(event?.config);
 };
 
@@ -241,7 +241,6 @@ export const syncConfigFromGitHub = async (token: string) => {
         }
         return await res.json();
     } else {
-        // Offline / Browser Mode
         const event = await db.find('events', e => e.id === 'main-event');
         const url = event?.config?.githubSync?.configUrl;
         
@@ -252,7 +251,6 @@ export const syncConfigFromGitHub = async (token: string) => {
             if (!response.ok) throw new Error("Failed to fetch remote config.");
             const remoteConfig = await response.json();
             
-            // Merge remote config
             const newConfig = { ...event.config, ...remoteConfig };
              newConfig.githubSync = {
                 ...newConfig.githubSync,
@@ -263,7 +261,6 @@ export const syncConfigFromGitHub = async (token: string) => {
             await db.updateWhere('events', e => e.id === 'main-event', { config: newConfig });
             return newConfig;
         } catch (e) {
-             // Update status failure
              if (event && event.config) {
                  const newConfig = { ...event.config };
                  newConfig.githubSync = {
@@ -348,15 +345,12 @@ export const getPublicSessionData = async (sessionId: string) => {
         if (!res.ok) throw new Error("Failed to load session data");
         return await res.json();
     }
-    // Offline
     const session = await db.find('sessions', s => s.id === sessionId);
-    // Use tokenless or mock token call for public data
     const polls = await getPolls('mock-token', sessionId);
     const questions = await getSessionQuestions('mock-token', sessionId);
     return { session, polls, questions };
 };
 
-// ... (User/Role management) ...
 export const getAdminUsers = async (token: string) => { return db.findAll('admin_users'); };
 export const saveAdminUser = async (token: string, user: any) => {
     if (user.id) await db.update('admin_users', user.id, user);
@@ -382,7 +376,6 @@ export const registerUser = async (eventId: string, data: RegistrationData, invi
         });
         return await res.json();
     } else {
-        // Offline Fallback
         const existing = await db.find('registrations', r => r.email === data.email);
         if (existing) return { success: false, message: 'Email already registered.' };
         
@@ -398,34 +391,28 @@ export const registerUser = async (eventId: string, data: RegistrationData, invi
     }
 };
 
-export const triggerRegistrationEmails = async (eventId: string, user: RegistrationData) => {
-    // Handled by backend in registerUser if online
+export const triggerRegistrationEmails = async (eventId: string, user: RegistrationData, qrCodeUrl?: string, verificationLink?: string) => {
     if (IS_ONLINE) return;
 
-    console.log("Offline: Simulating email trigger.");
     try {
         const config = await getEventConfig(eventId);
+        const uniqueId = user.id || `ticket_${Date.now()}`;
+        const finalVerificationLink = verificationLink || `${window.location.origin}/verify/${uniqueId}`; 
         
-        // Ensure user.id is available, fallback to a unique string if missing (should not happen if flow is correct)
-        const uniqueId = user.id || `ticket_${Date.now()}_${Math.random().toString(36).substr(2, 5)}`;
-        
-        // Create Enhanced QR Data Payload for Offline Simulation
-        // This matches the format expected by the Kiosk scanner and App success view
-        const verificationLink = `${window.location.origin}/verify/${uniqueId}`; 
-        const qrPayload = JSON.stringify({
-            id: uniqueId,
-            event: config.event.name,
-            url: verificationLink,
-            token: `secure_${uniqueId.slice(-6)}_${Date.now()}`, // Mock security token
-            ver: '1.0'
-        });
-        const qrCodeUrl = `https://api.qrserver.com/v1/create-qr-code/?size=250x250&data=${encodeURIComponent(qrPayload)}`;
+        let finalQrCodeUrl = qrCodeUrl;
+        if (!finalQrCodeUrl) {
+             const qrPayload = JSON.stringify({
+                id: uniqueId,
+                event: config.event.name,
+                url: finalVerificationLink,
+                token: `secure_${uniqueId.slice(-6)}_${Date.now()}`,
+                ver: '1.0'
+            });
+            finalQrCodeUrl = `https://api.qrserver.com/v1/create-qr-code/?size=250x250&data=${encodeURIComponent(qrPayload)}`;
+        }
 
-        // Generate email content using Gemini
-        console.log(`Generating registration emails with AI for ${user.email}. QR Data: ${qrPayload}`);
-        const emails = await geminiService.generateRegistrationEmails(user, config, verificationLink, qrCodeUrl);
+        const emails = await geminiService.generateRegistrationEmails(user, config, finalVerificationLink, finalQrCodeUrl);
         
-        // Send User Email
         if (emails && emails.userEmail) {
             await emailService.sendEmail({
                 to: user.email,
@@ -434,7 +421,6 @@ export const triggerRegistrationEmails = async (eventId: string, user: Registrat
             }, config);
         }
 
-        // Send Host Notification
         if (emails && emails.hostEmail) {
             await emailService.sendEmail({
                 to: config.host.email,
@@ -442,7 +428,6 @@ export const triggerRegistrationEmails = async (eventId: string, user: Registrat
                 body: emails.hostEmail.body
             }, config);
         }
-        
     } catch (error) {
         console.error("Failed to trigger registration emails:", error);
     }
@@ -452,57 +437,53 @@ export const getInvitationDetails = async (token: string) => { return { eventId:
 export const updateRegistrationStatus = async (token: string, id: string, status: string) => { await db.update('registrations', id, { status }); };
 export const deleteAdminRegistration = async (token: string, id: string) => { await db.remove('registrations', id); };
 export const promoteToConfirmed = async (token: string, id: string) => { await db.update('registrations', id, { status: 'confirmed' }); };
-export const verifyTicketToken = async (token: string, ticketToken: string) => {
-    // Handle both raw ID/Email and new JSON payload format
-    let lookupValue = ticketToken;
-    let eventContext = '';
 
+export const verifyTicketToken = async (token: string, ticketToken: string, eventId: string = 'main-event') => {
+    let lookupValue = ticketToken;
     try {
-        // Try parsing as JSON first
         const payload = JSON.parse(ticketToken);
-        if (payload.id) {
-            lookupValue = payload.id;
-            if (payload.event) eventContext = payload.event;
-        }
+        if (payload.id) lookupValue = payload.id;
     } catch (e) {
-        // assume raw ID or Email if JSON parse fails
-        lookupValue = ticketToken;
+        // Not JSON, use as-is (e.g. manual email or raw ID)
     }
 
-    // Sanitize
     lookupValue = lookupValue.trim();
-
-    // Try finding by ID first
-    let reg = await db.find('registrations', r => r.id === lookupValue);
     
-    // If not found, try by Email
+    // Find attendee by ID or Email specifically for this event
+    let reg = await db.find('registrations', r => (r.id === lookupValue || r.email.toLowerCase() === lookupValue.toLowerCase()) && r.eventId === eventId);
+    
+    // Fallback for demo: if no event-specific registration found, try global (legacy data)
     if (!reg) {
-        reg = await db.find('registrations', r => r.email.toLowerCase() === lookupValue.toLowerCase());
+        reg = await db.find('registrations', r => r.id === lookupValue || r.email.toLowerCase() === lookupValue.toLowerCase());
     }
 
     if (reg) {
+        if (reg.status === 'cancelled') {
+            return { success: false, message: "Registration was cancelled." };
+        }
         await db.update('registrations', reg.id, { checkedIn: true });
         return { success: true, message: `Checked in ${reg.name}`, user: reg };
     }
-    return { success: false, message: "Invalid ticket or email not found." };
+    
+    return { success: false, message: "Invalid ticket, email not found, or not registered for this event." };
 };
-export const processCheckIn = async (token: string, qrData: string) => {
+
+export const processCheckIn = async (token: string, qrData: string, eventId: string = 'main-event') => {
     if (IS_ONLINE) {
         const res = await fetch('/api/admin/checkin', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
-            body: JSON.stringify({ qrData })
+            body: JSON.stringify({ qrData, eventId })
         });
         return await res.json();
     }
-    return verifyTicketToken(token, qrData);
+    return verifyTicketToken(token, qrData, eventId);
 };
+
 export const getSignedTicketToken = async (token: string) => {
     const payload = requireAuth(token, 'delegate');
-    // Return the JSON payload matching the backend format
     return JSON.stringify({
         id: payload.id,
-        // Mock event data for client simulation
         event: 'Event', 
         url: `${window.location.origin}/verify/${payload.id}`,
         token: `secure_${payload.id.slice(-6)}_${Date.now()}`,
@@ -511,17 +492,11 @@ export const getSignedTicketToken = async (token: string) => {
 };
 
 export const bulkImportRegistrations = async (token: string, csvData: string) => {
-    // Split lines handling both LF and CRLF
     const lines = csvData.split(/\r?\n/);
     let successCount = 0;
-    
-    // Auto-detect delimiter: check first non-empty line
     const firstLine = lines.find(l => l.trim().length > 0) || '';
     const delimiter = firstLine.includes('\t') ? '\t' : ',';
 
-    // Basic Header Check (optional, here we assume order or simple heuristic)
-    // If user pastes from Excel, it might not have headers, or it might.
-    // We assume 1st line is header if it contains "name" or "email"
     let startIndex = 0;
     if (firstLine.toLowerCase().includes('name') || firstLine.toLowerCase().includes('email')) {
         startIndex = 1;
@@ -532,17 +507,11 @@ export const bulkImportRegistrations = async (token: string, csvData: string) =>
     for (let i = startIndex; i < lines.length; i++) {
         const line = lines[i].trim();
         if (!line) continue;
-
-        // Correctly split and clean quotes
         const parts = line.split(delimiter).map(s => s.trim().replace(/^"|"$/g, '')); 
-        
         if (parts.length >= 2) {
             const name = parts[0];
             const email = parts[1];
-            // Optional columns (company, role) can be processed here if needed
-            
             if (name && email && email.includes('@')) {
-                // Check dupes first to avoid partial failures
                 const existing = await db.find('registrations', r => r.email === email);
                 if (!existing) {
                     await registerUser('main-event', { name, email, createdAt: Date.now() });
@@ -559,15 +528,12 @@ export const bulkImportRegistrations = async (token: string, csvData: string) =>
 };
 
 export const sendDelegateInvitation = async (token: string, eventId: string, email: string) => {
-    // In online mode, we'd call a specific backend endpoint
     if (IS_ONLINE) {
         await fetch('/api/admin/communications/send', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
-            body: JSON.stringify({ to: email, subject: 'Invitation', body: 'You are invited!' }) // Simplified
+            body: JSON.stringify({ to: email, subject: 'Invitation', body: 'You are invited!' })
         });
-    } else {
-        console.log(`[Offline Simulation] Sending invitation email to ${email}`);
     }
 };
 export const getDelegateProfile = async (token: string) => {
@@ -581,7 +547,6 @@ export const updateDelegateProfile = async (token: string, data: Partial<Registr
     return db.find('registrations', r => r.id === payload.id);
 };
 
-// Updated Cancel with Logic
 export const cancelRegistration = async (token: string, id: string) => {
     if (IS_ONLINE) {
         const res = await fetch('/api/registrations/cancel', {
@@ -592,42 +557,26 @@ export const cancelRegistration = async (token: string, id: string) => {
         if (!res.ok) throw new Error("Failed to cancel");
         return await res.json();
     }
-    
-    // Offline Mock with Auto-Promotion Logic
     const reg = await db.find('registrations', r => r.id === id);
     if (reg) {
         const wasConfirmed = reg.status === 'confirmed';
         await db.update('registrations', id, { status: 'cancelled' });
-        
         if (wasConfirmed) {
-            // Find waitlisted users for this event
             const allRegs = await db.findAll('registrations');
             const waitlisted = allRegs
                 .filter(r => r.eventId === reg.eventId && r.status === 'waitlist')
                 .sort((a, b) => a.createdAt - b.createdAt);
-            
             if (waitlisted.length > 0) {
                 const nextUser = waitlisted[0];
                 await db.update('registrations', nextUser.id, { status: 'confirmed' });
-                // In offline mode, we just log the promotion
-                console.log(`[Offline Simulation] Auto-promoted ${nextUser.name} from waitlist.`);
-                return { 
-                    success: true, 
-                    message: `Cancelled. Auto-promoted ${nextUser.name} from waitlist (Offline Simulation).` 
-                };
             }
         }
     }
-    
     return { success: true, message: "Cancelled (Offline Mode)" };
 };
 
-export const sendUpdateEmailToDelegate = async (token: string, eventId: string, delegateId: string) => {
-    // Handled by backend if needed, or simple simulation
-};
+export const sendUpdateEmailToDelegate = async (token: string, eventId: string, delegateId: string) => {};
 export const saveAdminRegistration = async (token: string, id: string, updates: any) => { await db.update('registrations', id, updates); };
-
-// ... (Ticketing, Agenda, etc. - keep existing implementations which route via db.ts) ...
 export const getTicketTiers = async (token: string) => { return db.findAll('ticket_tiers'); };
 export const saveTicketTier = async (token: string, tier: any) => {
     if (tier.id) await db.update('ticket_tiers', tier.id, tier);
@@ -744,26 +693,19 @@ export const getPolls = async (token: string, sessionId: string): Promise<PollWi
     try {
         const payload = requireAuth(token, 'delegate');
         userId = payload.id;
-    } catch (e) { 
-        // Allow mock token or anonymous for projector
-    }
-
+    } catch (e) {}
     const polls = await db.findAll('polls', p => p.sessionId === sessionId);
     const votes = await db.findAll('poll_votes', v => polls.some(p => p.id === v.pollId));
     return polls.map(p => {
         const pVotes = votes.filter(v => v.pollId === p.id);
         const voteCounts = new Array(p.options.length).fill(0);
-        pVotes.forEach(v => {
-            if (v.optionIndex >= 0 && v.optionIndex < voteCounts.length) voteCounts[v.optionIndex]++;
-        });
+        pVotes.forEach(v => { if (v.optionIndex >= 0 && v.optionIndex < voteCounts.length) voteCounts[v.optionIndex]++; });
         const myVote = pVotes.find(v => v.userId === userId);
         return { ...p, votes: voteCounts, totalVotes: pVotes.length, userVotedIndex: myVote?.optionIndex };
     });
 };
 export const createPoll = async (token: string, sessionId: string, question: string, options: string[]) => {
-    await db.insert('polls', {
-        id: `poll_${Date.now()}`, sessionId, question, options, status: 'draft', createdAt: Date.now()
-    });
+    await db.insert('polls', { id: `poll_${Date.now()}`, sessionId, question, options, status: 'draft', createdAt: Date.now() });
 };
 export const updatePollStatus = async (token: string, pollId: string, status: 'active' | 'closed') => {
     await db.update('polls', pollId, { status });
@@ -772,20 +714,13 @@ export const votePoll = async (token: string, pollId: string, optionIndex: numbe
     const payload = requireAuth(token, 'delegate');
     const existing = await db.find('poll_votes', v => v.pollId === pollId && v.userId === payload.id);
     if (existing) throw new Error("Already voted");
-    await db.insert('poll_votes', {
-        id: `vote_${Date.now()}`, pollId, userId: payload.id, optionIndex, timestamp: Date.now()
-    });
-    
-    // Notify socket if online (handled in backend insert/update usually, but explicit emit helps)
-    if (IS_ONLINE && socket) {
-        socket.emit('poll:vote', { pollId, optionIndex });
-    }
+    await db.insert('poll_votes', { id: `vote_${Date.now()}`, pollId, userId: payload.id, optionIndex, timestamp: Date.now() });
+    if (IS_ONLINE && socket) { socket.emit('poll:vote', { pollId, optionIndex }); }
 };
 
 export const getTasks = async (token: string, eventId: string) => db.findAll('tasks', t => t.eventId === eventId);
 export const saveTask = async (token: string, task: any) => { if(task.id) await db.update('tasks', task.id, task); else await db.insert('tasks', {...task, id: `task_${Date.now()}`}); };
 export const deleteTask = async (token: string, id: string) => db.remove('tasks', id);
-
 export const getMealPlans = async (token: string) => db.findAll('meal_plans');
 export const saveMealPlan = async (token: string, p: any) => { if(p.id) await db.update('meal_plans', p.id, p); else await db.insert('meal_plans', {...p, id: `mp_${Date.now()}`}); };
 export const deleteMealPlan = async (token: string, id: string) => db.remove('meal_plans', id);
@@ -798,7 +733,6 @@ export const makeDiningReservation = async (token: string, rid: string, time: st
 export const getReservationsForRestaurant = async (token: string, rid: string) => db.findAll('dining_reservations', r => r.restaurantId === rid);
 export const createAdminDiningReservation = async (token: string, d: any) => db.insert('dining_reservations', {id: `dr_${Date.now()}`, ...d});
 export const deleteDiningReservation = async (token: string, id: string) => db.remove('dining_reservations', id);
-
 export const getHotels = async (token: string) => db.findAll('hotels');
 export const saveHotel = async (token: string, h: any) => { if(h.id) await db.update('hotels', h.id, h); else await db.insert('hotels', {...h, id: `h_${Date.now()}`}); };
 export const deleteHotel = async (token: string, id: string) => db.remove('hotels', id);
@@ -818,27 +752,16 @@ export const bookAccommodation = async (token: string, hid: string, rtid: string
 export const cancelAccommodationBooking = async (token: string, id: string) => db.update('accommodation_bookings', id, { status: 'Cancelled' });
 export const selfCheckOut = async (token: string, id: string) => db.update('accommodation_bookings', id, { status: 'CheckedOut' });
 
-// --- Economy & Wallet ---
-
 export const getDelegateBalance = async (token: string) => {
     if (IS_ONLINE) {
-        const res = await fetch('/api/delegate/wallet', {
-            headers: { 'Authorization': `Bearer ${token}` }
-        });
+        const res = await fetch('/api/delegate/wallet', { headers: { 'Authorization': `Bearer ${token}` } });
         if (res.ok) return await res.json();
     }
-    // Offline / Mock
     return { balance: 100, currencyName: 'EventCoin' };
 };
 
 export const getDelegateTransactions = async (token: string) => {
     if (IS_ONLINE) {
-        // We can just query the wallet transactions if the endpoint returns them, 
-        // but currently /api/delegate/wallet returns { balance, currencyName }.
-        // For now, let's fetch all transactions relevant to the user via generic sync 
-        // or a specific endpoint if we added one. 
-        // We added logic in calculateBalance but not a separate list endpoint.
-        // Let's rely on local DB sync for the list which is populated by 'refresh:wallet'
         const payload = requireAuth(token, 'delegate');
         const allTx = await db.findAll('transactions');
         return allTx.filter((t: any) => t.fromId === payload.id || t.toId === payload.id);
@@ -853,10 +776,7 @@ export const sendCoins = async (token: string, email: string, amt: number, msg: 
             headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
             body: JSON.stringify({ recipientEmail: email, amount: amt, message: msg })
         });
-        if (!res.ok) {
-            const err = await res.json();
-            throw new Error(err.error || 'Transfer failed');
-        }
+        if (!res.ok) { const err = await res.json(); throw new Error(err.error || 'Transfer failed'); }
         return await res.json();
     } else {
         const p = requireAuth(token, 'delegate');
@@ -881,10 +801,7 @@ export const createPaymentIntent = async (token: string, amt: number) => {
     if (IS_ONLINE) {
         const res = await fetch('/api/payments/create-intent', {
             method: 'POST',
-            headers: { 
-                'Content-Type': 'application/json', 
-                'Authorization': `Bearer ${token}` 
-            },
+            headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
             body: JSON.stringify({ amount: amt })
         });
         if (res.ok) return await res.json();
@@ -894,11 +811,7 @@ export const createPaymentIntent = async (token: string, amt: number) => {
 
 export const createPublicPaymentIntent = async (amt: number) => {
     if (IS_ONLINE) {
-        const res = await fetch('/api/public/payments/create-intent', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ amount: amt })
-        });
+        const res = await fetch('/api/public/payments/create-intent', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ amount: amt }) });
         if (res.ok) return await res.json();
     }
     return { clientSecret: `mock_secret_${Date.now()}` };
@@ -909,106 +822,57 @@ export const getAllTransactions = async (token: string) => db.findAll('transacti
 export const issueEventCoins = async (token: string, email: string, amt: number, msg: string) => { await db.insert('transactions', {id: `tx_${Date.now()}`, fromId: 'admin', amount: amt, message: msg, timestamp: Date.now()}); };
 export const getDashboardStats = async (token: string) => {
     if (IS_ONLINE) {
-        const res = await fetch('/api/admin/dashboard', {
-            headers: { 'Authorization': `Bearer ${token}` }
-        });
+        const res = await fetch('/api/admin/dashboard', { headers: { 'Authorization': `Bearer ${token}` } });
         if (res.ok) return await res.json();
     }
-    
-    // Offline Fallback
-    return { 
-        totalRegistrations: await db.count('registrations'), 
-        maxAttendees: 500, 
-        eventDate: 'Oct 26', 
-        registrationTrend: [], 
-        taskStats: {total:0,completed:0,pending:0}, 
-        recentRegistrations: [], 
-        eventCoinName: 'EC', 
-        eventCoinCirculation: 0, 
-        activeWallets: 0, 
-        totalTransactions: 0 
-    };
+    return { totalRegistrations: await db.count('registrations'), maxAttendees: 500, eventDate: 'Oct 26', registrationTrend: [], taskStats: {total:0,completed:0,pending:0}, recentRegistrations: [], eventCoinName: 'EC', eventCoinCirculation: 0, activeWallets: 0, totalTransactions: 0 };
 };
 
 export const getMyNetworkingProfile = async (token: string) => { const p = requireAuth(token, 'delegate'); return db.find('networking_profiles', np => np.userId === p.id); };
 export const updateNetworkingProfile = async (token: string, data: any) => { const p = requireAuth(token, 'delegate'); const ex = await db.find('networking_profiles', np => np.userId === p.id); if(ex) await db.update('networking_profiles', ex.id, data); else await db.insert('networking_profiles', {...data, userId: p.id, id: `np_${p.id}`}); };
-
 export const getNetworkingCandidates = async (token: string) => {
     if (IS_ONLINE) {
-        const res = await fetch('/api/delegate/networking/matches', {
-            headers: { 'Authorization': `Bearer ${token}` }
-        });
+        const res = await fetch('/api/delegate/networking/matches', { headers: { 'Authorization': `Bearer ${token}` } });
         if (res.ok) return await res.json();
     }
-    
-    // Offline / Fallback
     const payload = requireAuth(token, 'delegate');
     const myProfile = await db.find('networking_profiles', np => np.userId === payload.id);
     const allCandidates = await db.findAll('networking_profiles', np => np.userId !== payload.id && np.isVisible);
-    
-    // Basic local tag matching
     const matches: NetworkingMatch[] = [];
     if (myProfile) {
         for (const candidate of allCandidates) {
             const user = await db.find('registrations', r => r.id === candidate.userId);
             const sharedInterests = candidate.interests.filter((i: string) => myProfile.interests.includes(i));
-            
             if (sharedInterests.length > 0) {
-                matches.push({
-                    userId: candidate.userId,
-                    name: user?.name || 'Anonymous',
-                    jobTitle: candidate.jobTitle,
-                    company: candidate.company,
-                    score: 50 + (sharedInterests.length * 10), // Simple scoring
-                    reason: `You both like ${sharedInterests.join(', ')}`,
-                    icebreaker: `Ask about their interest in ${sharedInterests[0]}`,
-                    profile: candidate,
-                    photoUrl: user?.photoUrl
-                });
+                matches.push({ userId: candidate.userId, name: user?.name || 'Anonymous', jobTitle: candidate.jobTitle, company: candidate.company, score: 50 + (sharedInterests.length * 10), reason: `You both like ${sharedInterests.join(', ')}`, icebreaker: `Ask about their interest in ${sharedInterests[0]}`, profile: candidate, photoUrl: user?.photoUrl });
             }
         }
     }
-    
     return { matches, allCandidates: allCandidates.map(c => ({...c, name: 'Candidate'})) };
 };
-
-// --- Gamification ---
 
 export const getScavengerHuntItems = async (token: string) => db.findAll('scavenger_hunt_items');
 export const saveScavengerHuntItem = async (token: string, i: any) => { if(i.id) await db.update('scavenger_hunt_items', i.id, i); else await db.insert('scavenger_hunt_items', {...i, id: `shi_${Date.now()}`}); };
 export const deleteScavengerHuntItem = async (token: string, id: string) => db.remove('scavenger_hunt_items', id);
-
 export const getScavengerHuntProgress = async (token: string) => {
     if (IS_ONLINE) {
-        const res = await fetch('/api/delegate/gamification/progress', {
-            headers: { 'Authorization': `Bearer ${token}` }
-        });
+        const res = await fetch('/api/delegate/gamification/progress', { headers: { 'Authorization': `Bearer ${token}` } });
         if (res.ok) return await res.json();
     }
-    // Offline Mock
     const p = requireAuth(token, 'delegate');
     const prog = await db.find('scavenger_hunt_progress', pr => pr.userId === p.id);
     return prog ? prog.foundItemIds : [];
 };
-
 export const claimScavengerHuntItem = async (token: string, code: string) => {
     if (IS_ONLINE) {
-        const res = await fetch('/api/delegate/gamification/claim', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
-            body: JSON.stringify({ code })
-        });
+        const res = await fetch('/api/delegate/gamification/claim', { method: 'POST', headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` }, body: JSON.stringify({ code }) });
         return await res.json();
     }
-    // Offline Mock - Minimal implementation, just says success
     return { success: true, message: 'Found! (Mock Mode)' };
 };
-
 export const getScavengerHuntLeaderboard = async (token: string) => {
     if (IS_ONLINE) {
-        const res = await fetch('/api/gamification/leaderboard', {
-            headers: { 'Authorization': `Bearer ${token}` }
-        });
+        const res = await fetch('/api/gamification/leaderboard', { headers: { 'Authorization': `Bearer ${token}` } });
         if (res.ok) return await res.json();
     }
     return [];
@@ -1017,140 +881,66 @@ export const getScavengerHuntLeaderboard = async (token: string) => {
 export const getVenueMaps = async (token: string) => db.findAll('venue_maps');
 export const saveVenueMap = async (token: string, m: any) => { if(m.id) await db.update('venue_maps', m.id, m); else await db.insert('venue_maps', {...m, id: `vm_${Date.now()}`}); };
 export const deleteVenueMap = async (token: string, id: string) => db.remove('venue_maps', id);
-
 export const getMediaLibrary = async (token: string) => db.findAll('media');
 export const uploadFile = async (file: File) => uploadFileToStorage(file);
 export const deleteMedia = async (token: string, id: string) => db.remove('media', id);
-
 export const getEmailLogs = async (token: string) => db.findAll('email_logs');
 export const sendBroadcast = async (token: string, s: string, b: string, t: string, c: string) => { 
     if (IS_ONLINE) {
-        return fetch('/api/admin/communications/broadcast', { 
-            method: 'POST', 
-            headers: {'Content-Type': 'application/json', 'Authorization': `Bearer ${token}`},
-            body: JSON.stringify({ subject: s, body: b, target: t, channel: c })
-        }).then(r => r.json());
+        return fetch('/api/admin/communications/broadcast', { method: 'POST', headers: {'Content-Type': 'application/json', 'Authorization': `Bearer ${token}`}, body: JSON.stringify({ subject: s, body: b, target: t, channel: c }) }).then(r => r.json());
     }
-    // Update offline simulation to log channel correctly
     await db.insert('email_logs', {id: `el_${Date.now()}`, subject: `${c.toUpperCase()}: ${s}`, body: b, to: t, status: 'sent', timestamp: Date.now()}); 
     return { success: true, message: `Sent via ${c} (Mock)` }; 
 };
 export const sendTestEmail = async (token: string, to: string, config: any) => { 
-    if (IS_ONLINE) {
-        await fetch('/api/admin/communications/send', {
-            method: 'POST',
-            headers: {'Content-Type': 'application/json', 'Authorization': `Bearer ${token}`},
-            body: JSON.stringify({ to, config })
-        });
-    } else {
-        await emailService.sendEmail({to, subject: 'Test', body: 'Test'}, config); 
-    }
+    if (IS_ONLINE) { await fetch('/api/admin/communications/send', { method: 'POST', headers: {'Content-Type': 'application/json', 'Authorization': `Bearer ${token}`}, body: JSON.stringify({ to, config }) }); }
+    else { await emailService.sendEmail({to, subject: 'Test', body: 'Test'}, config); }
 };
-
-export const sendTestMessage = async (token: string, channel: 'email' | 'sms' | 'whatsapp' | 'telegram', to: string, config: any) => {
-    if (IS_ONLINE) {
-        await fetch('/api/admin/communications/test', {
-            method: 'POST',
-            headers: {'Content-Type': 'application/json', 'Authorization': `Bearer ${token}`},
-            body: JSON.stringify({ to, channel, config })
-        });
-    } else {
-        // Offline Mock
-        if (channel === 'email') {
-            await emailService.sendEmail({to, subject: 'Test', body: 'Test'}, config);
-        } else {
-            console.log(`[Test ${channel.toUpperCase()}] Sending to ${to}...`);
-            await new Promise(r => setTimeout(r, 500));
-        }
-    }
-};
-
 export const getNotifications = async (token: string) => { const p = requireAuth(token, 'delegate'); return db.findAll('notifications', n => n.userId === p.id); };
 export const markNotificationRead = async (token: string, id: string) => db.update('notifications', id, { read: true });
 export const clearAllNotifications = async (token: string) => { const p = requireAuth(token, 'delegate'); await db.updateWhere('notifications', n => n.userId === p.id, { read: true }); };
 
-// --- Chat ---
 export const getConversations = async (token: string) => {
     const payload = requireAuth(token, 'delegate');
     const messages = await db.findAll('messages', m => m.senderId === payload.id || m.receiverId === payload.id);
     const userIds = new Set<string>();
-    messages.forEach(m => {
-        if (m.senderId !== payload.id) userIds.add(m.senderId);
-        if (m.receiverId !== payload.id) userIds.add(m.receiverId);
-    });
+    messages.forEach(m => { if (m.senderId !== payload.id) userIds.add(m.senderId); if (m.receiverId !== payload.id) userIds.add(m.receiverId); });
     const users = await db.findAll('registrations', u => userIds.has(u.id));
     return Array.from(userIds).map(uid => {
         const lastMsg = messages.filter(m => m.senderId === uid || m.receiverId === uid).sort((a, b) => b.timestamp - a.timestamp)[0];
         const unread = messages.filter(m => m.senderId === uid && m.receiverId === payload.id && !m.read).length;
-        return {
-            withUserId: uid,
-            withUserName: users.find(u => u.id === uid)?.name || 'Unknown',
-            lastMessage: lastMsg?.content || '',
-            lastTimestamp: lastMsg?.timestamp || 0,
-            unreadCount: unread
-        };
+        return { withUserId: uid, withUserName: users.find(u => u.id === uid)?.name || 'Unknown', lastMessage: lastMsg?.content || '', lastTimestamp: lastMsg?.timestamp || 0, unreadCount: unread };
     });
 };
-
 export const getMessages = async (token: string, withUserId: string) => {
     const payload = requireAuth(token, 'delegate');
     return db.findAll('messages', m => (m.senderId === payload.id && m.receiverId === withUserId) || (m.senderId === withUserId && m.receiverId === payload.id));
 };
-
 export const sendMessage = async (token: string, toUserId: string, content: string) => {
     const payload = requireAuth(token, 'delegate');
-    const message = {
-        id: `msg_${Date.now()}`,
-        senderId: payload.id,
-        receiverId: toUserId,
-        content,
-        timestamp: Date.now(),
-        read: false
-    };
-    
-    // In real WebSocket setup, we emit the event
-    if (IS_ONLINE && socket) {
-        socket.emit('chat:send', message);
-    } else {
-        await db.insert('messages', message);
-    }
+    const message = { id: `msg_${Date.now()}`, senderId: payload.id, receiverId: toUserId, content, timestamp: Date.now(), read: false };
+    if (IS_ONLINE && socket) { socket.emit('chat:send', message); } else { await db.insert('messages', message); }
 };
-
-// --- Video ---
 export const sendSignal = async (token: string, toUserId: string, type: string, data: any) => {
     const payload = requireAuth(token, 'delegate');
-    // Ensure we send the correct senderId (the user's ID) so the backend or peer can verify
-    if (socket) {
-        socket.emit('signal', { to: toUserId, type, data, senderId: payload.id });
-    }
+    if (socket) { socket.emit('signal', { to: toUserId, type, data, senderId: payload.id }); }
 };
-
 export const subscribeToSignals = (callback: (payload: any) => void) => {
     if (!socket) {
-        // Fallback for offline local signaling if needed, though WebRTC usually needs network
-        // For local demo, we can use BroadcastChannel
         const localChannel = new BroadcastChannel('webrtc_signals');
         const handler = (e: MessageEvent) => callback(e.data);
         localChannel.addEventListener('message', handler);
         return () => localChannel.removeEventListener('message', handler);
     }
-    
     const handler = (payload: any) => callback(payload);
     socket.on('signal', handler);
-    return () => {
-        socket?.off('signal', handler);
-    };
+    return () => { socket?.off('signal', handler); };
 };
 
-// --- AI Wrappers ---
 export const generateMarketingVideo = async (prompt: string, imageBase64?: string) => geminiService.generateMarketingVideo(prompt, imageBase64);
 export const researchEntity = async (token: string, type: 'speaker' | 'sponsor', name: string) => {
     if (IS_ONLINE) {
-        const res = await fetch('/api/admin/ai/research', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
-            body: JSON.stringify({ type, name })
-        });
+        const res = await fetch('/api/admin/ai/research', { method: 'POST', headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` }, body: JSON.stringify({ type, name }) });
         if (!res.ok) throw new Error("Research failed");
         return await res.json();
     }
@@ -1163,14 +953,9 @@ export const getEventContextForAI = async (token: string) => {
     const sessions = await db.findAll('sessions');
     return `Event: ${config.event.name}. Date: ${config.event.date}. Sessions: ${sessions.map(s => s.title).join(', ')}`;
 };
-
 export const askHelp = async (token: string, query: string) => {
     if (IS_ONLINE) {
-        const res = await fetch('/api/admin/help', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
-            body: JSON.stringify({ query })
-        });
+        const res = await fetch('/api/admin/help', { method: 'POST', headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` }, body: JSON.stringify({ query }) });
         if (!res.ok) throw new Error("Help request failed");
         const data = await res.json();
         return data.answer;

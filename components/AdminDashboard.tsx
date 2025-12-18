@@ -127,17 +127,20 @@ const StatCard: React.FC<{ title: string; value: string | number; description?: 
     </div>
 );
 
-const QuickAction: React.FC<{ label: string, icon: React.ReactNode, onClick: () => void }> = ({ label, icon, onClick }) => (
-    <button 
-        onClick={onClick}
-        className="flex flex-col items-center justify-center p-4 bg-white dark:bg-gray-800 rounded-xl shadow-sm border border-gray-100 dark:border-gray-700 hover:bg-gray-50 dark:hover:bg-gray-700/50 transition-colors group w-full h-full"
-    >
-        <div className="h-10 w-10 rounded-full bg-primary/10 text-primary group-hover:bg-primary group-hover:text-white flex items-center justify-center transition-colors mb-3">
-            {icon}
-        </div>
-        <span className="text-sm font-medium text-gray-700 dark:text-gray-300 group-hover:text-gray-900 dark:group-hover:text-white">{label}</span>
-    </button>
-);
+const QuickAction: React.FC<{ label: string, icon: React.ReactNode, onClick: () => void, userPermissions: Permission[], permission: Permission }> = ({ label, icon, onClick, userPermissions, permission }) => {
+    if (!userPermissions.includes(permission)) return null;
+    return (
+        <button 
+            onClick={onClick}
+            className="flex flex-col items-center justify-center p-4 bg-white dark:bg-gray-800 rounded-xl shadow-sm border border-gray-100 dark:border-gray-700 hover:bg-gray-50 dark:hover:bg-gray-700/50 transition-colors group w-full h-full"
+        >
+            <div className="h-10 w-10 rounded-full bg-primary/10 text-primary group-hover:bg-primary group-hover:text-white flex items-center justify-center transition-colors mb-3">
+                {icon}
+            </div>
+            <span className="text-sm font-medium text-gray-700 dark:text-gray-300 group-hover:text-gray-900 dark:group-hover:text-white">{label}</span>
+        </button>
+    );
+};
 
 
 export const AdminDashboard: React.FC<AdminDashboardProps> = ({ user, adminToken, onNavigate }) => {
@@ -176,6 +179,11 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ user, adminToken
   const taskProgress = stats && stats.taskStats.total > 0 
       ? (stats.taskStats.completed / stats.taskStats.total) * 100 
       : 0;
+
+  const handleLaunchKiosk = () => {
+    // Determine event ID context - default to main-event if not found
+    window.open('/kiosk/main-event', '_blank');
+  };
 
   if (isLoading) {
     return <ContentLoader text="Loading dashboard..." />;
@@ -246,10 +254,10 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ user, adminToken
               <div>
                   <h3 className="text-lg font-semibold text-gray-900 dark:text-white mb-4">Quick Actions</h3>
                   <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
-                      <QuickAction label="Check-in" onClick={() => onNavigate('registrations')} icon={<svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v1m6 11h2m-6.5 6.5v-1m-6.5-5.5h-1M4 12V4a2 2 0 012-2h8a2 2 0 012 2v8a2 2 0 01-2 2H6a2 2 0 01-2-2z" /></svg>} />
-                      <QuickAction label="Add Task" onClick={() => onNavigate('tasks')} icon={<svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 6v6m0 0v6m0-6h6m-6 0H6" /></svg>} />
-                      <QuickAction label="Send Email" onClick={() => onNavigate('communications')} icon={<svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 8l7.89 5.26a2 2 0 002.22 0L21 8M5 19h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z" /></svg>} />
-                      <QuickAction label="Settings" onClick={() => onNavigate('settings')} icon={<svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z" /><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" /></svg>} />
+                      <QuickAction label="Kiosk Mode" onClick={handleLaunchKiosk} icon={<svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9.75 17L9 20l-1 1h8l-1-1-.75-3M3 13h18M5 17h14a2 2 0 002-2V5a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z" /></svg>} userPermissions={user.permissions} permission="manage_registrations" />
+                      <QuickAction label="Add Task" onClick={() => onNavigate('tasks')} icon={<svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 6v6m0 0v6m0-6h6m-6 0H6" /></svg>} userPermissions={user.permissions} permission="manage_tasks" />
+                      <QuickAction label="Send Email" onClick={() => onNavigate('communications')} icon={<svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 8l7.89 5.26a2 2 0 002.22 0L21 8M5 19h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z" /></svg>} userPermissions={user.permissions} permission="manage_communications" />
+                      <QuickAction label="Settings" onClick={() => onNavigate('settings')} icon={<svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z" /><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" /></svg>} userPermissions={user.permissions} permission="manage_settings" />
                   </div>
               </div>
 
@@ -257,7 +265,9 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ user, adminToken
               <div className="bg-white dark:bg-gray-800 shadow-sm rounded-xl overflow-hidden border border-gray-100 dark:border-gray-700">
                 <div className="px-6 py-4 border-b border-gray-100 dark:border-gray-700 flex justify-between items-center bg-gray-50 dark:bg-gray-800/50">
                     <h3 className="text-lg font-semibold text-gray-900 dark:text-white">Recent Registrations</h3>
-                    <button onClick={() => onNavigate('registrations')} className="text-sm text-primary hover:underline">View All</button>
+                    {user.permissions.includes('manage_registrations') && (
+                        <button onClick={() => onNavigate('registrations')} className="text-sm text-primary hover:underline">View All</button>
+                    )}
                 </div>
                 {stats && stats.recentRegistrations.length > 0 ? (
                   <ul className="divide-y divide-gray-100 dark:divide-gray-700">
@@ -300,20 +310,22 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ user, adminToken
                        {/* Placeholder for Sales if implemented */}
                        <div className="p-4 rounded-lg bg-green-50 dark:bg-green-900/20 border border-green-100 dark:border-green-800">
                            <p className="text-sm text-green-600 dark:text-green-300 font-medium">Ticket Sales (Est)</p>
-                           <p className="text-2xl font-bold text-green-900 dark:text-white">$0.00</p>
+                           <p className="text-2xl font-bold text-indigo-900 dark:text-white">$0.00</p>
                            <p className="text-xs text-gray-500 mt-1">Integration pending</p>
                        </div>
                    </div>
                </div>
 
                {/* Help/Support Box */}
-               <div className="bg-gradient-to-br from-purple-600 to-indigo-700 rounded-xl p-6 text-white shadow-md">
-                   <h3 className="text-lg font-bold mb-2">Need Help?</h3>
-                   <p className="text-sm text-indigo-100 mb-4">Check the system status or run diagnostics if you encounter issues.</p>
-                   <button onClick={() => onNavigate('tests')} className="block w-full text-center bg-white/20 hover:bg-white/30 border border-white/40 rounded-lg py-2 text-sm font-medium transition-colors">
-                       Run System Tests
-                   </button>
-               </div>
+               {user.permissions.includes('view_diagnostics') && (
+                   <div className="bg-gradient-to-br from-purple-600 to-indigo-700 rounded-xl p-6 text-white shadow-md">
+                       <h3 className="text-lg font-bold mb-2">Need Help?</h3>
+                       <p className="text-sm text-indigo-100 mb-4">Check the system status or run diagnostics if you encounter issues.</p>
+                       <button onClick={() => onNavigate('tests')} className="block w-full text-center bg-white/20 hover:bg-white/30 border border-white/40 rounded-lg py-2 text-sm font-medium transition-colors">
+                           Run System Tests
+                       </button>
+                   </div>
+               )}
           </div>
       </div>
     </div>

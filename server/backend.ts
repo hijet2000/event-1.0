@@ -264,7 +264,7 @@ const SAFE_DEFAULTS = {
     whatsapp: { enabled: false, accessToken: '', phoneNumberId: '' },
     sms: { enabled: false, accountSid: '', authToken: '', fromNumber: '' },
     smtp: { host: '', port: 587, username: '', password: '', encryption: 'tls' },
-    googleConfig: { serviceAccountKeyJson: '' },
+    googleConfig: { serviceAccountKeyJson: '', subjectEmail: '' },
     emailProvider: 'smtp',
     eventCoin: { name: 'EventCoin', startingBalance: 100 }
 };
@@ -332,12 +332,14 @@ const createTransporter = (config: any) => {
              throw new Error("Google Service Account JSON missing required fields.");
         }
 
-        // Use standard nodemailer transport with service account credentials
+        // Use Domain-Wide Delegation if subjectEmail is provided, otherwise standard service account auth
+        const subject = config.googleConfig.subjectEmail || config.host.email;
+
         return nodemailer.createTransport({
             service: 'gmail',
             auth: {
                 type: 'OAuth2',
-                user: serviceAccount.client_email, 
+                user: subject, 
                 serviceClient: serviceAccount.client_id,
                 privateKey: serviceAccount.private_key,
             }
@@ -364,8 +366,13 @@ const sendEmail = async (config: any, to: string, subject: string, html: string)
         const transporter = createTransporter(config);
         console.log(`[Email] Sending to ${to} via ${config.emailProvider}`);
 
+        // Set from address to the impersonated subject if using Google Workspace
+        const fromEmail = (config.emailProvider === 'google' && config.googleConfig?.subjectEmail) 
+            ? config.googleConfig.subjectEmail 
+            : config.host.email;
+
         await transporter.sendMail({
-            from: `"${config.event.name}" <${config.host.email}>`,
+            from: `"${config.event.name}" <${fromEmail}>`,
             to,
             subject,
             html,
