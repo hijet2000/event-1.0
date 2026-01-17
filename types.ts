@@ -20,49 +20,33 @@ export type Permission =
   | 'view_system_status'
   | 'view_diagnostics';
 
-export const PERMISSION_GROUPS: Record<string, Permission[]> = {
-  'General': ['view_dashboard', 'manage_settings', 'manage_users'],
-  'Event Content': ['manage_agenda', 'manage_speakers_sponsors', 'manage_maps', 'manage_media', 'manage_marketing'],
-  'Delegate Management': ['manage_registrations', 'send_invitations', 'manage_communications'],
-  'Operations': ['manage_tasks', 'manage_dining', 'manage_accommodation', 'manage_gamification'],
-  'Economy': ['view_eventcoin_dashboard', 'manage_eventcoin'],
-  'System': ['view_system_status', 'view_diagnostics']
-};
-
-export const ALL_PERMISSIONS: Record<Permission, string> = {
-  view_dashboard: 'View Dashboard Stats',
-  manage_registrations: 'Manage Registrations & Check-in',
-  manage_settings: 'Edit Global Event Settings',
-  manage_users: 'Manage Admin Users & Roles',
-  manage_tasks: 'Manage Staff Tasks',
-  manage_dining: 'Manage Meal Plans & Restaurants',
-  manage_accommodation: 'Manage Hotel Bookings',
-  manage_agenda: 'Manage Sessions & Schedule',
-  manage_speakers_sponsors: 'Manage Speakers & Sponsors',
-  view_eventcoin_dashboard: 'View Economy Stats',
-  manage_eventcoin: 'Issue/Deduct EventCoins',
-  send_invitations: 'Send Direct Invitations',
-  manage_gamification: 'Manage Scavenger Hunt',
-  manage_communications: 'Send Broadcasts & View Logs',
-  manage_media: 'Manage Media Library',
-  manage_marketing: 'Generate Marketing Content',
-  manage_maps: 'Manage Venue Maps',
-  view_system_status: 'View Technical Logs/Export',
-  view_diagnostics: 'Run System Health Tests'
-};
-
 export interface RegistrationData {
   id?: string;
   name: string;
   email: string;
   company?: string;
   role?: string;
+  goals?: string; // New field for custom AI request
   ticketTierId?: string;
   createdAt: number;
   checkedIn?: boolean;
   status?: 'confirmed' | 'waitlist' | 'cancelled';
   photoUrl?: string;
   [key: string]: any;
+}
+
+export interface SocialPost {
+    id: string;
+    userId: string;
+    userName: string;
+    userPhotoUrl?: string;
+    type: 'social' | 'incident';
+    content: string;
+    imageUrl?: string;
+    timestamp: number;
+    incidentCategory?: string;
+    incidentSeverity?: 'low' | 'medium' | 'high';
+    likes: number;
 }
 
 export interface Session {
@@ -75,6 +59,7 @@ export interface Session {
   track?: string;
   capacity?: number;
   speakerIds: string[];
+  streamUrl?: string;
 }
 
 export interface Speaker {
@@ -98,20 +83,6 @@ export interface Sponsor {
   websiteUrl: string;
   logoUrl: string;
   tier: SponsorshipTier;
-}
-
-export interface AiConciergeConfig {
-    enabled: boolean;
-    voice: 'Puck' | 'Charon' | 'Kore' | 'Fenrir' | 'Zephyr';
-    persona: string;
-}
-
-export interface PrintConfig {
-    enabled: boolean;
-    width: number;
-    height: number;
-    orientation: 'portrait' | 'landscape';
-    autoPrintOnKiosk: boolean;
 }
 
 export interface EventConfig {
@@ -140,65 +111,21 @@ export interface EventConfig {
     faviconUrl?: string;
   };
   formFields: FormField[];
-  emailTemplates: {
-    userConfirmation: EmailContent;
-    hostNotification: EmailContent;
-    passwordReset: EmailContent;
-    delegateInvitation: EmailContent;
-  };
+  emailTemplates: any;
   emailProvider: 'smtp' | 'google';
-  smtp: {
-    host: string;
-    port: number;
-    username: string;
-    password?: string;
-    encryption: 'none' | 'ssl' | 'tls';
-  };
+  smtp: any;
   googleConfig: {
     serviceAccountKeyJson: string;
     subjectEmail: string;
   };
-  badgeConfig: {
-    showName: boolean;
-    showEmail: boolean;
-    showCompany: boolean;
-    showRole: boolean;
-  };
-  printConfig: PrintConfig;
-  eventCoin: {
-    enabled: boolean;
-    name: string;
-    startingBalance: number;
-    peggedCurrency: string;
-    exchangeRate: number;
-  };
-  githubSync: {
-    enabled: boolean;
-    configUrl: string; // Deprecated in favor of repo details, kept for backward compat
-    owner?: string;
-    repo?: string;
-    path?: string;
-    token?: string;
-    lastSyncTimestamp?: number;
-    lastSyncStatus?: 'success' | 'failed';
-  };
-  whatsapp: {
-    enabled: boolean;
-    accessToken: string;
-    phoneNumberId: string;
-  };
-  telegram: {
-    enabled: boolean;
-    botToken: string;
-  };
-  sms: {
-    enabled: boolean;
-    provider: 'twilio';
-    accountSid: string;
-    authToken: string;
-    fromNumber: string;
-  };
-  aiConcierge: AiConciergeConfig;
+  badgeConfig: any;
+  printConfig: any;
+  eventCoin: any;
+  githubSync: any;
+  whatsapp: any;
+  telegram: any;
+  sms: any;
+  aiConcierge: any;
 }
 
 export interface FormField {
@@ -209,17 +136,6 @@ export interface FormField {
   required: boolean;
   enabled: boolean;
   options?: string[];
-}
-
-export interface EmailContent {
-  subject: string;
-  body: string;
-}
-
-export interface EmailPayload {
-  to: string;
-  subject: string;
-  body: string;
 }
 
 export interface DashboardStats {
@@ -249,12 +165,6 @@ export interface Transaction {
   message: string;
 }
 
-export interface EventCoinStats {
-  totalCirculation: number;
-  totalTransactions: number;
-  activeWallets: number;
-}
-
 export interface AdminUser {
   id: string;
   email: string;
@@ -280,22 +190,13 @@ export interface PublicEvent {
   config: EventConfig;
 }
 
-export interface EventData {
-    id: string;
-    name: string;
-    type: string;
-}
-
-export type TaskStatus = 'todo' | 'in_progress' | 'completed';
-export type TaskPriority = 'low' | 'medium' | 'high';
-
 export interface Task {
   id: string;
   eventId: string;
   title: string;
   description: string;
-  status: TaskStatus;
-  priority: TaskPriority;
+  status: 'todo' | 'in_progress' | 'completed';
+  priority: 'low' | 'medium' | 'high';
   assigneeEmail?: string;
   dueDate?: string;
   createdAt: number;
@@ -314,28 +215,6 @@ export interface Restaurant {
   cuisine: string;
   operatingHours: string;
   menu?: string;
-}
-
-export type MealType = 'breakfast' | 'lunch' | 'dinner';
-
-export interface MealPlanAssignment {
-  id: string;
-  delegateId: string;
-  mealPlanId: string;
-  startDate: string;
-  endDate: string;
-}
-
-export interface AccommodationBooking {
-  id: string;
-  delegateId: string;
-  hotelId: string;
-  roomTypeId: string;
-  checkInDate: string;
-  checkOutDate: string;
-  status: AccommodationBookingStatus;
-  hotelRoomId?: string; // ID of the specific room assigned
-  roomNumber?: string; // Cached room number for display
 }
 
 export interface Hotel {
@@ -357,7 +236,17 @@ export interface RoomType {
   amenities: string[];
 }
 
-export type AccommodationBookingStatus = 'Confirmed' | 'CheckedIn' | 'CheckedOut' | 'Cancelled';
+export interface AccommodationBooking {
+  id: string;
+  delegateId: string;
+  hotelId: string;
+  roomTypeId: string;
+  checkInDate: string;
+  checkOutDate: string;
+  status: 'Confirmed' | 'CheckedIn' | 'CheckedOut' | 'Cancelled';
+  hotelRoomId?: string;
+  roomNumber?: string;
+}
 
 export interface EnrichedAccommodationBooking extends AccommodationBooking {
     delegateName: string;
@@ -368,14 +257,12 @@ export interface EnrichedAccommodationBooking extends AccommodationBooking {
     hotelRoomId?: string;
 }
 
-export type HotelRoomStatus = 'Available' | 'Occupied' | 'Cleaning' | 'OutOfOrder';
-
 export interface HotelRoom {
     id: string;
     hotelId: string;
     roomTypeId: string;
     roomNumber: string;
-    status: HotelRoomStatus;
+    status: 'Available' | 'Occupied' | 'Cleaning' | 'OutOfOrder';
 }
 
 export interface DiningReservation {
@@ -417,16 +304,8 @@ export interface Poll {
     createdAt: number;
 }
 
-export interface PollVote {
-    id: string;
-    pollId: string;
-    userId: string;
-    optionIndex: number;
-    timestamp: number;
-}
-
 export interface PollWithResults extends Poll {
-    votes: number[]; // Array of vote counts per option index
+    votes: number[];
     totalVotes: number;
     userVotedIndex?: number;
 }
@@ -516,12 +395,76 @@ export interface VenueMap {
 
 export interface MapPin {
     id: string;
-    x: number; // Percentage 0-100
-    y: number; // Percentage 0-100
+    x: number;
+    y: number;
     label: string;
     type: 'room' | 'sponsor' | 'facility' | 'info';
-    linkedId?: string; // ID of session/room or sponsor
+    linkedId?: string;
     description?: string;
 }
 
 export const PIN_TYPES = ['room', 'sponsor', 'facility', 'info'];
+
+/* Missing Types */
+export interface EmailPayload {
+  to: string;
+  subject: string;
+  body: string;
+}
+
+export interface EmailContent {
+  subject: string;
+  body: string;
+}
+
+export interface EventCoinStats {
+    totalCirculation: number;
+    totalTransactions: number;
+    activeWallets: number;
+}
+
+export type TaskStatus = 'todo' | 'in_progress' | 'completed';
+export type TaskPriority = 'low' | 'medium' | 'high';
+export type MealType = 'breakfast' | 'lunch' | 'dinner';
+export type AccommodationBookingStatus = 'Confirmed' | 'CheckedIn' | 'CheckedOut' | 'Cancelled';
+export type HotelRoomStatus = 'Available' | 'Occupied' | 'Cleaning' | 'OutOfOrder';
+
+export interface MealPlanAssignment {
+    id: string;
+    delegateId: string;
+    mealPlanId: string;
+    startDate: string;
+    endDate: string;
+}
+
+export type EventData = PublicEvent;
+
+export const ALL_PERMISSIONS: Record<Permission, string> = {
+    view_dashboard: 'View high-level event statistics',
+    manage_registrations: 'Check-in delegates and manage attendee list',
+    manage_settings: 'Edit event branding and core configuration',
+    manage_users: 'Create and edit admin accounts',
+    manage_tasks: 'Assign and track planning tasks',
+    manage_dining: 'Configure meal plans and restaurants',
+    manage_accommodation: 'Manage hotel blocks and bookings',
+    manage_agenda: 'Schedule sessions and assign speakers',
+    manage_speakers_sponsors: 'Edit speaker bios and sponsor tiers',
+    view_eventcoin_dashboard: 'Monitor internal economy and circulation',
+    manage_eventcoin: 'Issue or deduct coins from users',
+    send_invitations: 'Invite new delegates via email',
+    manage_gamification: 'Setup scavenger hunt challenges',
+    manage_communications: 'Send broadcasts and audit email logs',
+    manage_media: 'Upload and delete files in library',
+    manage_marketing: 'Generate AI promotional content',
+    manage_maps: 'Edit interactive floor plans',
+    view_system_status: 'Check connectivity and DB schema',
+    view_diagnostics: 'Run automated system tests'
+};
+
+export const PERMISSION_GROUPS: Record<string, Permission[]> = {
+    'Core Access': ['view_dashboard', 'manage_settings', 'manage_users', 'view_system_status', 'view_diagnostics'],
+    'Attendee Management': ['manage_registrations', 'send_invitations', 'manage_communications'],
+    'Content & Logistics': ['manage_agenda', 'manage_speakers_sponsors', 'manage_media', 'manage_marketing', 'manage_maps'],
+    'Hospitality': ['manage_dining', 'manage_accommodation', 'manage_tasks'],
+    'Economy & Engagement': ['view_eventcoin_dashboard', 'manage_eventcoin', 'manage_gamification']
+};

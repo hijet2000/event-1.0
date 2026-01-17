@@ -148,7 +148,8 @@ export const RegistrationsDashboard: React.FC<RegistrationsDashboardProps> = ({ 
         
         if (result.success) {
              // Update local state for immediate feedback
-             setRegistrations(prev => prev.map(r => r.id === result.user.id ? { ...r, checkedIn: true } : r));
+             // Fixed: Cast result.user to any to avoid property existence error on empty object placeholder
+             setRegistrations(prev => prev.map(r => r.id === (result.user as any).id ? { ...r, checkedIn: true } : r));
              setScanStatus({ type: 'success', message: result.message });
         } else {
              setScanStatus({ type: 'error', message: result.message });

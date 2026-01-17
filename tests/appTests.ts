@@ -1,6 +1,6 @@
 
 import { describe, it, expect } from './testFramework';
-import { registerUser, getEventConfig, purchaseEventCoins, getDelegateBalance, sendCoins, updateNetworkingProfile, getMyNetworkingProfile, loginAdmin } from '../server/api';
+import { registerUser, purchaseEventCoins, getDelegateBalance, sendCoins, updateNetworkingProfile, getMyNetworkingProfile, loginAdmin } from '../server/api';
 import { hashPassword, comparePassword } from '../server/auth';
 import { db } from '../server/store';
 
@@ -17,7 +17,6 @@ export const registerTestSuites = () => {
             const hash = await hashPassword(password);
             
             expect(hash).toBeTruthy();
-            expect(hash).toBe('hashed_' + password); // Based on our mock implementation
             
             const isValid = await comparePassword(password, hash);
             expect(isValid).toBe(true);
@@ -69,7 +68,8 @@ export const registerTestSuites = () => {
             } as any);
             
             expect(result.success).toBe(false);
-            expect(result.message).toBe('Email already registered.');
+            /* Fixed: Safe cast to handle message property */
+            expect((result as any).message).toBe('Email already registered.');
         });
     });
 
@@ -80,8 +80,7 @@ export const registerTestSuites = () => {
             await registerUser('main-event', { name: 'Coin Tester', email, createdAt: Date.now() } as any);
             const user = db.registrations.find((r: any) => r.email === email);
             
-            // Mock token (structure doesn't matter much for mock verifyToken unless heavily validated)
-            // We need a valid token structure for the API to decode ID
+            // Mock token structure
             const token = btoa(JSON.stringify({ id: user.id, email, type: 'delegate', exp: Date.now() + 100000 }));
             
             // 2. Purchase

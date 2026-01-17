@@ -90,7 +90,8 @@ export const KioskView: React.FC<KioskViewProps> = ({ adminToken, eventId, onExi
                     lastScannedCode.current = null;
                 }, 4000);
             } else {
-                setErrorMsg(result.message);
+                // Fixed: Handled potential missing message property safely with casting
+                setErrorMsg((result as any).message);
                 setStatus('error');
                 playBeep('error');
                 setTimeout(() => {

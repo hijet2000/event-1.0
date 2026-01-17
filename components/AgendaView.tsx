@@ -7,7 +7,8 @@ import { Spinner } from './Spinner';
 import { Alert } from './Alert';
 import { SessionQAModal } from './SessionQAModal';
 import { SessionLivePollsModal } from './SessionLivePollsModal';
-import { SessionSkeleton } from './Skeleton';
+// Added Skeleton to imports
+import { SessionSkeleton, Skeleton } from './Skeleton';
 
 interface AgendaViewProps {
   sessions: Session[];
@@ -15,7 +16,8 @@ interface AgendaViewProps {
   mySessionIds?: string[];
   delegateToken?: string;
   onToggleSession?: (sessionId: string, isAdded: boolean) => void;
-  readOnly?: boolean; // For public page
+  readOnly?: boolean;
+  isLoading?: boolean; // New loading prop
 }
 
 const FeedbackModal: React.FC<{ isOpen: boolean, onClose: () => void, sessionTitle: string, onSubmit: (rating: number, comment: string) => Promise<void> }> = ({ isOpen, onClose, sessionTitle, onSubmit }) => {
@@ -171,7 +173,7 @@ const SessionCard: React.FC<{
   );
 };
 
-export const AgendaView: React.FC<AgendaViewProps> = ({ sessions, speakers, mySessionIds = [], delegateToken, onToggleSession, readOnly }) => {
+export const AgendaView: React.FC<AgendaViewProps> = ({ sessions, speakers, mySessionIds = [], delegateToken, onToggleSession, readOnly, isLoading }) => {
   const [viewMode, setViewMode] = useState<'all' | 'my'>('all');
   const [localMySessionIds, setLocalMySessionIds] = useState<Set<string>>(new Set(mySessionIds));
   const [feedbackSession, setFeedbackSession] = useState<Session | null>(null);
@@ -179,8 +181,8 @@ export const AgendaView: React.FC<AgendaViewProps> = ({ sessions, speakers, mySe
   const [pollSession, setPollSession] = useState<Session | null>(null);
   const [feedbackSuccess, setFeedbackSuccess] = useState(false);
 
-  // Treat empty sessions array as loading state if not empty array provided initially
-  const isLoading = sessions.length === 0;
+  // Manual loading fallback if prop not provided
+  const internalLoading = isLoading ?? (sessions.length === 0);
 
   useEffect(() => {
       setLocalMySessionIds(new Set(mySessionIds));
@@ -248,9 +250,9 @@ export const AgendaView: React.FC<AgendaViewProps> = ({ sessions, speakers, mySe
   }, [filteredSessions]);
 
   return (
-    <div>
+    <div className="animate-fade-in">
       <div className="flex flex-col sm:flex-row justify-between items-center mb-6 gap-4">
-          <h2 className="text-xl font-bold text-gray-900 dark:text-white">Event Agenda</h2>
+          <h2 className="text-2xl font-bold text-gray-900 dark:text-white">Event Agenda</h2>
           
           {!readOnly && (
               <div className="bg-gray-100 dark:bg-gray-700 p-1 rounded-lg flex">
@@ -272,9 +274,17 @@ export const AgendaView: React.FC<AgendaViewProps> = ({ sessions, speakers, mySe
       
       {feedbackSuccess && <div className="mb-4"><Alert type="success" message="Feedback submitted! Thank you." /></div>}
 
-      {isLoading ? (
-          <div className="animate-fade-in">
-              {[1, 2, 3].map(i => <SessionSkeleton key={i} />)}
+      {internalLoading ? (
+          <div className="space-y-8">
+              <div className="space-y-4">
+                  <Skeleton variant="text" width="200px" height="2rem" />
+                  <SessionSkeleton />
+                  <SessionSkeleton />
+              </div>
+              <div className="space-y-4">
+                  <Skeleton variant="text" width="200px" height="2rem" />
+                  <SessionSkeleton />
+              </div>
           </div>
       ) : Object.keys(sessionsByDay).length > 0 ? (
         Object.keys(sessionsByDay).map(day => {
@@ -300,7 +310,7 @@ export const AgendaView: React.FC<AgendaViewProps> = ({ sessions, speakers, mySe
             </div>
         )})
       ) : (
-        <div className="text-center py-12">
+        <div className="text-center py-12 bg-gray-50 dark:bg-gray-800/50 rounded-xl border border-dashed border-gray-300 dark:border-gray-700">
             <p className="italic text-gray-500 dark:text-gray-400">
                 {viewMode === 'my' && !readOnly ? "You haven't added any sessions to your schedule yet." : "The event agenda has not been published yet."}
             </p>

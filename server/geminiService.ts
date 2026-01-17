@@ -2,7 +2,7 @@
 import { GoogleGenAI, Type } from "@google/genai";
 import { type RegistrationData, type EventConfig, type EmailContent, type NetworkingProfile } from '../types';
 
-// Updated: Initialize client using named parameter and direct process.env reference
+// Initialize client using named parameter and direct process.env reference
 const getAiClient = () => {
   return new GoogleGenAI({ apiKey: process.env.API_KEY });
 };
@@ -38,7 +38,7 @@ export const generateRegistrationEmails = async (
 ): Promise<{ userEmail: EmailContent; hostEmail: EmailContent }> => {
   
   const ai = getAiClient();
-  const { name, email, ...customData } = registrationData;
+  const { name, email, goals, ...customData } = registrationData;
   const { event, emailTemplates, formFields, host } = config;
 
   const customFieldsString = formFields
@@ -46,39 +46,39 @@ export const generateRegistrationEmails = async (
     .map(field => `${field.label}: ${customData[field.id]}`)
     .join('\n');
 
+  // Bespoke prompt for deep personalization
   const prompt = `
-    Based on the provided JSON templates and delegate data, please populate the placeholders and return the final email content for an event registration.
+    You are an expert event concierge. A delegate named "${name}" has just registered for "${event.name}".
     
-    Delegate Data:
-    - name: "${name}"
-    - email: "${email}"
-    
+    The delegate submitted a specific "Custom Request / Goal" for their attendance: 
+    "${goals || 'General interest in networking and learning.'}"
+
+    Please generate two emails in JSON format based on the templates below.
+
+    USER CONFIRMATION EMAIL (userEmail):
+    1. Populate the basic placeholders: eventName, name, eventDate, eventLocation, qrCodeUrl.
+    2. Crucially, add a section at the very bottom titled "Personalized AI Strategy".
+    3. In this section, analyze their goal and provide 3 specific, expert pieces of advice on how they can maximize their time at this event (e.g. which sessions to look for, who to network with, or questions to ask). Make it sound intelligent, empathetic, and bespoke.
+
+    HOST NOTIFICATION EMAIL (hostEmail):
+    1. Summarize the delegate's custom request for the organizers.
+    2. Add a short "Actionable Host Tip" for the event organizers (e.g., "This person is looking for investors, consider introducing them to Sponsor X").
+
     Event Data:
-    - eventName: "${event.name}"
-    - eventDate: "${event.date}"
-    - eventLocation: "${event.location}"
-    - hostName: "${host.name}"
+    - Date: "${event.date}"
+    - Location: "${event.location}"
+    - Host: "${host.name}"
 
-    Verification Link:
-    - verificationLink: "${verificationLink}"
-    
-    QR Code URL:
-    - qrCodeUrl: "${qrCodeUrl}"
-
-    Custom Fields Data String:
-    - customFields: "${customFieldsString || 'No additional information provided.'}"
-
-    Email Templates (JSON):
+    Templates:
     ${JSON.stringify({
-        userConfirmation: emailTemplates.userConfirmation,
-        hostNotification: emailTemplates.hostNotification
+        user: emailTemplates.userConfirmation,
+        host: emailTemplates.hostNotification
     }, null, 2)}
 
-    Now, generate the final JSON output with all placeholders filled.
+    Output must be strictly JSON matching the responseSchema.
   `;
 
   try {
-    // Updated: Use gemini-3-flash-preview for text tasks
     const response = await ai.models.generateContent({
       model: "gemini-3-flash-preview",
       contents: prompt,
@@ -88,13 +88,22 @@ export const generateRegistrationEmails = async (
       },
     });
 
-    // Correctly accessing .text property (not a method)
     const parsedResponse = JSON.parse(response.text || '{}');
     return parsedResponse;
 
   } catch (error) {
     console.error("Error generating emails with Gemini API:", error);
-    throw new Error("Failed to generate registration emails.");
+    // Return safe fallback if AI fails
+    return {
+        userEmail: {
+            subject: `Confirmed: ${event.name}`,
+            body: `Hi ${name}, your registration is confirmed. We look forward to seeing you at ${event.location}!`
+        },
+        hostEmail: {
+            subject: `New Delegate: ${name}`,
+            body: `Delegate ${name} (${email}) has registered.`
+        }
+    };
   }
 };
 
@@ -105,7 +114,6 @@ export const researchEntity = async (type: 'speaker' | 'sponsor', name: string) 
         : `Research "${name}" (Company). Find their Description (max 3 sentences) and Website URL. Format output as a JSON block with keys: description, websiteUrl.`;
 
     try {
-        // Updated: Use gemini-3-flash-preview for text tasks with search
         const response = await ai.models.generateContent({
             model: 'gemini-3-flash-preview',
             contents: prompt,
@@ -114,7 +122,6 @@ export const researchEntity = async (type: 'speaker' | 'sponsor', name: string) 
             }
         });
 
-        // Correctly accessing .text property (not a method)
         const text = response.text || '';
         const match = text.match(/```json\n([\s\S]*?)\n```/) || text.match(/```\n([\s\S]*?)\n```/);
         const jsonStr = match ? match[1] : text;
@@ -162,10 +169,6 @@ export const generateMarketingVideo = async (prompt: string, imageBase64?: strin
     const downloadLink = operation.response?.generatedVideos?.[0]?.video?.uri;
     if (!downloadLink) throw new Error("Video generation completed but no URI returned.");
 
-    // Updated: Use process.env.API_KEY directly as per guidelines
-    const response = await fetch(`${downloadLink}&key=${process.env.API_KEY}`);
-    if (!response.ok) throw new Error("Failed to download generated video.");
-    
     return downloadLink; 
     
   } catch (error) {
@@ -178,12 +181,10 @@ export const generateAiContent = async (type: string, context: any) => {
     const ai = getAiClient();
     let prompt = `Generate content for ${type} using ${JSON.stringify(context)}`;
     try {
-        // Updated: Use gemini-3-flash-preview for text tasks
         const response = await ai.models.generateContent({
             model: 'gemini-3-flash-preview',
             contents: prompt,
         });
-        // Correctly accessing .text property (not a method)
         return response.text || '';
     } catch(e) {
         return "";
@@ -192,12 +193,22 @@ export const generateAiContent = async (type: string, context: any) => {
 
 export const generateImage = async (prompt: string) => {
     const ai = getAiClient();
-    const response = await ai.models.generateImages({
-      model: 'imagen-4.0-generate-001',
-      prompt: prompt,
-      config: { numberOfImages: 1, outputMimeType: 'image/jpeg' },
+    const response = await ai.models.generateContent({
+      model: 'gemini-2.5-flash-image',
+      contents: {
+          parts: [
+              { text: prompt }
+          ]
+      },
     });
-    return `data:image/jpeg;base64,${response.generatedImages[0].image.imageBytes}`;
+
+    for (const part of response.candidates[0].content.parts) {
+        if (part.inlineData) {
+            const base64EncodeString: string = part.inlineData.data;
+            return `data:image/png;base64,${base64EncodeString}`;
+        }
+    }
+    throw new Error("Failed to generate image.");
 };
 
 export const summarizeSessionFeedback = async (sessionTitle: string, comments: string[]): Promise<string> => {
@@ -213,12 +224,10 @@ export const summarizeSessionFeedback = async (sessionTitle: string, comments: s
     `;
     
     try {
-        // Updated: Use gemini-3-flash-preview for text tasks
         const response = await ai.models.generateContent({
             model: 'gemini-3-flash-preview',
             contents: prompt,
         });
-        // Correctly accessing .text property (not a method)
         return response.text || "No summary generated.";
     } catch (e) {
         console.error("Feedback analysis failed", e);
@@ -226,34 +235,70 @@ export const summarizeSessionFeedback = async (sessionTitle: string, comments: s
     }
 };
 
-const SYSTEM_DOCUMENTATION = `
-You are a helpful Technical Support Assistant for the Event Registration Platform.
-Your goal is to explain how the system works and help users troubleshoot issues.
-
-MODULE DOCUMENTATION:
-... [rest of the string]
-`;
-
 export const askSystemHelp = async (query: string): Promise<string> => {
     const ai = getAiClient();
     const prompt = `
-        ${SYSTEM_DOCUMENTATION}
-        
-        USER QUESTION: "${query}"
-        
-        Provide a helpful, step-by-step answer or explanation.
+        You are a technical support agent for an event platform. Help the user with: "${query}"
     `;
     
     try {
-        // Updated: Use gemini-3-flash-preview for text tasks
         const response = await ai.models.generateContent({
             model: 'gemini-3-flash-preview',
             contents: prompt,
         });
-        // Correctly accessing .text property (not a method)
-        return response.text || "I couldn't find an answer to that. Please check the documentation manually.";
+        return response.text || "I couldn't find an answer to that.";
     } catch (e) {
-        console.error("Help query failed", e);
         return "I'm having trouble connecting to the knowledge base right now.";
+    }
+};
+
+export const translateText = async (text: string, targetLanguage: string): Promise<string> => {
+    const ai = getAiClient();
+    const prompt = `Translate to ${targetLanguage}: "${text}"`;
+    try {
+        const response = await ai.models.generateContent({
+            model: "gemini-3-flash-preview",
+            contents: prompt,
+        });
+        return response.text || text;
+    } catch (e) {
+        return text;
+    }
+};
+
+export const analyzeIncidentImage = async (base64Image: string, userDescription: string): Promise<{ category: string, severity: 'low' | 'medium' | 'high' }> => {
+    const ai = getAiClient();
+    const data = base64Image.split(',')[1];
+    const mimeType = base64Image.substring(base64Image.indexOf(':') + 1, base64Image.indexOf(';'));
+
+    const prompt = `
+        Analyze this incident report. Description: "${userDescription}"
+        Categorize (Medical, Security, Technical, Cleaning, Facilities, Other) and find severity (low, medium, high). Return JSON.
+    `;
+
+    try {
+        const response = await ai.models.generateContent({
+            model: "gemini-3-flash-preview",
+            contents: {
+                parts: [
+                    { inlineData: { data, mimeType } },
+                    { text: prompt }
+                ]
+            },
+            config: {
+                responseMimeType: "application/json",
+                responseSchema: {
+                    type: Type.OBJECT,
+                    properties: {
+                        category: { type: Type.STRING },
+                        severity: { type: Type.STRING, enum: ['low', 'medium', 'high'] }
+                    },
+                    required: ['category', 'severity']
+                }
+            }
+        });
+        return JSON.parse(response.text || '{}');
+    } catch (e) {
+        return { category: 'Other', severity: 'low' };
     }
 };

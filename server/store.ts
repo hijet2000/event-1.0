@@ -43,7 +43,6 @@ export const initializeDb = async () => {
 
     // Seed default admin if missing (Mock Mode only)
     if (!db.admin_users || db.admin_users.length === 0) {
-        // Ensure role exists
         const roleId = 'role_super_admin';
         
         const fullPermissions = [
@@ -56,7 +55,6 @@ export const initializeDb = async () => {
         ];
 
         // Upsert super admin role
-        const roleIndex = db.roles.findIndex((r: any) => r.id === roleId);
         const superAdminRole = {
             id: roleId,
             name: 'Super Admin',
@@ -64,14 +62,9 @@ export const initializeDb = async () => {
             permissions: fullPermissions
         };
 
-        if (roleIndex > -1) {
-            db.roles[roleIndex] = superAdminRole;
-        } else {
-            db.roles.push(superAdminRole);
-        }
+        db.roles = [superAdminRole];
 
         // Create Admin
-        // Hash for 'password' is $2b$10$mockcGFzc3dvcmQ=
         db.admin_users.push({
             id: 'user_admin_01',
             email: 'admin@example.com',
@@ -80,25 +73,28 @@ export const initializeDb = async () => {
             createdAt: Date.now()
         });
         
-        // Ensure default event exists with COMPLETE config
+        // Ensure default event exists
         if (!db.events || db.events.length === 0) {
              db.events.push({
                  id: 'main-event',
                  name: 'Tech Summit 2025',
                  eventType: 'Conference',
+                 colorPrimary: '#4f46e5',
+                 date: 'October 26, 2025',
+                 location: 'Metropolis Convention Center',
                  created_at: Date.now(),
                  config: {
                     event: { 
                         name: 'Tech Summit 2025', 
                         date: 'October 26, 2025', 
-                        location: 'Convention Center',
+                        location: 'Metropolis Convention Center',
                         description: 'Join us for the premier technology event of the year.',
                         maxAttendees: 500,
                         eventType: 'Conference',
                         publicUrl: 'http://localhost:3000'
                     },
                     host: { 
-                        name: 'Event Organizers', 
+                        name: 'Event Core Team', 
                         email: 'contact@example.com' 
                     },
                     theme: { 
@@ -112,10 +108,9 @@ export const initializeDb = async () => {
                         badgeImageUrl: ''
                     },
                     formFields: [],
-                    emailTemplates: {}, // Will be merged with defaults
+                    emailTemplates: {},
                     emailProvider: 'smtp',
                     smtp: { host: '', port: 587, username: '', password: '', encryption: 'tls' },
-                    /* Added missing subjectEmail property to googleConfig in the seed data */
                     googleConfig: { serviceAccountKeyJson: '', subjectEmail: '' },
                     badgeConfig: { showName: true, showEmail: false, showCompany: true, showRole: true },
                     eventCoin: { enabled: true, name: 'EventCoin', startingBalance: 100, exchangeRate: 1, peggedCurrency: 'USD' },
@@ -126,6 +121,36 @@ export const initializeDb = async () => {
                     aiConcierge: { enabled: true, voice: 'Kore', persona: 'You are a helpful assistant.' }
                  }
              });
+        }
+
+        // SEED DEMO DELEGATE
+        if (!db.registrations || db.registrations.length === 0) {
+            db.registrations.push({
+                id: 'reg_demo_001',
+                eventId: 'main-event',
+                name: 'Demo Delegate',
+                email: 'delegate@example.com',
+                company: 'Future Labs',
+                role: 'Senior Researcher',
+                status: 'confirmed',
+                checkedIn: false,
+                createdAt: Date.now()
+            });
+            
+            // Give them some starting coins
+            db.transactions.push({
+                id: 'tx_init_demo',
+                timestamp: Date.now(),
+                fromId: 'system',
+                toId: 'reg_demo_001',
+                fromName: 'System',
+                toName: 'Demo Delegate',
+                fromEmail: 'system@event.com',
+                toEmail: 'delegate@example.com',
+                amount: 100,
+                type: 'initial',
+                message: 'Welcome Bonus'
+            });
         }
         
         saveDb();

@@ -3,97 +3,79 @@ import { type EventConfig } from '../types';
 
 export const defaultConfig: EventConfig = {
   event: {
-    name: "Tech Summit 2025",
+    name: "Future Edge Summit 2025",
     date: "October 26-28, 2025",
-    location: "Metropolis Convention Center",
-    description: "Join us for the premier technology event of the year. Tech Summit 2025 brings together industry leaders, innovators, and developers for three days of inspiration, learning, and networking. Explore the latest trends in AI, Cloud Computing, and Web Development.",
+    location: "Neo-Convention Hub, Silicon Valley",
+    description: "The ultimate gathering for forward-thinking innovators. Future Edge Summit 2025 brings together the brightest minds in tech for three days of deep-dive workshops, networking, and industry-defining keynotes on AI, Quantum Computing, and Sustainable Tech.",
     maxAttendees: 500,
     eventType: 'Conference',
     publicUrl: "http://localhost:3000",
   },
   host: {
-    name: "Event Organizers Inc.",
-    email: "contact@techsummit.com",
+    name: "Future Labs Global",
+    email: "summit@futurelabs.io",
   },
   theme: {
-    colorPrimary: "#4f46e5", // Indigo 600
-    colorSecondary: "#ec4899", // Pink 500
-    backgroundColor: "#f9fafb", // Gray 50
+    colorPrimary: "#6366f1", // Modern Indigo
+    colorSecondary: "#a855f7", // Modern Purple
+    backgroundColor: "#ffffff",
     fontFamily: "Inter",
     logoUrl: "",
-    pageImageUrl: "https://images.unsplash.com/photo-1511578314322-379afb476865?q=80&w=2070",
+    pageImageUrl: "https://images.unsplash.com/photo-1540575861501-7c0011e7a48f?q=80&w=2070",
     websiteUrl: "https://example.com",
-    badgeImageUrl: "https://images.unsplash.com/photo-1620932934088-fb1023940157?q=80&w=1887",
+    badgeImageUrl: "",
     faviconUrl: ""
   },
   formFields: [
     {
       id: "company",
-      label: "Company / Organization",
+      label: "Organization",
       type: "text",
-      placeholder: "e.g., Acme Corporation",
+      placeholder: "e.g., SpaceX, Tesla, Acme Inc.",
       required: true,
       enabled: true,
     },
     {
       id: "job_title",
-      label: "Job Title",
+      label: "Professional Role",
       type: "text",
-      placeholder: "e.g., Software Engineer",
+      placeholder: "e.g., Principal Engineer",
       required: true,
       enabled: true,
     },
     {
-      id: "phone",
-      label: "Phone Number",
-      type: "text",
-      placeholder: "+1 (555) 000-0000",
-      required: false,
-      enabled: true,
-    },
-    {
-      id: "dietary_restrictions",
-      label: "Dietary Restrictions",
+      id: "dietary",
+      label: "Dietary Preferences",
       type: "dropdown",
-      placeholder: "Select an option...",
       required: false,
       enabled: true,
-      options: ["None", "Vegetarian", "Vegan", "Gluten-Free", "Other"],
+      options: ["No Restrictions", "Vegetarian", "Vegan", "Halal", "Gluten-Free"],
     },
     {
-      id: "t_shirt_size",
-      label: "T-Shirt Size",
+      id: "discovery",
+      label: "How did you hear about us?",
       type: "dropdown",
-      placeholder: "Select size...",
-      required: true,
-      enabled: true,
-      options: ["S", "M", "L", "XL", "XXL"],
-    },
-    {
-      id: "comments",
-      label: "Additional Comments",
-      type: "textarea",
-      placeholder: "Any other information you'd like to share?",
       required: false,
-      enabled: false,
-    },
+      enabled: true,
+      options: ["LinkedIn", "Twitter/X", "Newsletter", "Colleague", "Other"],
+    }
   ],
   emailTemplates: {
     userConfirmation: {
-      subject: "Registration Confirmed for {{eventName}}!",
-      body: "Hi {{name}},\n\nThank you for registering for the {{eventName}}. We're excited to have you join us on {{eventDate}} at {{eventLocation}}.\n\n-- YOUR EVENT PASS --\n\nPlease keep this QR code handy. You will need it for fast check-in and to access services like dining and accommodation.\n\nHere is your QR code: {{qrCodeUrl}}\n\nYou can log in to the delegate portal at any time to manage your details and access your pass.\n\nSee you there!\n- The {{hostName}} Team",
+      subject: "Your Pass for {{eventName}} is Ready!",
+      body: "Hi {{name}},\n\nYour registration for {{eventName}} has been processed. We are thrilled to have you join our community of innovators.\n\nEVENT DETAILS:\nDate: {{eventDate}}\nVenue: {{eventLocation}}\n\nYOUR ACCESS PASS:\nBelow is your digital pass. Please present this at the entry for expedited check-in.\n\n{{qrCodeUrl}}\n\nSee you on the edge!\n- The {{hostName}} Team",
     },
     hostNotification: {
-      subject: "New Registration for {{eventName}}: {{name}}",
-      body: "A new delegate has registered for the {{eventName}}.\n\nName: {{name}}\nEmail: {{email}}\n\nAdditional Information:\n{{customFields}}\n\n- Event Registration System",
+      subject: "New Delegate: {{name}} registered for {{eventName}}",
+      body: "New registration received.\n\nName: {{name}}\nEmail: {{email}}\n\nGoals:\n{{goals}}\n\n- Platform Internal Bot",
     },
     passwordReset: {
-        subject: "Password Reset for the {{eventName}} Platform",
-        body: "Hi,\n\nYou requested a password reset for your event portal account.\n\nClick the link below to reset your password. This link is valid for one hour.\n{{resetLink}}\n\nIf you did not request this, please ignore this email.\n\n- The {{hostName}} Team",
+        subject: "Secure Link: Reset your password",
+        body: "Hi,\n\nA password reset was requested for your event account.\n\n{{resetLink}}\n\n- Security Team",
     },
     delegateInvitation: {
-      subject: "Invitation to attend {{eventName}}!",
-      body: "Hi there,\n\n{{inviterName}} has invited you to attend the {{eventName}}.\n\nClick the link below to complete your registration:\n{{inviteLink}}\n\nWe look forward to seeing you there!\n- The {{hostName}} Team",
+      subject: "Special Invitation: Join us at {{eventName}}",
+      body: "Hi,\n\n{{inviterName}} thought you'd be a perfect fit for {{eventName}}.\n\nSecure your spot here: {{inviteLink}}\n\nBest,\n{{hostName}}",
     }
   },
   emailProvider: 'smtp',
@@ -104,7 +86,6 @@ export const defaultConfig: EventConfig = {
       password: '',
       encryption: 'tls',
   },
-  /* Added missing subjectEmail property to match EventConfig interface defined in types.ts */
   googleConfig: {
       serviceAccountKeyJson: '',
       subjectEmail: '',
@@ -124,7 +105,7 @@ export const defaultConfig: EventConfig = {
   },
   eventCoin: {
     enabled: true,
-    name: "EventCoin",
+    name: "EdgeCoin",
     startingBalance: 100,
     peggedCurrency: "USD",
     exchangeRate: 1.0,
@@ -156,6 +137,6 @@ export const defaultConfig: EventConfig = {
   aiConcierge: {
     enabled: true,
     voice: 'Kore',
-    persona: 'You are a friendly and helpful event concierge. You are knowledgeable about the schedule, speakers, and venue.',
+    persona: 'You are an elite event concierge for a high-tech summit. You are knowledgeable, concise, and professional.',
   }
 };

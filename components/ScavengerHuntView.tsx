@@ -1,6 +1,6 @@
 
 import React, { useState, useEffect } from 'react';
-import { ScavengerHuntItem, LeaderboardEntry } from '../types';
+import { ScavengerHuntItem, LeaderboardEntry, RegistrationData } from '../types';
 import { getScavengerHuntItems, getScavengerHuntProgress, claimScavengerHuntItem, getScavengerHuntLeaderboard, getDelegateProfile } from '../server/api';
 import { QRCodeScannerModal } from './QRCodeScannerModal';
 import { ContentLoader } from './ContentLoader';
@@ -35,8 +35,9 @@ export const ScavengerHuntView: React.FC<ScavengerHuntViewProps> = ({ delegateTo
     const fetchData = async () => {
         try {
             // Fetch profile to get my ID for ranking
-            const profile = await getDelegateProfile(delegateToken);
-            setMyUserId(profile.user.id || '');
+            /* Fixed: Cast result to any or specific response type to safely access user property */
+            const profile = await getDelegateProfile(delegateToken) as { user: RegistrationData };
+            setMyUserId(profile.user?.id || '');
 
             const [itemsData, progressData, leaderboardData] = await Promise.all([
                 getScavengerHuntItems(delegateToken),

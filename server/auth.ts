@@ -16,7 +16,6 @@ export const comparePassword = async (password: string, hash: string): Promise<b
       return Promise.resolve(computed === hash);
   }
   // Fallback for real bcrypt hashes (cannot verify real hashes in browser mock mode easily)
-  // In a real scenario, this wouldn't happen as offline mode wouldn't share db with online mode effectively
   return Promise.resolve(false);
 };
 
@@ -52,15 +51,14 @@ export const generateToken = (payload: Omit<TokenPayload, 'iat' | 'exp'>): strin
 export const verifyToken = (token: string): TokenPayload | null => {
   try {
     const parts = token.split('.');
+    const nowInSeconds = Math.floor(Date.now() / 1000);
     
     // Handle standard JWT (3 parts)
     if (parts.length === 3) {
         const payloadJson = b64UrlDecode(parts[1]);
         const payload = JSON.parse(payloadJson) as TokenPayload;
         
-        // Check expiry (JWT exp is in seconds)
-        const now = Math.floor(Date.now() / 1000);
-        if (payload.exp < now) {
+        if (payload.exp < nowInSeconds) {
           console.warn('Token expired');
           return null;
         }
@@ -68,12 +66,19 @@ export const verifyToken = (token: string): TokenPayload | null => {
         return payload;
     } 
     
-    // Fallback for legacy base64-only tokens (migration support)
-    // Try simple atob of the whole string
+    // Fallback for legacy base64-only tokens (migration support from PHP backend)
     try {
         const legacy = JSON.parse(atob(token));
-        // Check legacy exp (milliseconds)
-        if (legacy.exp && legacy.exp > Date.now()) return legacy;
+        if (legacy.exp) {
+            // Detect if exp is in milliseconds (usually > 10^12) or seconds
+            const expInSeconds = legacy.exp > 1000000000000 ? Math.floor(legacy.exp / 1000) : legacy.exp;
+            
+            if (expInSeconds < nowInSeconds) {
+                console.warn('Legacy token expired');
+                return null;
+            }
+            return legacy;
+        }
     } catch {
         // ignore
     }

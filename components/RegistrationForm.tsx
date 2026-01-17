@@ -40,7 +40,6 @@ export const RegistrationForm: React.FC<RegistrationFormProps> = ({
 
   const activeTicketTiers = ticketTiers.filter(t => t.active);
 
-  // Initialize password strength if form data already has password
   useEffect(() => {
     if (formData.password) {
       setPasswordStrength(checkPasswordStrength(formData.password));
@@ -52,7 +51,6 @@ export const RegistrationForm: React.FC<RegistrationFormProps> = ({
     
     if (name === 'password') {
         setPasswordStrength(checkPasswordStrength(value));
-        // Real-time validation for password match if confirm password has been touched
         if (touched.confirmPassword && confirmPassword) {
              setErrors(prev => ({
                  ...prev,
@@ -61,7 +59,6 @@ export const RegistrationForm: React.FC<RegistrationFormProps> = ({
         }
     }
     
-    // Clear error on change if it exists
     if (errors[name]) {
         setErrors(prev => ({ ...prev, [name]: '' }));
     }
@@ -81,7 +78,6 @@ export const RegistrationForm: React.FC<RegistrationFormProps> = ({
   };
 
   const handleTicketSelect = (tierId: string) => {
-      // Create a synthetic event to reuse onFormChange logic
       const syntheticEvent = {
           target: { name: 'ticketTierId', value: tierId }
       } as React.ChangeEvent<HTMLInputElement>;
@@ -95,15 +91,15 @@ export const RegistrationForm: React.FC<RegistrationFormProps> = ({
   const validateField = (name: string, value: string | undefined, currentData: RegistrationFormState, currentConfirmPassword: string) => {
     switch (name) {
       case 'firstName':
-        return !value?.trim() ? `${t('form.firstName')} ${t('form.required').toLowerCase()}.` : '';
+        return !value?.trim() ? `${t('form.firstName')} is required.` : '';
       case 'lastName':
-        return !value?.trim() ? `${t('form.lastName')} ${t('form.required').toLowerCase()}.` : '';
+        return !value?.trim() ? `${t('form.lastName')} is required.` : '';
       case 'email':
-        if (!value?.trim()) return `${t('form.email')} ${t('form.required').toLowerCase()}.`;
+        if (!value?.trim()) return `${t('form.email')} is required.`;
         if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value)) return 'Please enter a valid email address.';
         return '';
       case 'password':
-        if (!value) return `${t('form.password')} ${t('form.required').toLowerCase()}.`;
+        if (!value) return `${t('form.password')} is required.`;
         if (value.length < 8) return 'Password must be at least 8 characters long.';
         return '';
       case 'confirmPassword':
@@ -113,7 +109,7 @@ export const RegistrationForm: React.FC<RegistrationFormProps> = ({
       default:
         const fieldConfig = config.find(field => field.id === name);
         if (fieldConfig?.enabled && fieldConfig?.required && !String(value || '').trim()) {
-            return `${fieldConfig.label} ${t('form.required').toLowerCase()}.`;
+            return `${fieldConfig.label} is required.`;
         }
         return '';
     }
@@ -183,106 +179,20 @@ export const RegistrationForm: React.FC<RegistrationFormProps> = ({
     onReset();
   };
   
-  const renderErrorSummary = () => {
-    const errorKeys = Object.keys(errors).filter(key => errors[key]);
-    if (errorKeys.length === 0) return null;
-
-    return (
-        <div role="alert" className="p-4 mb-6 border-l-4 rounded-r-lg bg-red-50 dark:bg-red-900/30 border-red-500 dark:border-red-500 text-red-700 dark:text-red-300 animate-fade-in-down shadow-sm">
-            <h3 className="font-bold flex items-center">
-                <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5 mr-2" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
-                </svg>
-                Please correct the errors below
-            </h3>
-        </div>
-    );
-  };
-
-  const renderConfirmationModal = () => {
-      if (!showConfirm) return null;
-      const selectedTicket = ticketTiers.find(t => t.id === formData.ticketTierId);
-
-      return (
-          <div className="fixed inset-0 bg-black/60 z-50 flex items-center justify-center p-4 backdrop-blur-sm" onClick={() => !isLoading && setShowConfirm(false)}>
-              <div className="bg-white dark:bg-gray-800 rounded-2xl shadow-2xl w-full max-w-lg overflow-hidden flex flex-col max-h-[90vh]" onClick={e => e.stopPropagation()}>
-                  <div className="p-6 border-b border-gray-200 dark:border-gray-700">
-                      <h3 className="text-xl font-bold text-gray-900 dark:text-white">Review Your Details</h3>
-                      <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">Please ensure all information is correct before submitting.</p>
-                  </div>
-                  
-                  <div className="p-6 overflow-y-auto space-y-4">
-                      {/* Ticket Info */}
-                      {selectedTicket && (
-                          <div className="bg-primary/5 p-4 rounded-lg border border-primary/10">
-                              <span className="text-xs font-bold text-primary uppercase tracking-wider">Selected Ticket</span>
-                              <div className="flex justify-between items-center mt-1">
-                                  <span className="font-semibold text-gray-900 dark:text-white">{selectedTicket.name}</span>
-                                  <span className="font-mono font-bold text-gray-700 dark:text-gray-300">
-                                      {selectedTicket.price === 0 ? 'Free' : `${selectedTicket.currency} ${selectedTicket.price}`}
-                                  </span>
-                              </div>
-                          </div>
-                      )}
-
-                      <dl className="divide-y divide-gray-100 dark:divide-gray-700 text-sm">
-                          <div className="py-3 grid grid-cols-3 gap-4">
-                              <dt className="font-medium text-gray-500 dark:text-gray-400">Full Name</dt>
-                              <dd className="col-span-2 text-gray-900 dark:text-white font-medium">{formData.firstName} {formData.lastName}</dd>
-                          </div>
-                          <div className="py-3 grid grid-cols-3 gap-4">
-                              <dt className="font-medium text-gray-500 dark:text-gray-400">Email</dt>
-                              <dd className="col-span-2 text-gray-900 dark:text-white">{formData.email}</dd>
-                          </div>
-                          
-                          {/* Custom Fields */}
-                          {config.filter(f => f.enabled && formData[f.id]).map(field => (
-                              <div key={field.id} className="py-3 grid grid-cols-3 gap-4">
-                                  <dt className="font-medium text-gray-500 dark:text-gray-400">{field.label}</dt>
-                                  <dd className="col-span-2 text-gray-900 dark:text-white whitespace-pre-wrap">{formData[field.id]}</dd>
-                              </div>
-                          ))}
-                      </dl>
-                  </div>
-
-                  <div className="p-6 border-t border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-900/50 flex justify-end gap-3">
-                      <button 
-                          type="button" 
-                          onClick={() => setShowConfirm(false)}
-                          disabled={isLoading}
-                          className="px-4 py-2 border border-gray-300 dark:border-gray-600 rounded-lg text-sm font-medium text-gray-700 dark:text-gray-200 bg-white dark:bg-gray-800 hover:bg-gray-50 dark:hover:bg-gray-700 disabled:opacity-50"
-                      >
-                          Back to Edit
-                      </button>
-                      <button 
-                          type="button" 
-                          onClick={handleConfirmSubmit}
-                          disabled={isLoading}
-                          className="px-6 py-2 bg-primary text-white rounded-lg text-sm font-bold shadow-lg hover:bg-primary/90 flex items-center disabled:opacity-70 disabled:cursor-not-allowed"
-                      >
-                          {isLoading ? <Spinner /> : 'Confirm & Submit'}
-                      </button>
-                  </div>
-              </div>
-          </div>
-      );
-  };
-
   const enabledCustomFields = config.filter(field => field.enabled);
 
   return (
     <>
-        <form onSubmit={handleSubmit} className="space-y-8" ref={formRef} noValidate>
-        {renderErrorSummary()}
+        <form onSubmit={handleSubmit} className="space-y-12" ref={formRef} noValidate>
         
-        {/* Ticket Selection */}
+        {/* Step 1: Ticket Selection */}
         {activeTicketTiers.length > 0 && (
-            <div id="ticket-section" className="bg-white dark:bg-gray-800 rounded-2xl p-6 sm:p-8 shadow-sm border border-gray-100 dark:border-gray-700">
-                <h3 className="text-xl font-bold text-gray-900 dark:text-white mb-6 flex items-center">
-                    <span className="flex items-center justify-center w-8 h-8 rounded-full bg-primary/10 text-primary text-sm font-bold mr-3">1</span>
-                    {t('form.selectTicket')}
+            <div id="ticket-section" className="bg-white dark:bg-gray-800 rounded-[2.5rem] p-8 sm:p-12 shadow-sm border border-gray-100 dark:border-gray-700 transition-all hover:shadow-xl">
+                <h3 className="text-3xl font-black text-gray-900 dark:text-white mb-10 flex items-center uppercase tracking-tighter">
+                    <span className="flex items-center justify-center w-12 h-12 rounded-2xl bg-primary text-white text-sm font-black mr-5 shadow-lg shadow-primary/30">01</span>
+                    Select Pass
                 </h3>
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
                     {activeTicketTiers.map(tier => {
                         const isSelected = formData.ticketTierId === tier.id;
                         const isSoldOut = tier.sold >= tier.limit;
@@ -290,175 +200,242 @@ export const RegistrationForm: React.FC<RegistrationFormProps> = ({
                             <div 
                                 key={tier.id}
                                 onClick={() => !isSoldOut && handleTicketSelect(tier.id)}
-                                className={`relative p-4 rounded-xl border-2 transition-all cursor-pointer ${
+                                className={`relative p-8 rounded-[2rem] border-4 transition-all cursor-pointer group ${
                                     isSelected 
-                                    ? 'border-primary bg-primary/5 shadow-md' 
+                                    ? 'border-primary bg-primary/5 shadow-2xl shadow-primary/10' 
                                     : isSoldOut 
-                                        ? 'border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-800 opacity-60 cursor-not-allowed'
-                                        : 'border-gray-200 dark:border-gray-700 hover:border-primary/50 hover:shadow-sm dark:bg-gray-800'
+                                        ? 'border-gray-100 dark:border-gray-800 bg-gray-50 dark:bg-gray-900 opacity-40 cursor-not-allowed'
+                                        : 'border-gray-200 dark:border-gray-700 hover:border-primary/40 hover:bg-gray-50 dark:hover:bg-gray-700/50'
                                 }`}
                             >
-                                <div className="flex justify-between items-start mb-2">
-                                    <h4 className={`font-bold text-lg ${isSelected ? 'text-primary' : 'text-gray-900 dark:text-white'}`}>{tier.name}</h4>
+                                <div className="flex justify-between items-start mb-4">
+                                    <h4 className={`font-black text-2xl uppercase tracking-tighter ${isSelected ? 'text-primary' : 'text-gray-900 dark:text-white'}`}>{tier.name}</h4>
                                     <div className="text-right">
-                                        <span className={`block font-bold text-lg ${isSelected ? 'text-primary' : 'text-gray-900 dark:text-white'}`}>
-                                            {tier.price === 0 ? 'Free' : `${tier.currency} ${tier.price}`}
+                                        <span className={`block font-black text-2xl ${isSelected ? 'text-primary' : 'text-gray-900 dark:text-white'}`}>
+                                            {tier.price === 0 ? 'FREE' : `${tier.currency}${tier.price}`}
                                         </span>
                                     </div>
                                 </div>
-                                <p className="text-sm text-gray-600 dark:text-gray-400 mb-3">{tier.description}</p>
-                                {tier.benefits.length > 0 && (
-                                    <ul className="text-xs text-gray-500 dark:text-gray-400 space-y-1 mb-2">
-                                        {tier.benefits.map((b, i) => (
-                                            <li key={i} className="flex items-center">
-                                                <svg className="w-3 h-3 mr-1.5 text-green-500" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" /></svg>
-                                                {b}
-                                            </li>
-                                        ))}
-                                    </ul>
-                                )}
-                                {isSoldOut && (
-                                    <div className="absolute inset-0 bg-white/50 dark:bg-black/50 flex items-center justify-center rounded-xl">
-                                        <span className="bg-red-100 text-red-800 text-xs font-bold px-3 py-1 rounded-full uppercase tracking-wider transform -rotate-12">{t('form.soldOut')}</span>
-                                    </div>
-                                )}
+                                <p className="text-sm font-medium text-gray-500 dark:text-gray-400 mb-6 leading-relaxed">{tier.description}</p>
                                 {isSelected && (
-                                    <div className="absolute top-4 right-4 bg-primary text-white rounded-full p-1">
-                                        <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={3} d="M5 13l4 4L19 7" /></svg>
+                                    <div className="absolute -top-4 -right-4 bg-primary text-white rounded-2xl p-2 shadow-2xl border-4 border-white dark:border-gray-800 animate-bounce">
+                                        <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={4} d="M5 13l4 4L19 7" /></svg>
                                     </div>
                                 )}
+                                <div className={`h-1.5 w-full rounded-full bg-gray-100 dark:bg-gray-700 overflow-hidden ${isSelected ? 'opacity-100' : 'opacity-30'}`}>
+                                    <div className="h-full bg-primary" style={{ width: `${Math.min((tier.sold / tier.limit) * 100, 100)}%` }}></div>
+                                </div>
+                                <p className="text-[10px] font-black uppercase tracking-widest text-gray-400 mt-2">Available Capacity: {tier.limit - tier.sold}</p>
                             </div>
                         );
                     })}
                 </div>
                 {errors.ticketTierId && (
-                    <p className="mt-2 text-sm text-red-600 dark:text-red-400 animate-fade-in-down">
+                    <p className="mt-6 text-sm text-red-600 dark:text-red-400 font-black uppercase tracking-widest flex items-center gap-2">
+                        <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 20 20"><path fillRule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7 4a1 1 0 11-2 0 1 1 0 012 0zm-1-9a1 1 0 00-1 1v4a1 1 0 102 0V6a1 1 0 00-1-1z" clipRule="evenodd"/></svg>
                         {errors.ticketTierId}
                     </p>
                 )}
             </div>
         )}
 
-        {/* Account Section */}
-        <div className="bg-white dark:bg-gray-800 rounded-2xl p-6 sm:p-8 shadow-sm border border-gray-100 dark:border-gray-700">
-            <h3 className="text-xl font-bold text-gray-900 dark:text-white mb-6 flex items-center">
-                <span className="flex items-center justify-center w-8 h-8 rounded-full bg-primary/10 text-primary text-sm font-bold mr-3">{activeTicketTiers.length > 0 ? 2 : 1}</span>
-                {t('form.yourDetails')}
+        {/* Step 2: Personal Details */}
+        <div className="bg-white dark:bg-gray-800 rounded-[2.5rem] p-8 sm:p-12 shadow-sm border border-gray-100 dark:border-gray-700 transition-all hover:shadow-xl">
+            <h3 className="text-3xl font-black text-gray-900 dark:text-white mb-10 flex items-center uppercase tracking-tighter">
+                <span className="flex items-center justify-center w-12 h-12 rounded-2xl bg-primary text-white text-sm font-black mr-5 shadow-lg shadow-primary/30">{activeTicketTiers.length > 0 ? '02' : '01'}</span>
+                Identity
             </h3>
-            <div className="space-y-6">
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                <TextInput
-                label={t('form.firstName')}
-                name="firstName"
-                value={formData.firstName}
-                onChange={handleFormChangeInternal}
-                onBlur={handleBlur}
-                placeholder="e.g. Jane"
-                required
-                error={touched.firstName ? errors.firstName : ''}
-                />
-                <TextInput
-                label={t('form.lastName')}
-                name="lastName"
-                value={formData.lastName}
-                onChange={handleFormChangeInternal}
-                onBlur={handleBlur}
-                placeholder="e.g. Doe"
-                required
-                error={touched.lastName ? errors.lastName : ''}
-                />
-            </div>
-            <TextInput
-                label={t('form.email')}
-                name="email"
-                type="email"
-                value={formData.email}
-                onChange={handleFormChangeInternal}
-                onBlur={handleBlur}
-                placeholder="e.g. jane.doe@example.com"
-                required
-                error={touched.email ? errors.email : ''}
-                />
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                <div>
-                <TextInput
-                    label={t('form.password')}
-                    name="password"
-                    type="password"
-                    value={formData.password || ''}
-                    onChange={handleFormChangeInternal}
-                    onBlur={handleBlur}
-                    placeholder="••••••••"
-                    required
-                    error={touched.password ? errors.password : ''}
-                />
-                <PasswordStrengthIndicator strength={passwordStrength} />
+            <div className="space-y-10">
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-10">
+                    <TextInput
+                        label="First Name"
+                        name="firstName"
+                        value={formData.firstName}
+                        onChange={handleFormChangeInternal}
+                        onBlur={handleBlur}
+                        placeholder="Jane"
+                        required
+                        error={touched.firstName ? errors.firstName : ''}
+                    />
+                    <TextInput
+                        label="Last Name"
+                        name="lastName"
+                        value={formData.lastName}
+                        onChange={handleFormChangeInternal}
+                        onBlur={handleBlur}
+                        placeholder="Doe"
+                        required
+                        error={touched.lastName ? errors.lastName : ''}
+                    />
                 </div>
                 <TextInput
-                label={t('form.confirmPassword')}
-                name="confirmPassword"
-                type="password"
-                value={confirmPassword}
-                onChange={handleConfirmPasswordChange}
-                onBlur={handleBlur}
-                placeholder="••••••••"
-                required
-                error={touched.confirmPassword ? errors.confirmPassword : ''}
+                    label="Business Email"
+                    name="email"
+                    type="email"
+                    value={formData.email}
+                    onChange={handleFormChangeInternal}
+                    onBlur={handleBlur}
+                    placeholder="jane.doe@organization.com"
+                    required
+                    error={touched.email ? errors.email : ''}
                 />
-            </div>
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-10">
+                    <div>
+                        <TextInput
+                            label="Create Access Password"
+                            name="password"
+                            type="password"
+                            value={formData.password || ''}
+                            onChange={handleFormChangeInternal}
+                            onBlur={handleBlur}
+                            placeholder="Min 8 characters"
+                            required
+                            error={touched.password ? errors.password : ''}
+                        />
+                        <PasswordStrengthIndicator strength={passwordStrength} />
+                    </div>
+                    <TextInput
+                        label="Verify Password"
+                        name="confirmPassword"
+                        type="password"
+                        value={confirmPassword}
+                        onChange={handleConfirmPasswordChange}
+                        onBlur={handleBlur}
+                        placeholder="Repeat password"
+                        required
+                        error={touched.confirmPassword ? errors.confirmPassword : ''}
+                    />
+                </div>
             </div>
         </div>
         
-        {/* Additional Info Section (Dynamic) */}
-        {enabledCustomFields.length > 0 && (
-            <div className="bg-white dark:bg-gray-800 rounded-2xl p-6 sm:p-8 shadow-sm border border-gray-100 dark:border-gray-700">
-            <h3 className="text-xl font-bold text-gray-900 dark:text-white mb-6 flex items-center">
-                    <span className="flex items-center justify-center w-8 h-8 rounded-full bg-primary/10 text-primary text-sm font-bold mr-3">{activeTicketTiers.length > 0 ? 3 : 2}</span>
-                    {t('form.additionalInfo')}
-            </h3>
-            <div className="space-y-6">
-                {enabledCustomFields.map(field => (
-                <DynamicFormField
-                    key={field.id}
-                    field={field}
-                    value={formData[field.id] || ''}
-                    onChange={handleFormChangeInternal}
-                    onBlur={handleBlur}
-                    error={touched[field.id] ? errors[field.id] : ''}
-                />
-                ))}
+        {/* Step 3: Custom Request Area */}
+        <div className="bg-gradient-to-br from-primary/5 via-primary/[0.02] to-secondary/5 dark:from-indigo-950/20 dark:to-purple-950/20 rounded-[3rem] p-8 sm:p-14 shadow-inner border border-primary/10 dark:border-indigo-900/50 relative overflow-hidden group">
+            <div className="absolute top-0 right-0 p-10 opacity-5 group-hover:opacity-10 transition-opacity pointer-events-none transform group-hover:rotate-12 duration-1000">
+                 <svg className="w-64 h-64 text-primary" fill="currentColor" viewBox="0 0 24 24"><path d="M12 2L4.5 20.29l.71.71L12 18l6.79 3 .71-.71L12 2z"/></svg>
             </div>
+            
+            <div className="flex flex-col md:flex-row items-start md:items-center justify-between mb-12 gap-6">
+              <h3 className="text-3xl font-black text-gray-900 dark:text-white flex items-center uppercase tracking-tighter">
+                  <span className="flex items-center justify-center w-12 h-12 rounded-2xl bg-gradient-to-br from-primary to-secondary text-white text-sm font-black mr-5 shadow-xl shadow-primary/30">✨</span>
+                  AI Curator
+              </h3>
+              <span className="px-4 py-1.5 bg-white dark:bg-gray-800 rounded-full border border-primary/20 text-primary text-[10px] font-black uppercase tracking-widest shadow-sm">Bespoke Experience</span>
             </div>
-        )}
+
+            <p className="text-lg font-medium text-gray-700 dark:text-gray-300 mb-10 max-w-2xl leading-relaxed">
+                What are your main objectives? Describe your custom request, and our Gemini AI will construct a <span className="text-primary font-bold underline decoration-primary/30 decoration-4">Personalized Event Strategy</span> just for you.
+            </p>
+            
+            <div className="space-y-10">
+                <div className="relative">
+                    <label htmlFor="goals" className="block text-xs font-black uppercase tracking-widest text-gray-400 mb-3 ml-1">Your Narrative</label>
+                    <textarea 
+                        id="goals"
+                        name="goals"
+                        value={formData.goals || ''}
+                        onChange={handleFormChangeInternal}
+                        rows={5}
+                        className="w-full rounded-[1.5rem] border-2 border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-950 p-6 text-base font-medium focus:ring-4 focus:ring-primary/10 focus:border-primary transition-all shadow-inner placeholder:text-gray-400"
+                        placeholder="I want to connect with Venture Capitalists interested in Carbon Capture technologies, and identify which technical deep-dives are most relevant to scaling LLMs..."
+                    />
+                    <div className="absolute bottom-4 right-6 text-[10px] font-bold text-gray-400 pointer-events-none flex items-center gap-2">
+                      <span className="w-1.5 h-1.5 rounded-full bg-primary animate-pulse"></span>
+                      Direct to AI Core
+                    </div>
+                </div>
+
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-10">
+                  {enabledCustomFields.map(field => (
+                      <DynamicFormField
+                          key={field.id}
+                          field={field}
+                          value={formData[field.id] || ''}
+                          onChange={handleFormChangeInternal}
+                          onBlur={handleBlur}
+                          error={touched[field.id] ? errors[field.id] : ''}
+                      />
+                  ))}
+                </div>
+            </div>
+        </div>
 
         {/* Action Buttons */}
-        <div className="pt-4 flex flex-col items-center gap-4">
+        <div className="pt-10 flex flex-col items-center gap-8">
             <button
             type="submit"
             disabled={isLoading}
-            className="w-full sm:w-2/3 flex justify-center items-center py-4 px-6 border border-transparent rounded-xl shadow-lg text-lg font-bold text-white bg-gradient-to-r from-primary to-indigo-600 hover:from-primary/90 hover:to-indigo-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-primary disabled:opacity-70 disabled:cursor-not-allowed transform transition-all duration-200 hover:-translate-y-1"
+            className="group w-full sm:w-3/4 flex justify-center items-center py-6 px-10 border border-transparent rounded-full shadow-3xl text-2xl font-black text-white bg-gray-900 hover:bg-black dark:bg-white dark:text-gray-900 focus:outline-none focus:ring-8 focus:ring-primary/10 disabled:opacity-70 disabled:cursor-not-allowed transform transition-all duration-500 hover:-translate-y-2"
             >
             {isLoading ? (
                 <>
                 <Spinner />
-                <span className="ml-2">{t('form.processing')}</span>
+                <span className="ml-3 uppercase tracking-tighter">Initializing Passage...</span>
                 </>
             ) : (
-                t('form.completeRegistration')
+                <span className="flex items-center gap-3 uppercase tracking-tighter">
+                  Complete Registration
+                  <svg className="w-8 h-8 group-hover:translate-x-2 transition-transform" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={3} d="M17 8l4 4m0 0l-4 4m4-4H3"/></svg>
+                </span>
             )}
             </button>
             <button
             type="button"
             disabled={isLoading}
             onClick={handleResetClick}
-            className="text-sm font-medium text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200 underline transition-colors"
+            className="text-xs font-black text-gray-400 hover:text-primary dark:text-gray-500 dark:hover:text-primary uppercase tracking-[0.2em] transition-all border-b-2 border-transparent hover:border-primary/30 pb-1"
             >
             {t('form.clear')}
             </button>
         </div>
         </form>
         
-        {renderConfirmationModal()}
+        {/* Verification / Review Modal */}
+        {showConfirm && (
+          <div className="fixed inset-0 bg-gray-950/80 z-[100] flex items-center justify-center p-6 backdrop-blur-2xl animate-fade-in">
+              <div className="bg-white dark:bg-gray-900 rounded-[3rem] shadow-4xl w-full max-w-2xl overflow-hidden flex flex-col border border-white/10">
+                  <div className="p-10 border-b border-gray-100 dark:border-gray-800 bg-gray-50/50 dark:bg-gray-950/50">
+                      <h3 className="text-3xl font-black text-gray-900 dark:text-white uppercase tracking-tighter">Final Verification</h3>
+                      <p className="text-sm font-bold text-gray-500 dark:text-gray-400 mt-2 uppercase tracking-widest">Review your credentials</p>
+                  </div>
+                  
+                  <div className="p-10 overflow-y-auto space-y-8">
+                      <div className="grid grid-cols-2 gap-8">
+                        <div>
+                            <span className="text-[10px] font-black text-primary uppercase tracking-[0.2em]">Attendee</span>
+                            <p className="text-xl font-bold text-gray-900 dark:text-white mt-1">{formData.firstName} {formData.lastName}</p>
+                        </div>
+                        <div>
+                            <span className="text-[10px] font-black text-primary uppercase tracking-[0.2em]">Terminal</span>
+                            <p className="text-xl font-bold text-gray-900 dark:text-white mt-1 truncate">{formData.email}</p>
+                        </div>
+                      </div>
+                      <div className="p-8 rounded-[2rem] bg-primary/5 border border-primary/10">
+                          <span className="text-[10px] font-black text-primary uppercase tracking-[0.2em]">Besoke AI Request</span>
+                          <p className="text-base text-gray-700 dark:text-gray-300 mt-4 leading-relaxed font-medium">"{formData.goals || 'Optimization of general attendance goals.'}"</p>
+                      </div>
+                  </div>
+
+                  <div className="p-10 border-t border-gray-100 dark:border-gray-800 flex justify-end gap-6 bg-gray-50/30 dark:bg-gray-950/30">
+                      <button 
+                          type="button" 
+                          onClick={() => setShowConfirm(false)}
+                          className="px-8 py-4 rounded-2xl text-sm font-black text-gray-500 uppercase tracking-widest hover:text-gray-900 dark:hover:text-white transition-colors"
+                      >
+                          Edit
+                      </button>
+                      <button 
+                          type="button" 
+                          onClick={handleConfirmSubmit}
+                          disabled={isLoading}
+                          className="px-10 py-4 bg-primary text-white rounded-2xl text-sm font-black shadow-2xl shadow-primary/20 hover:scale-[1.02] active:scale-95 transition-all uppercase tracking-widest disabled:opacity-70"
+                      >
+                          {isLoading ? <Spinner /> : 'Commit Information'}
+                      </button>
+                  </div>
+              </div>
+          </div>
+        )}
     </>
   );
 };

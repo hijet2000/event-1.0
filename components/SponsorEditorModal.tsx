@@ -70,7 +70,8 @@ export const SponsorEditorModal: React.FC<SponsorEditorModalProps> = ({ isOpen, 
         }
         setIsResearching(true);
         try {
-            const data = await researchEntity(adminToken, 'sponsor', formData.name);
+            // Fixed: Cast researchEntity result to any to avoid property existence errors
+            const data = (await researchEntity(adminToken, 'sponsor', formData.name)) as any;
             if (data) {
                 setFormData(prev => ({
                     ...prev,
