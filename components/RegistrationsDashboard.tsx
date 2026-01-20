@@ -52,6 +52,7 @@ export const RegistrationsDashboard: React.FC<RegistrationsDashboardProps> = ({ 
   // Action states
   const [isExporting, setIsExporting] = useState(false);
   const [isDeleting, setIsDeleting] = useState<string | null>(null);
+  const [isUpdatingCheckIn, setIsUpdatingCheckIn] = useState<string | null>(null);
   
   // Feedback states
   const [scanStatus, setScanStatus] = useState<{ type: 'success' | 'error'; message: string } | null>(null);
@@ -96,9 +97,6 @@ export const RegistrationsDashboard: React.FC<RegistrationsDashboardProps> = ({ 
           // Allow DOM to update then print
           setTimeout(() => {
               window.print();
-              // Clear print user after print dialog closes (or immediately, browser specific)
-              // Setting to null too fast might clear before print preview renders in some browsers
-              // But we keep it in DOM via CSS media queries, so state clearing isn't strictly destructive if layout component handles it
           }, 100);
       }
   }, [userForPrint, config]);
@@ -128,6 +126,25 @@ export const RegistrationsDashboard: React.FC<RegistrationsDashboardProps> = ({ 
       }
   };
   
+  const handleToggleCheckIn = async (reg: RegistrationData) => {
+      if (!reg.id) return;
+      const newCheckedIn = !reg.checkedIn;
+      setIsUpdatingCheckIn(reg.id);
+      
+      // Optimistic update
+      setRegistrations(prev => prev.map(r => r.id === reg.id ? { ...r, checkedIn: newCheckedIn } : r));
+      
+      try {
+          await updateRegistrationStatus(adminToken, reg.id, newCheckedIn);
+      } catch (e) {
+          // Revert on failure
+          setRegistrations(prev => prev.map(r => r.id === reg.id ? { ...r, checkedIn: !newCheckedIn } : r));
+          alert("Failed to update check-in status.");
+      } finally {
+          setIsUpdatingCheckIn(null);
+      }
+  };
+
   const handlePromote = async (id: string) => {
       try {
           await promoteToConfirmed(adminToken, id);
@@ -147,9 +164,10 @@ export const RegistrationsDashboard: React.FC<RegistrationsDashboardProps> = ({ 
         const result = await verifyTicketToken(adminToken, token);
         
         if (result.success) {
-             // Update local state for immediate feedback
-             // Fixed: Cast result.user to any to avoid property existence error on empty object placeholder
-             setRegistrations(prev => prev.map(r => r.id === (result.user as any).id ? { ...r, checkedIn: true } : r));
+             const user = result.user as any;
+             // Ensure it's persisted and UI updated
+             await updateRegistrationStatus(adminToken, user.id, true);
+             setRegistrations(prev => prev.map(r => r.id === user.id ? { ...r, checkedIn: true } : r));
              setScanStatus({ type: 'success', message: result.message });
         } else {
              setScanStatus({ type: 'error', message: result.message });
@@ -259,7 +277,6 @@ export const RegistrationsDashboard: React.FC<RegistrationsDashboardProps> = ({ 
               if (logoBase64) {
                   try {
                       const logoSize = 12;
-                      // Draw slightly overlapping header for style
                       doc.addImage(logoBase64, 'PNG', x + 5, y + 8, logoSize, logoSize);
                   } catch (e) { /* Ignore logo errors if CORS fails */ }
               }
@@ -272,7 +289,6 @@ export const RegistrationsDashboard: React.FC<RegistrationsDashboardProps> = ({ 
               doc.setTextColor(0, 0, 0);
               doc.setFontSize(16);
               doc.setFont("helvetica", "bold");
-              // Truncate if too long
               const name = reg.name.length > 20 ? reg.name.substring(0, 18) + '...' : reg.name;
               doc.text(name.toUpperCase(), contentCenter, currentY, { align: "center" });
               
@@ -293,37 +309,24 @@ export const RegistrationsDashboard: React.FC<RegistrationsDashboardProps> = ({ 
               }
 
               // Footer QR Code (Simulated)
-              // In a real app, we'd fetch the QR image blob. Here we use a placeholder box or try fetching.
               const qrUrl = `https://api.qrserver.com/v1/create-qr-code/?size=150x150&data=${reg.id}`;
               const qrBase64 = await getBase64ImageFromUrl(qrUrl);
               if (qrBase64) {
                   try {
                     const qrSize = 20;
                     doc.addImage(qrBase64, 'PNG', contentCenter - (qrSize/2), y + badgeHeight - 25, qrSize, qrSize);
-                  } catch (e) {
-                      // ignore QR errors
-                  }
+                  } catch (e) { }
               }
               
               doc.setFontSize(8);
               doc.setTextColor(150,150,150);
               doc.text(reg.id?.slice(-6) || '', contentCenter, y + badgeHeight - 3, { align: "center"});
 
-
-              // Cut Marks (subtle)
-              doc.setDrawColor(240, 240, 240);
-              doc.setLineWidth(0.1);
-              doc.line(x, y, x + 2, y); // Top Left horizontal
-              doc.line(x, y, x, y + 2); // Top Left vertical
-              // ... add more if needed for production print shops
-
-              // Grid Logic
               col++;
               if (col >= cols) {
                   col = 0;
                   row++;
                   if (row >= rows) {
-                      // New Page
                       if (i < badgeList.length - 1) {
                           doc.addPage();
                           col = 0;
@@ -348,21 +351,18 @@ export const RegistrationsDashboard: React.FC<RegistrationsDashboardProps> = ({ 
           setSortDesc(!sortDesc);
       } else {
           setSortField(field);
-          setSortDesc(false); // Default ascending for new field
+          setSortDesc(false);
       }
   };
 
-  // Memoize the filtered list to avoid re-calculating on every render
   const processedRegistrations = useMemo(() => {
     let result = [...registrations];
     
-    // 0. Filter by Tab Status (default to confirmed if status missing in legacy data)
     result = result.filter(reg => {
         const status = reg.status || 'confirmed';
         return status === activeTab;
     });
 
-    // 1. Filter Text & Date
     const lowerCaseFilter = filterText.toLowerCase();
     let filterStartTimestamp: number | null = null;
     if (filterDate) {
@@ -383,7 +383,6 @@ export const RegistrationsDashboard: React.FC<RegistrationsDashboardProps> = ({ 
       return textMatch && dateMatch;
     });
     
-    // 2. Sort
     result.sort((a, b) => {
         let valA, valB;
         if (sortField === 'status') {
@@ -556,15 +555,17 @@ export const RegistrationsDashboard: React.FC<RegistrationsDashboardProps> = ({ 
                             <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500 dark:text-gray-400">{reg.email}</td>
                             <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500 dark:text-gray-400">{new Date(reg.createdAt).toLocaleDateString()}</td>
                             <td className="px-6 py-4 whitespace-nowrap text-sm">
-                                {reg.checkedIn ? (
-                                    <span className="px-2 inline-flex text-xs leading-5 font-semibold rounded-full bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-200">
-                                        Checked-in
-                                    </span>
-                                ) : (
-                                    <span className="px-2 inline-flex text-xs leading-5 font-semibold rounded-full bg-gray-100 text-gray-800 dark:bg-gray-700 dark:text-gray-200">
-                                        Pending
-                                    </span>
-                                )}
+                                <button 
+                                    onClick={() => handleToggleCheckIn(reg)}
+                                    disabled={isUpdatingCheckIn === reg.id}
+                                    className={`px-2 inline-flex text-xs leading-5 font-semibold rounded-full transition-colors cursor-pointer disabled:cursor-not-allowed ${
+                                        reg.checkedIn 
+                                            ? 'bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-200 hover:bg-green-200' 
+                                            : 'bg-gray-100 text-gray-800 dark:bg-gray-700 dark:text-gray-200 hover:bg-gray-200'
+                                    }`}
+                                >
+                                    {isUpdatingCheckIn === reg.id ? <Spinner /> : reg.checkedIn ? 'Checked-in' : 'Pending'}
+                                </button>
                             </td>
                             <td className="px-6 py-4 whitespace-nowrap text-right text-sm font-medium">
                                 <div className="flex items-center justify-end space-x-3">
@@ -622,7 +623,7 @@ export const RegistrationsDashboard: React.FC<RegistrationsDashboardProps> = ({ 
         <div className="flex gap-2 flex-wrap">
             {canInvite && (
                 <button onClick={() => setInviteModalOpen(true)} className="py-2 px-4 border border-transparent rounded-md shadow-sm text-sm font-medium text-white bg-secondary hover:bg-secondary/90 flex items-center gap-2">
-                    <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 8l7.89 5.26a2 2 0 002.22 0L21 8M5 19h14a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z" /></svg>
+                    <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 8l7.89 5.26a2 2 0 002.22 0L21 8M5 19h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z" /></svg>
                     Invite Delegate
                 </button>
             )}

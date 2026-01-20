@@ -3,6 +3,7 @@
   "description": "A modern, custom event registration platform that uses the Gemini API to manage attendee registrations.",
   "requestFramePermissions": [
     "camera",
-    "microphone"
+    "microphone",
+    "geolocation"
   ]
 }

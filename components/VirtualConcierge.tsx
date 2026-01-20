@@ -143,7 +143,8 @@ export const VirtualConcierge: React.FC<VirtualConciergeProps> = ({ isOpen, onCl
                 streamRef.current = stream;
 
                 const sessionPromise = ai.live.connect({
-                    model: 'gemini-2.5-flash-native-audio-preview-09-2025',
+                    // Fix: Updated model to latest recommended for real-time audio tasks
+                    model: 'gemini-2.5-flash-native-audio-preview-12-2025',
                     callbacks: {
                         onopen: () => {
                             console.log('Live API Connected');
@@ -225,7 +226,7 @@ export const VirtualConcierge: React.FC<VirtualConciergeProps> = ({ isOpen, onCl
                         speechConfig: {
                             voiceConfig: { prebuiltVoiceConfig: { voiceName: aiConfig.voice } }
                         },
-                        // Updated: systemInstruction should be a string in config as per examples
+                        // Fix: systemInstruction should be a direct string in config as per examples
                         systemInstruction: systemInstruction,
                         inputAudioTranscription: {},
                         outputAudioTranscription: {}
